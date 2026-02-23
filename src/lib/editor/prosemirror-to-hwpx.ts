@@ -9,6 +9,7 @@ type MetadataAttrs = {
   fileName?: string;
   textIndex?: number;
   originalText?: string;
+  letterSpacing?: number | string;
 };
 
 type TableMetadataAttrs = {
@@ -59,6 +60,21 @@ export type CollectEditsResult = {
   warnings: string[];
 };
 
+type LetterSpacingEdit = {
+  segmentId: string;
+  fileName: string;
+  textIndex: number;
+  sourceCharPrIDRef: string;
+  newSpacing: number;
+};
+
+type CollectLetterSpacingResult = {
+  edits: LetterSpacingEdit[];
+  warnings: string[];
+};
+
+const HEADER_FILE = "Contents/header.xml";
+
 function extractNodeText(node: JSONContent): string {
   if (node.type === "text") {
     return node.text || "";
@@ -102,8 +118,34 @@ function asNonNegativeInt(input: unknown): number | null {
   return Number.isFinite(parsed) && parsed >= 0 ? parsed : null;
 }
 
+function asInt(input: unknown): number | null {
+  if (input === null || input === undefined || input === "") {
+    return null;
+  }
+  const parsed = Number.parseInt(String(input), 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function uniqueWarnings(items: string[]): string[] {
   return Array.from(new Set(items));
+}
+
+function readSegmentCharPrIDRef(segment: EditorSegment): string | null {
+  const direct = segment.styleHints.charPrIDRef;
+  if (direct && String(direct).trim()) {
+    return String(direct).trim();
+  }
+  const styleEntries = Object.entries(segment.styleHints);
+  const fallback = styleEntries.find(([key]) => key.toLowerCase() === "charpridref");
+  return fallback && String(fallback[1]).trim() ? String(fallback[1]).trim() : null;
+}
+
+function readSegmentLetterSpacing(segment: EditorSegment): number {
+  const fromHint =
+    asInt(segment.styleHints.hwpxCharSpacing) ??
+    asInt(segment.styleHints.letterSpacing) ??
+    asInt(segment.styleHints.spacing);
+  return fromHint ?? 0;
 }
 
 function isXmlName(fileName: string): boolean {
@@ -634,6 +676,324 @@ async function applyTablePatches(
   };
 }
 
+function readNodeLetterSpacing(attrs: MetadataAttrs): number {
+  return asInt(attrs.letterSpacing) ?? 0;
+}
+
+function collectLetterSpacingEdits(
+  doc: JSONContent,
+  sourceSegments: EditorSegment[],
+  extraSegmentsMap?: Record<string, string[]>,
+): CollectLetterSpacingResult {
+  const bySegmentId = new Map(sourceSegments.map((segment) => [segment.segmentId, segment]));
+  const edits = new Map<string, LetterSpacingEdit>();
+  const warnings: string[] = [];
+
+  const registerEdit = (segment: EditorSegment, nextSpacing: number): void => {
+    const sourceCharPrIDRef = readSegmentCharPrIDRef(segment);
+    if (!sourceCharPrIDRef) {
+      warnings.push(`segment(${segment.segmentId})의 charPrIDRef를 찾지 못해 자간 반영을 건너뜁니다.`);
+      return;
+    }
+    if (readSegmentLetterSpacing(segment) === nextSpacing) {
+      return;
+    }
+    edits.set(segment.segmentId, {
+      segmentId: segment.segmentId,
+      fileName: segment.fileName,
+      textIndex: segment.textIndex,
+      sourceCharPrIDRef,
+      newSpacing: nextSpacing,
+    });
+  };
+
+  walk(doc, (node) => {
+    if (!isTextBlockNode(node)) {
+      return;
+    }
+
+    const attrs = (node.attrs || {}) as MetadataAttrs;
+    const segmentId = attrs.segmentId;
+    if (!segmentId) {
+      return;
+    }
+    const source = bySegmentId.get(segmentId);
+    if (!source) {
+      return;
+    }
+    const nextSpacing = readNodeLetterSpacing(attrs);
+    registerEdit(source, nextSpacing);
+
+    if (extraSegmentsMap) {
+      for (const extraId of extraSegmentsMap[segmentId] || []) {
+        const extra = bySegmentId.get(extraId);
+        if (!extra) {
+          continue;
+        }
+        registerEdit(extra, nextSpacing);
+      }
+    }
+  });
+
+  return {
+    edits: Array.from(edits.values()).sort((a, b) => a.textIndex - b.textIndex),
+    warnings: uniqueWarnings(warnings),
+  };
+}
+
+function closestAncestorByLocalName(element: Element | null, localName: string): Element | null {
+  let current = element;
+  while (current) {
+    if (current.localName === localName) {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return null;
+}
+
+function readCharPrSpacing(charPr: Element): number {
+  const spacing = Array.from(charPr.children).find((child) => child.localName === "spacing");
+  if (!spacing) {
+    return 0;
+  }
+  return (
+    asInt(spacing.getAttribute("hangul")) ??
+    asInt(spacing.getAttribute("latin")) ??
+    asInt(spacing.getAttribute("hanja")) ??
+    asInt(spacing.getAttribute("japanese")) ??
+    asInt(spacing.getAttribute("other")) ??
+    asInt(spacing.getAttribute("symbol")) ??
+    asInt(spacing.getAttribute("user")) ??
+    0
+  );
+}
+
+function ensureCharPrSpacingElement(charPr: Element, document: Document): Element {
+  const existing = Array.from(charPr.children).find((child) => child.localName === "spacing");
+  if (existing) {
+    return existing;
+  }
+  const namespaceUri = charPr.namespaceURI || "http://www.hancom.co.kr/hwpml/2011/head";
+  const prefix = charPr.prefix || "hh";
+  const spacing = document.createElementNS(namespaceUri, `${prefix}:spacing`);
+  charPr.appendChild(spacing);
+  return spacing;
+}
+
+function setSpacingAttributes(spacingElement: Element, value: number): void {
+  const serialized = String(value);
+  for (const attr of ["hangul", "latin", "hanja", "japanese", "other", "symbol", "user"]) {
+    spacingElement.setAttribute(attr, serialized);
+  }
+}
+
+async function applyLetterSpacingPatches(
+  fileBuffer: ArrayBuffer,
+  edits: LetterSpacingEdit[],
+  sourceSegments: EditorSegment[],
+): Promise<{ buffer: ArrayBuffer; warnings: string[] }> {
+  if (!edits.length) {
+    return { buffer: fileBuffer, warnings: [] };
+  }
+
+  const zip = await JSZip.loadAsync(fileBuffer);
+  const headerFile = zip.files[HEADER_FILE];
+  if (!headerFile || headerFile.dir) {
+    return {
+      buffer: fileBuffer,
+      warnings: ["Contents/header.xml을 찾지 못해 자간 반영을 건너뜁니다."],
+    };
+  }
+
+  const warnings: string[] = [];
+  const headerXml = await headerFile.async("string");
+  const headerDoc = new DOMParser().parseFromString(headerXml, "application/xml");
+  if (headerDoc.querySelector("parsererror")) {
+    return {
+      buffer: fileBuffer,
+      warnings: ["header.xml 파싱 실패로 자간 반영을 건너뜁니다."],
+    };
+  }
+
+  const charProperties = Array.from(headerDoc.getElementsByTagName("*")).find(
+    (node) => node.localName === "charProperties",
+  );
+  if (!charProperties) {
+    return {
+      buffer: fileBuffer,
+      warnings: ["header.xml에 charProperties가 없어 자간 반영을 건너뜁니다."],
+    };
+  }
+
+  const charPrNodes = Array.from(charProperties.children).filter((child) => child.localName === "charPr");
+  const charPrById = new Map<string, Element>();
+  let maxId = 0;
+  for (const charPr of charPrNodes) {
+    const id = charPr.getAttribute("id");
+    if (!id) {
+      continue;
+    }
+    charPrById.set(id, charPr);
+    const parsed = asInt(id);
+    if (parsed !== null) {
+      maxId = Math.max(maxId, parsed);
+    }
+  }
+  let nextCharPrId = maxId + 1;
+  const charPrCache = new Map<string, string>();
+  const targetCharPrBySegment = new Map<string, string>();
+
+  for (const edit of edits) {
+    const cacheKey = `${edit.sourceCharPrIDRef}::${edit.newSpacing}`;
+    if (charPrCache.has(cacheKey)) {
+      targetCharPrBySegment.set(edit.segmentId, charPrCache.get(cacheKey)!);
+      continue;
+    }
+
+    const sourceCharPr = charPrById.get(edit.sourceCharPrIDRef);
+    if (!sourceCharPr) {
+      warnings.push(
+        `charPr(${edit.sourceCharPrIDRef})를 찾지 못해 segment(${edit.segmentId}) 자간 반영을 건너뜁니다.`,
+      );
+      continue;
+    }
+
+    const sourceSpacing = readCharPrSpacing(sourceCharPr);
+    if (sourceSpacing === edit.newSpacing) {
+      charPrCache.set(cacheKey, edit.sourceCharPrIDRef);
+      targetCharPrBySegment.set(edit.segmentId, edit.sourceCharPrIDRef);
+      continue;
+    }
+
+    const cloned = sourceCharPr.cloneNode(true) as Element;
+    const nextId = String(nextCharPrId);
+    nextCharPrId += 1;
+    cloned.setAttribute("id", nextId);
+    const spacingElement = ensureCharPrSpacingElement(cloned, headerDoc);
+    setSpacingAttributes(spacingElement, edit.newSpacing);
+    charProperties.appendChild(cloned);
+    charPrById.set(nextId, cloned);
+    charPrCache.set(cacheKey, nextId);
+    targetCharPrBySegment.set(edit.segmentId, nextId);
+  }
+
+  if (!targetCharPrBySegment.size) {
+    return {
+      buffer: fileBuffer,
+      warnings: uniqueWarnings(warnings),
+    };
+  }
+
+  const nextCharPrCount = Array.from(charProperties.children).filter((child) => child.localName === "charPr").length;
+  charProperties.setAttribute("itemCnt", String(nextCharPrCount));
+
+  const targetBySegmentId = new Map<string, string>();
+  for (const edit of edits) {
+    const targetCharPrId = targetCharPrBySegment.get(edit.segmentId);
+    if (!targetCharPrId) {
+      continue;
+    }
+    targetBySegmentId.set(edit.segmentId, targetCharPrId);
+  }
+
+  const names = Object.keys(zip.files);
+  const filesToPatch = new Set(edits.map((edit) => edit.fileName));
+  const stagedEntries: Array<{ fileName: string; data: string | Uint8Array }> = [];
+  for (const fileName of names) {
+    const item = zip.files[fileName];
+    if (item.dir) {
+      continue;
+    }
+    if (!isXmlName(fileName)) {
+      stagedEntries.push({ fileName, data: await item.async("uint8array") });
+      continue;
+    }
+    if (fileName === HEADER_FILE) {
+      stagedEntries.push({ fileName, data: new XMLSerializer().serializeToString(headerDoc) });
+      continue;
+    }
+    if (!filesToPatch.has(fileName)) {
+      stagedEntries.push({ fileName, data: await item.async("uint8array") });
+      continue;
+    }
+
+    const sectionXml = await item.async("string");
+    const sectionDoc = new DOMParser().parseFromString(sectionXml, "application/xml");
+    if (sectionDoc.querySelector("parsererror")) {
+      warnings.push(`section XML 파싱 실패로 자간 반영을 건너뜁니다: ${fileName}`);
+      stagedEntries.push({ fileName, data: await item.async("uint8array") });
+      continue;
+    }
+
+    const pool = sourceSegments
+      .filter((segment) => segment.fileName === fileName)
+      .sort((a, b) => a.textIndex - b.textIndex);
+    let poolIndex = 0;
+    const visit = (node: Node): void => {
+      if (node.nodeType === 3 /* TEXT_NODE */ || node.nodeType === 4 /* CDATA_SECTION_NODE */) {
+        const textNode = node as Text;
+        if ((textNode.nodeValue || "").trim().length > 0 && poolIndex < pool.length) {
+          const segment = pool[poolIndex];
+          const targetCharPrId = targetBySegmentId.get(segment.segmentId);
+          if (targetCharPrId) {
+            const run = closestAncestorByLocalName(textNode.parentElement, "run");
+            if (run) {
+              run.setAttribute("charPrIDRef", targetCharPrId);
+            }
+          }
+          poolIndex += 1;
+        }
+        return;
+      }
+      for (const child of Array.from(node.childNodes)) {
+        visit(child);
+      }
+    };
+    visit(sectionDoc);
+
+    stagedEntries.push({
+      fileName,
+      data: new XMLSerializer().serializeToString(sectionDoc),
+    });
+  }
+
+  const out = new JSZip();
+  const map = new Map(stagedEntries.map((entry) => [entry.fileName, entry]));
+  const ordered: Array<{ fileName: string; data: string | Uint8Array }> = [];
+
+  if (map.has("mimetype")) {
+    ordered.push(map.get("mimetype")!);
+    map.delete("mimetype");
+  }
+  for (const entry of stagedEntries) {
+    if (!map.has(entry.fileName)) {
+      continue;
+    }
+    ordered.push(entry);
+    map.delete(entry.fileName);
+  }
+  for (const entry of map.values()) {
+    ordered.push(entry);
+  }
+
+  for (const entry of ordered) {
+    const options = entry.fileName === "mimetype" ? { compression: "STORE" as const } : undefined;
+    out.file(entry.fileName, entry.data, options);
+  }
+
+  const buffer = await out.generateAsync({
+    type: "arraybuffer",
+    compression: "DEFLATE",
+    mimeType: "application/zip",
+  });
+
+  return {
+    buffer,
+    warnings: uniqueWarnings(warnings),
+  };
+}
+
 export function collectDocumentEdits(
   doc: JSONContent,
   sourceSegments: EditorSegment[],
@@ -711,13 +1071,19 @@ export async function applyProseMirrorDocToHwpx(
 ): Promise<{ blob: Blob; edits: TextEdit[]; warnings: string[]; integrityIssues: string[] }> {
   const { edits, warnings: previewWarnings } = collectDocumentEdits(doc, sourceSegments, extraSegmentsMap);
   const { patches: tablePatches, warnings: tableWarnings } = collectTablePatches(doc);
-  if (!edits.length && !tablePatches.length) {
+  const { edits: letterSpacingEdits, warnings: letterSpacingWarnings } = collectLetterSpacingEdits(
+    doc,
+    sourceSegments,
+    extraSegmentsMap,
+  );
+
+  if (!edits.length && !tablePatches.length && !letterSpacingEdits.length) {
     const blob = new Blob([fileBuffer], { type: "application/zip" });
     const integrityIssues = await validateHwpxArchive(fileBuffer);
     return {
       blob,
       edits,
-      warnings: uniqueWarnings([...previewWarnings, ...tableWarnings]),
+      warnings: uniqueWarnings([...previewWarnings, ...tableWarnings, ...letterSpacingWarnings]),
       integrityIssues,
     };
   }
@@ -735,12 +1101,18 @@ export async function applyProseMirrorDocToHwpx(
     runtimeWarnings = patched.warnings;
   }
 
+  if (letterSpacingEdits.length) {
+    const patched = await applyLetterSpacingPatches(workingBuffer, letterSpacingEdits, sourceSegments);
+    workingBuffer = patched.buffer;
+    runtimeWarnings = [...runtimeWarnings, ...patched.warnings];
+  }
+
   const integrityIssues = await validateHwpxArchive(workingBuffer);
   const blob = new Blob([workingBuffer], { type: "application/zip" });
   return {
     blob,
     edits,
-    warnings: uniqueWarnings([...previewWarnings, ...tableWarnings, ...runtimeWarnings]),
+    warnings: uniqueWarnings([...previewWarnings, ...tableWarnings, ...letterSpacingWarnings, ...runtimeWarnings]),
     integrityIssues,
   };
 }

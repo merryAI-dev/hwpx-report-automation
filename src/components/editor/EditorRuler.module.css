@@ -1,0 +1,53 @@
+/* Ruler sits above the A4 paper, aligned to its left edge */
+.rulerWrap {
+  width: 794px;
+  background: #e8e8e8;
+  border-bottom: 1px solid #b8b8b8;
+  height: 18px;
+  position: relative;
+  overflow: hidden;
+  flex-shrink: 0;
+}
+
+.ruler {
+  position: absolute;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100%;
+}
+
+.tickMinor,
+.tickMajor {
+  position: absolute;
+  bottom: 0;
+  width: 1px;
+  background: #888;
+}
+
+.tickMinor {
+  height: 4px;
+}
+
+.tickMajor {
+  height: 8px;
+  background: #444;
+}
+
+.label {
+  position: absolute;
+  bottom: 9px;
+  left: 2px;
+  font-size: 8px;
+  color: #444;
+  font-family: '맑은 고딕', 'Malgun Gothic', sans-serif;
+  white-space: nowrap;
+  line-height: 1;
+  pointer-events: none;
+}
+
+@media (max-width: 860px) {
+  .rulerWrap {
+    width: 100%;
+  }
+}

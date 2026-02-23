@@ -1,0 +1,29 @@
+/* HWP-like editor canvas: gray background, A4 paper centered */
+.canvas {
+  background: #d1d1d1;
+  min-height: 100%;
+  overflow-y: auto;
+  padding: 24px 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+/* A4 paper: 210mm × 297mm ≈ 794px × 1123px at 96 dpi */
+.paper {
+  width: 794px;
+  min-height: 1123px;
+  background: #ffffff;
+  box-shadow:
+    0 1px 3px rgba(0, 0, 0, 0.18),
+    0 4px 16px rgba(0, 0, 0, 0.13);
+  margin-bottom: 24px;
+  position: relative;
+}
+
+@media (max-width: 860px) {
+  .paper {
+    width: 100%;
+    min-height: auto;
+  }
+}

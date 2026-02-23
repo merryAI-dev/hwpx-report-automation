@@ -5,6 +5,8 @@ type RequestBody = {
   text?: string;
   instruction?: string;
   styleHints?: Record<string, string>;
+  prevText?: string;
+  nextText?: string;
   model?: string;
 };
 
@@ -46,10 +48,12 @@ export async function POST(request: Request) {
         {
           role: "user",
           content:
+            (body.prevText ? `앞 문단:\n${body.prevText}\n\n` : "") +
             `원문:\n${text}\n\n` +
+            (body.nextText ? `뒤 문단:\n${body.nextText}\n\n` : "") +
             `수정 지시:\n${instruction}\n\n` +
             `스타일 힌트(JSON):\n${styleContext}\n\n` +
-            "요구사항: 문장 수와 길이는 원문과 유사하게 유지하고, 핵심 정보 누락 없이 더 읽기 좋게 고쳐라.",
+            "요구사항: 원문만 수정하라. 앞/뒤 문단은 맥락 참고용이다. 문장 수와 길이는 원문과 유사하게 유지하고, 핵심 정보 누락 없이 더 읽기 좋게 고쳐라.",
         },
       ],
     });

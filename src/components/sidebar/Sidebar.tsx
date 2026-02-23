@@ -2,22 +2,33 @@
 
 import type { ReactNode } from "react";
 import type { SidebarTab } from "@/store/document-store";
+import styles from "./Sidebar.module.css";
+
+const TAB_LABELS: Record<SidebarTab, string> = {
+  outline: "문서 개요",
+  ai: "AI 제안",
+  chat: "AI 채팅",
+  analysis: "문서 분석",
+  history: "수정 이력",
+};
 
 type SidebarProps = {
   collapsed: boolean;
   activeTab: SidebarTab;
-  onChangeTab: (tab: SidebarTab) => void;
   outline: ReactNode;
   ai: ReactNode;
+  chat: ReactNode;
+  analysis: ReactNode;
   history: ReactNode;
 };
 
 export function Sidebar({
   collapsed,
   activeTab,
-  onChangeTab,
   outline,
   ai,
+  chat,
+  analysis,
   history,
 }: SidebarProps) {
   if (collapsed) {
@@ -25,37 +36,17 @@ export function Sidebar({
   }
 
   return (
-    <aside className="sidebar">
-      <div className="sidebar-tabs">
-        <button
-          type="button"
-          className={activeTab === "outline" ? "sidebar-tab active" : "sidebar-tab"}
-          onClick={() => onChangeTab("outline")}
-        >
-          문서 개요
-        </button>
-        <button
-          type="button"
-          className={activeTab === "ai" ? "sidebar-tab active" : "sidebar-tab"}
-          onClick={() => onChangeTab("ai")}
-        >
-          AI 제안
-        </button>
-        <button
-          type="button"
-          className={activeTab === "history" ? "sidebar-tab active" : "sidebar-tab"}
-          onClick={() => onChangeTab("history")}
-        >
-          수정 이력
-        </button>
+    <aside className={styles.panel}>
+      <div className={styles.panelTitleBar}>
+        {TAB_LABELS[activeTab] ?? ""}
       </div>
-
-      <div className="sidebar-content">
+      <div className={activeTab === "chat" ? styles.panelContentChat : styles.panelContent}>
         {activeTab === "outline" ? outline : null}
         {activeTab === "ai" ? ai : null}
+        {activeTab === "chat" ? chat : null}
+        {activeTab === "analysis" ? analysis : null}
         {activeTab === "history" ? history : null}
       </div>
     </aside>
   );
 }
-

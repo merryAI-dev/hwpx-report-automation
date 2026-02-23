@@ -78,6 +78,40 @@ async function makeFixtureHwpx(): Promise<ArrayBuffer> {
   return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
 }
 
+async function makeLetterSpacingFixtureHwpx(): Promise<ArrayBuffer> {
+  const zip = new JSZip();
+  zip.file("mimetype", "application/hwp+zip", { compression: "STORE" });
+  zip.file("version.xml", `<?xml version="1.0" encoding="UTF-8"?><version app="test"/>`);
+  zip.file(
+    "Contents/content.hpf",
+    `<?xml version="1.0" encoding="UTF-8"?><opf:package xmlns:opf="http://www.idpf.org/2007/opf"></opf:package>`,
+  );
+  zip.file(
+    "Contents/header.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head">
+  <hh:refList>
+    <hh:charProperties itemCnt="2">
+      <hh:charPr id="1">
+        <hh:spacing hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/>
+      </hh:charPr>
+      <hh:charPr id="2">
+        <hh:spacing hangul="-10" latin="-10" hanja="-10" japanese="-10" other="-10" symbol="-10" user="-10"/>
+      </hh:charPr>
+    </hh:charProperties>
+  </hh:refList>
+</hh:head>`,
+  );
+  zip.file(
+    "Contents/section0.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hp:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">
+  <hp:p><hp:run charPrIDRef="2"><hp:t>자간 테스트</hp:t></hp:run></hp:p>
+</hp:sec>`,
+  );
+  return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
+}
+
 describe("parseHwpxToProseMirror – multi-run merging", () => {
   it("merges multiple <hp:t> runs in the same <hp:p> into one paragraph", async () => {
     const dom = new JSDOM("");
@@ -166,5 +200,21 @@ describe("parseHwpxToProseMirror", () => {
       { type: "hardBreak" },
       { type: "text", text: "둘째 줄" },
     ]);
+  });
+
+  it("reads run charPr spacing from header.xml into paragraph letterSpacing attrs", async () => {
+    const dom = new JSDOM("");
+    (globalThis as unknown as { DOMParser: typeof DOMParser }).DOMParser = dom.window.DOMParser;
+    (globalThis as unknown as { NodeFilter: typeof NodeFilter }).NodeFilter = dom.window.NodeFilter;
+
+    const input = await makeLetterSpacingFixtureHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+
+    expect(parsed.segments).toHaveLength(1);
+    expect(parsed.segments[0].styleHints.charPrIDRef).toBe("2");
+    expect(parsed.segments[0].styleHints.hwpxCharSpacing).toBe("-10");
+
+    const paragraph = (parsed.doc.content || []).find((node) => node.type === "paragraph");
+    expect((paragraph?.attrs || {}) as { letterSpacing?: number }).toMatchObject({ letterSpacing: -10 });
   });
 });
