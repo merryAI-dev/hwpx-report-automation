@@ -1,0 +1,165 @@
+import { Extension } from "@tiptap/core";
+import Suggestion, { type SuggestionKeyDownProps, type SuggestionProps } from "@tiptap/suggestion";
+import { ReactRenderer } from "@tiptap/react";
+import type { Editor, Range } from "@tiptap/core";
+import tippy, { type Instance as TippyInstance } from "tippy.js";
+import { SlashCommandMenu, type SlashCommandMenuRef } from "../../components/editor/SlashCommandMenu";
+
+export type SlashCommandItem = {
+  id: string;
+  title: string;
+  description: string;
+  keywords: string[];
+  run: (params: { editor: Editor; range: Range; onAiCommand?: () => void }) => void;
+};
+
+type SlashCommandContext = {
+  onAiCommand?: () => void;
+};
+
+function baseCommands(): Omit<SlashCommandItem, "run">[] {
+  return [
+    {
+      id: "table-3x4",
+      title: "표 생성 3x4",
+      description: "3행 4열 표를 삽입합니다.",
+      keywords: ["표", "테이블", "3x4", "insert table"],
+    },
+    {
+      id: "ai-rewrite",
+      title: "AI 수정",
+      description: "현재 선택 텍스트를 AI 제안 대상으로 보냅니다.",
+      keywords: ["ai", "rewrite", "수정", "제안"],
+    },
+    {
+      id: "divider",
+      title: "구분선",
+      description: "수평 구분선을 삽입합니다.",
+      keywords: ["구분선", "hr", "divider"],
+    },
+    {
+      id: "image-placeholder",
+      title: "이미지",
+      description: "이미지 자리 표시 문단을 삽입합니다. (Phase 2)",
+      keywords: ["이미지", "image", "placeholder"],
+    },
+  ];
+}
+
+export function getSlashCommandItems(query: string, context: SlashCommandContext): SlashCommandItem[] {
+  const q = query.trim().toLowerCase();
+  const commands: SlashCommandItem[] = baseCommands().map((command) => ({
+    ...command,
+    run: ({ editor, range, onAiCommand }) => {
+      if (command.id === "table-3x4") {
+        editor.chain().focus().deleteRange(range).insertTable({ rows: 3, cols: 4, withHeaderRow: false }).run();
+        return;
+      }
+      if (command.id === "ai-rewrite") {
+        editor.chain().focus().deleteRange(range).run();
+        const aiHandler = onAiCommand || context.onAiCommand;
+        aiHandler?.();
+        return;
+      }
+      if (command.id === "divider") {
+        editor.chain().focus().deleteRange(range).setHorizontalRule().run();
+        return;
+      }
+      editor.chain().focus().deleteRange(range).insertContent("[이미지 자리]").run();
+    },
+  }));
+
+  if (!q) {
+    return commands;
+  }
+  return commands.filter((command) => {
+    const bucket = `${command.title} ${command.description} ${command.keywords.join(" ")}`.toLowerCase();
+    return bucket.includes(q);
+  });
+}
+
+type SlashSuggestionProps = SuggestionProps<SlashCommandItem, SlashCommandItem>;
+type SlashCommandMenuProps = {
+  items: SlashCommandItem[];
+  command: (item: SlashCommandItem) => void;
+};
+
+export const SlashCommandExtension = Extension.create<SlashCommandContext>({
+  name: "slashCommand",
+  addOptions() {
+    return {
+      onAiCommand: undefined,
+    };
+  },
+  addProseMirrorPlugins() {
+    const context = this.options;
+    return [
+      Suggestion<SlashCommandItem, SlashCommandItem>({
+        editor: this.editor,
+        char: "#",
+        allowSpaces: true,
+        startOfLine: false,
+        items: ({ query }) => getSlashCommandItems(query, context),
+        command: ({ editor, range, props }) => {
+          props.run({ editor, range, onAiCommand: context.onAiCommand });
+        },
+        render: () => {
+          let component: ReactRenderer<SlashCommandMenuRef, SlashCommandMenuProps> | null = null;
+          let popup: TippyInstance | null = null;
+
+          return {
+            onStart: (props: SlashSuggestionProps) => {
+              const menuProps: SlashCommandMenuProps = {
+                items: props.items,
+                command: props.command,
+              };
+              component = new ReactRenderer(SlashCommandMenu, {
+                props: menuProps,
+                editor: props.editor,
+              });
+
+              if (!props.clientRect) {
+                return;
+              }
+
+              popup = tippy(document.body, {
+                getReferenceClientRect: () => props.clientRect?.() ?? new DOMRect(0, 0, 0, 0),
+                appendTo: () => document.body,
+                content: component.element,
+                showOnCreate: true,
+                interactive: true,
+                trigger: "manual",
+                placement: "bottom-start",
+              });
+            },
+            onUpdate(props: SlashSuggestionProps) {
+              const menuProps: SlashCommandMenuProps = {
+                items: props.items,
+                command: props.command,
+              };
+              component?.updateProps(menuProps);
+              if (!props.clientRect || !popup) {
+                return;
+              }
+              popup.setProps({
+                getReferenceClientRect: () => props.clientRect?.() ?? new DOMRect(0, 0, 0, 0),
+              });
+            },
+            onKeyDown(props: SuggestionKeyDownProps) {
+              if (props.event.key === "Escape") {
+                popup?.hide();
+                return true;
+              }
+              return component?.ref?.onKeyDown(props.event) ?? false;
+            },
+            onExit() {
+              popup?.destroy();
+              popup = null;
+              component?.destroy();
+            },
+          };
+        },
+      }),
+    ];
+  },
+});
