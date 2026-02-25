@@ -2,10 +2,11 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Editor, JSONContent } from "@tiptap/core";
-import { Fragment, type Node as PMNode } from "@tiptap/pm/model";
+import { Fragment, Schema, type Node as PMNode } from "@tiptap/pm/model";
 import { useCallback } from "react";
 import { DocumentEditor } from "@/components/editor/DocumentEditor";
 import { EditorToolbar } from "@/components/editor/EditorToolbar";
+import { HwpxSaveDialog } from "@/components/common/HwpxSaveDialog";
 import { EditorLayout } from "@/components/editor/EditorLayout";
 import { EditorRuler } from "@/components/editor/EditorRuler";
 import { StatusBar } from "@/components/common/StatusBar";
@@ -16,19 +17,27 @@ import { ChatPanel } from "@/components/sidebar/ChatPanel";
 import { EditHistoryPanel } from "@/components/sidebar/EditHistoryPanel";
 import { DocumentAnalysisPanel } from "@/components/sidebar/DocumentAnalysisPanel";
 import { streamChat } from "@/lib/chat/chat-stream";
-import type { ChatMessageAPI, DocumentContext, EditPreview, ToolCallInfo } from "@/types/chat";
+import type { ChatMessageAPI, ContentBlock, DocumentContext, EditPreview, TableContext, ToolCallInfo } from "@/types/chat";
 import { buildBatchApplyPlan, collectSectionBatchItems } from "@/lib/editor/batch-ai";
 import { buildDirtySummary, buildOutlineFromDoc } from "@/lib/editor/document-store";
 import { parseHwpxToProseMirror } from "@/lib/editor/hwpx-to-prosemirror";
 import { parseDocxToProseMirror } from "@/lib/editor/docx-to-prosemirror";
 import { parsePptxToProseMirror } from "@/lib/editor/pptx-to-prosemirror";
 import { applyProseMirrorDocToHwpx, collectDocumentEdits } from "@/lib/editor/prosemirror-to-hwpx";
+import { buildHwpxModelFromDoc } from "@/lib/editor/hwpx-template-synthesizer";
 import { exportToPdf } from "@/lib/editor/export-pdf";
 import { exportToDocx } from "@/lib/editor/export-docx";
 import { triggerDiffHighlightUpdate } from "@/lib/editor/diff-highlight-extension";
 import type { DiffHighlightSuggestion } from "@/lib/editor/diff-highlight-extension";
 import { INSTRUCTION_PRESETS } from "@/lib/editor/ai-presets";
 import type { PresetKey } from "@/lib/editor/ai-presets";
+import {
+  listRecentFileSnapshots,
+  loadRecentFileSnapshot,
+  saveRecentFileSnapshot,
+  type RecentFileKind,
+  type RecentFileSnapshotMeta,
+} from "@/lib/recent-files";
 import { useDocumentStore } from "@/store/document-store";
 import type { RenderElementInfo, SidebarTab } from "@/store/document-store";
 import styles from "./page.module.css";
@@ -79,6 +88,54 @@ type SegmentTextUpdate = {
 };
 
 const BATCH_API_CHUNK_SIZE = 40;
+const AUTOSAVE_INTERVAL_MS = 60_000;
+let uniqueSaveSequence = 0;
+
+function toFileStem(fileName: string): string {
+  const stem = fileName.replace(/\.[^.]+$/, "").trim();
+  return stem || "document";
+}
+
+function pad2(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function pad3(value: number): string {
+  return String(value).padStart(3, "0");
+}
+
+function formatTimestampForFileName(ts: number): string {
+  const date = new Date(ts);
+  return [
+    date.getFullYear(),
+    pad2(date.getMonth() + 1),
+    pad2(date.getDate()),
+    "-",
+    pad2(date.getHours()),
+    pad2(date.getMinutes()),
+    pad2(date.getSeconds()),
+    "-",
+    pad3(date.getMilliseconds()),
+  ].join("");
+}
+
+function createUniqueHwpxFileName(fileName: string, label: string): string {
+  const stem = toFileStem(fileName || "document.hwpx");
+  uniqueSaveSequence += 1;
+  return `${stem}-${label}-${formatTimestampForFileName(Date.now())}-${pad3(uniqueSaveSequence % 1000)}.hwpx`;
+}
+
+function triggerBrowserDownload(blob: Blob, fileName: string): void {
+  const url = URL.createObjectURL(blob);
+  const anchor = document.createElement("a");
+  anchor.href = url;
+  anchor.download = fileName;
+  anchor.style.display = "none";
+  document.body.appendChild(anchor);
+  anchor.click();
+  anchor.remove();
+  window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
 
 function buildInlineFragment(editor: Editor, text: string): Fragment {
   const nodes: PMNode[] = [];
@@ -151,6 +208,99 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+function textToInlineNodes(schema: Schema, text: string): PMNode[] {
+  const parts = text.split("\n");
+  const nodes: PMNode[] = [];
+  parts.forEach((part, i) => {
+    if (part) nodes.push(schema.text(part));
+    if (i < parts.length - 1) nodes.push(schema.nodes.hardBreak.create());
+  });
+  return nodes;
+}
+
+function fillTableRows(
+  editor: Editor,
+  tableIndex: number,
+  startRow: number,
+  rows: Array<Record<string, string>>,
+  headers: string[],
+): string {
+  const normalize = (s: string) => s.replace(/\s+/g, " ").trim();
+  const headerToCol = new Map<string, number>();
+  headers.forEach((h, i) => headerToCol.set(normalize(h), i));
+
+  // Step 1: JSON에서 대상 표 찾기
+  const docJson = editor.getJSON();
+  const docContent = docJson.content ?? [];
+  let tblCount = 0;
+  let tableNodeJson: JSONContent | null = null;
+  for (const node of docContent) {
+    if (node.type === "table") {
+      if (tblCount === tableIndex) { tableNodeJson = node; break; }
+      tblCount++;
+    }
+  }
+  if (!tableNodeJson) return "표를 찾지 못했습니다";
+
+  // Step 2: JSON에서 셀 내용 직접 수정
+  let modified = 0;
+  rows.forEach((rowData, i) => {
+    const rowIdx = startRow + i;
+    const rowNode = tableNodeJson!.content?.[rowIdx];
+    if (!rowNode) return;
+    for (const [headerName, cellText] of Object.entries(rowData)) {
+      const colIdx = headerToCol.get(normalize(headerName));
+      if (colIdx === undefined) continue;
+      const cellNode = rowNode.content?.[colIdx];
+      if (!cellNode) continue;
+      const firstPara = cellNode.content?.[0];
+      const text = String(cellText).trim();
+      const paraContent: JSONContent[] = text
+        ? [{ type: "text", text }]
+        : [];
+      cellNode.content = [{
+        type: firstPara?.type ?? "paragraph",
+        attrs: firstPara?.attrs ?? {},
+        content: paraContent,
+      }];
+      modified++;
+    }
+  });
+
+  if (modified === 0) {
+    const keyList = [...headerToCol.keys()].join(", ");
+    return `채울 셀을 찾지 못했습니다. 사용 가능한 헤더: ${keyList}`;
+  }
+
+  // Step 3: 수정된 JSON을 ProseMirror 노드로 파싱 후 표 전체를 교체
+  type FoundTable = { pos: number; nodeSize: number };
+  let foundTable: FoundTable | null = null;
+  let tblCnt2 = 0;
+  editor.state.doc.descendants((node, pos) => {
+    if (foundTable) return false;
+    if (node.type.name === "table") {
+      if (tblCnt2 === tableIndex) { foundTable = { pos, nodeSize: node.nodeSize }; return false; }
+      tblCnt2++;
+    }
+    return true;
+  });
+  if (!foundTable) return "표 위치를 파악하지 못했습니다";
+
+  try {
+    const newTableNode = editor.schema.nodeFromJSON(tableNodeJson!);
+    const tr = editor.state.tr.replaceWith(
+      (foundTable as FoundTable).pos,
+      (foundTable as FoundTable).pos + (foundTable as FoundTable).nodeSize,
+      newTableNode,
+    );
+    if (tr.docChanged) editor.view.dispatch(tr.scrollIntoView());
+  } catch (e) {
+    return `표 업데이트 오류: ${e instanceof Error ? e.message : String(e)}`;
+  }
+
+  return `${rows.length}행 데이터 채우기 완료`;
+}
+
 function applySearchReplace(
   text: string,
   search: string,
@@ -198,6 +348,12 @@ type JavaRenderPayload = {
 export default function Home() {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [viewMode, setViewMode] = useState<"editor" | "preview">("editor");
+  const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [recentSnapshots, setRecentSnapshots] = useState<RecentFileSnapshotMeta[]>([]);
+  const [selectedRecentSnapshotId, setSelectedRecentSnapshotId] = useState("");
+  const autoSaveInFlightRef = useRef(false);
+  const docRevisionRef = useRef(0);
+  const lastAutoSavedRevisionRef = useRef(-1);
 
   const {
     fileName,
@@ -205,6 +361,7 @@ export default function Home() {
     editorDoc,
     sourceSegments,
     extraSegmentsMap,
+    hwpxDocumentModel,
     integrityIssues,
     exportWarnings,
     outline,
@@ -239,6 +396,8 @@ export default function Home() {
     verificationLoading,
     // Batch mode
     batchMode,
+    // Form mode
+    formMode,
 
     // Chat agent
     chatMessages,
@@ -246,6 +405,7 @@ export default function Home() {
     pendingToolCall,
 
     setLoadedDocument,
+    setHwpxDocumentModel,
     setEditorDoc,
     setOutline,
     setEditsPreview,
@@ -280,6 +440,8 @@ export default function Home() {
     setVerificationLoading,
     // Batch mode
     setBatchMode,
+    // Form mode
+    setFormMode,
 
     // Chat agent
     addChatMessage,
@@ -291,6 +453,45 @@ export default function Home() {
     appendToolCallToLastMessage,
     appendToolResultToLastMessage,
   } = useDocumentStore();
+
+  // Phase 2: appendTransaction 이후 Zustand 갱신 신호
+  const onNewParaCreated = useCallback(
+    (_paraId: string, _fileName: string) => {
+      const model = useDocumentStore.getState().hwpxDocumentModel;
+      if (model) setHwpxDocumentModel(model);
+    },
+    [setHwpxDocumentModel],
+  );
+
+  // Phase 2: 항상 최신 model을 반환하는 getter (클로저 stale 방지)
+  const getHwpxDocumentModel = useCallback(
+    () => useDocumentStore.getState().hwpxDocumentModel,
+    [],
+  );
+
+  const refreshRecentSnapshots = useCallback(async (preferredId?: string) => {
+    try {
+      const rows = await listRecentFileSnapshots();
+      setRecentSnapshots(rows);
+      setSelectedRecentSnapshotId((prev) => {
+        if (preferredId && rows.some((row) => row.id === preferredId)) {
+          return preferredId;
+        }
+        if (prev && rows.some((row) => row.id === prev)) {
+          return prev;
+        }
+        return rows[0]?.id || "";
+      });
+    } catch {
+      // IndexedDB unavailable or blocked
+      setRecentSnapshots([]);
+      setSelectedRecentSnapshotId("");
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshRecentSnapshots();
+  }, [refreshRecentSnapshots]);
 
   const downloadUrl = useMemo(() => {
     if (!download.blob) {
@@ -360,63 +561,131 @@ export default function Home() {
   };
 
   /* ── File I/O ── */
-  const onPickFile = async (file: File) => {
-    setBusy(true);
-    setViewMode("editor");
-    const ext = file.name.toLowerCase().split(".").pop() || "";
-    const formatLabel = ext === "docx" ? "DOCX" : ext === "pptx" ? "PPTX" : "HWPX";
-    const isHwpx = ext === "hwpx";
-    setStatus(`${formatLabel}를 분석하고 변환 중입니다...`);
-    try {
-      const buffer = await file.arrayBuffer();
-      let parsePromise;
-      if (ext === "docx") parsePromise = parseDocxToProseMirror(buffer);
-      else if (ext === "pptx") parsePromise = parsePptxToProseMirror(buffer);
-      else parsePromise = parseHwpxToProseMirror(buffer);
+  const loadFileIntoEditor = useCallback(
+    async (file: File, recentKind: RecentFileKind | null = "opened") => {
+      setBusy(true);
+      setViewMode("editor");
+      const ext = file.name.toLowerCase().split(".").pop() || "";
+      const formatLabel = ext === "docx" ? "DOCX" : ext === "pptx" ? "PPTX" : "HWPX";
+      const isHwpx = ext === "hwpx";
+      setStatus(`${formatLabel}를 분석하고 변환 중입니다...`);
+      try {
+        const buffer = await file.arrayBuffer();
+        let parsePromise;
+        if (ext === "docx") parsePromise = parseDocxToProseMirror(buffer);
+        else if (ext === "pptx") parsePromise = parsePptxToProseMirror(buffer);
+        else parsePromise = parseHwpxToProseMirror(buffer);
 
-      const [parsed] = await Promise.all([
-        parsePromise,
-        // Fire Java rendering request concurrently (HWPX only)
-        !isHwpx
-          ? Promise.resolve()
-          : (async () => {
-              try {
-                const fd = new FormData();
-                fd.append("file", file);
-                const resp = await fetch("/api/hwpx-render", { method: "POST", body: fd });
-                if (resp.ok) {
-                  const payload = (await resp.json()) as JavaRenderPayload;
-                  if (payload.html && payload.elementMap) {
-                    setRenderResult(payload.html, payload.elementMap);
+        const [parsed] = await Promise.all([
+          parsePromise,
+          !isHwpx
+            ? Promise.resolve()
+            : (async () => {
+                try {
+                  const fd = new FormData();
+                  fd.append("file", file);
+                  const resp = await fetch("/api/hwpx-render", { method: "POST", body: fd });
+                  if (resp.ok) {
+                    const payload = (await resp.json()) as JavaRenderPayload;
+                    if (payload.html && payload.elementMap) {
+                      setRenderResult(payload.html, payload.elementMap);
+                    }
                   }
+                } catch {
+                  // Java server not running
                 }
-              } catch {
-                // Java server not running
-              }
-            })(),
-      ]);
-      setLoadedDocument({
-        fileName: file.name,
-        buffer,
-        doc: parsed.doc,
-        segments: parsed.segments,
-        extraSegmentsMap: parsed.extraSegmentsMap,
-        integrityIssues: parsed.integrityIssues,
-      });
-      setOutline(buildOutlineFromDoc(parsed.doc));
-      setStatus(
-        parsed.integrityIssues.length
-          ? `로드 완료: 세그먼트 ${parsed.segments.length}개 (경고 ${parsed.integrityIssues.length}개)`
-          : `로드 완료: 세그먼트 ${parsed.segments.length}개`,
-      );
+              })(),
+        ]);
 
-      // Phase 2-4: Auto-analyze document on upload
-      fireDocumentAnalysis(parsed.segments);
+        // DOCX/PPTX: base.hwpx 템플릿으로 HwpxDocumentModel 합성 → HWPX 저장 활성화
+        let hwpxDocumentModel = parsed.hwpxDocumentModel ?? null;
+        if ((ext === "docx" || ext === "pptx") && !hwpxDocumentModel) {
+          try {
+            const templateResp = await fetch("/base.hwpx");
+            if (templateResp.ok) {
+              const templateBuffer = await templateResp.arrayBuffer();
+              hwpxDocumentModel = await buildHwpxModelFromDoc(templateBuffer, parsed.doc);
+            }
+          } catch {
+            // base.hwpx 로드 실패 시 null 유지 (HWPX 저장 비활성)
+          }
+        }
+
+        setLoadedDocument({
+          fileName: file.name,
+          buffer,
+          doc: parsed.doc,
+          segments: parsed.segments,
+          extraSegmentsMap: parsed.extraSegmentsMap,
+          integrityIssues: parsed.integrityIssues,
+          hwpxDocumentModel,
+        });
+        setOutline(buildOutlineFromDoc(parsed.doc));
+        docRevisionRef.current = 0;
+        lastAutoSavedRevisionRef.current = -1;
+
+        if (recentKind) {
+          const snapshotMeta = await saveRecentFileSnapshot({
+            name: file.name,
+            blob: file,
+            kind: recentKind,
+          });
+          if (snapshotMeta) {
+            await refreshRecentSnapshots(snapshotMeta.id);
+          }
+        }
+
+        setStatus(
+          parsed.integrityIssues.length
+            ? `로드 완료: 세그먼트 ${parsed.segments.length}개 (경고 ${parsed.integrityIssues.length}개)`
+            : `로드 완료: 세그먼트 ${parsed.segments.length}개`,
+        );
+
+        // Phase 2-4: Auto-analyze document on upload
+        fireDocumentAnalysis(parsed.segments);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "문서 로드 실패";
+        setStatus(message);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      setBusy,
+      setViewMode,
+      setStatus,
+      setRenderResult,
+      setLoadedDocument,
+      setOutline,
+      refreshRecentSnapshots,
+    ],
+  );
+
+  const onPickFile = async (file: File) => {
+    await loadFileIntoEditor(file, "opened");
+  };
+
+  const onLoadRecentSnapshot = async (snapshotId: string) => {
+    if (!snapshotId) {
+      setStatus("최근 파일을 먼저 선택하세요.");
+      return;
+    }
+    setStatus("최근 파일을 불러오는 중입니다...");
+    try {
+      const snapshot = await loadRecentFileSnapshot(snapshotId);
+      if (!snapshot) {
+        setStatus("선택한 최근 파일을 찾지 못했습니다.");
+        await refreshRecentSnapshots();
+        return;
+      }
+      const file = new File([snapshot.blob], snapshot.meta.name, {
+        type: snapshot.meta.mimeType || "application/octet-stream",
+      });
+      await loadFileIntoEditor(file, null);
+      setSelectedRecentSnapshotId(snapshotId);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "문서 로드 실패";
+      const message = error instanceof Error ? error.message : "최근 파일 로드 실패";
       setStatus(message);
-    } finally {
-      setBusy(false);
     }
   };
 
@@ -461,11 +730,12 @@ export default function Home() {
   };
 
   const onEditorUpdateDoc = (doc: Parameters<typeof setEditorDoc>[0]) => {
+    docRevisionRef.current += 1;
     setEditorDoc(doc);
     setOutline(buildOutlineFromDoc(doc));
     const next = collectDocumentEdits(doc, sourceSegments, extraSegmentsMap);
     setEditsPreview(next.edits);
-    setExportWarnings(next.warnings);
+    // exportWarnings는 내보내기 시에만 갱신 (편집 중 배너 노출 방지)
   };
 
   const onGenerateSuggestion = async () => {
@@ -527,56 +797,138 @@ export default function Home() {
   };
 
   const isHwpxFile = fileName.toLowerCase().endsWith(".hwpx");
+  const runHwpxExport = useCallback(
+    async (params: {
+      kind: Exclude<RecentFileKind, "opened">;
+      fileLabel: string;
+      triggerDownload: boolean;
+      markClean: boolean;
+      overrideFileName?: string;
+    }) => {
+      if (!sourceBuffer || !editorDoc) {
+        throw new Error("먼저 문서 파일을 업로드하세요.");
+      }
+      if (!hwpxDocumentModel) {
+        throw new Error("현재는 HWPX 원본 문서만 HWPX 저장/자동저장을 지원합니다.");
+      }
 
-  const onExport = async () => {
-    if (!sourceBuffer || !editorDoc) {
-      setStatus("먼저 문서 파일을 업로드하세요.");
-      return;
-    }
-    if (!isHwpxFile) {
-      setStatus("DOCX 파일은 아직 HWPX 내보내기만 지원합니다. PDF/DOCX 내보내기는 곧 지원 예정입니다.");
-      return;
-    }
-    setBusy(true);
-    setStatus("수정 내용을 HWPX로 내보내는 중입니다...");
-    try {
-      const result = await applyProseMirrorDocToHwpx(sourceBuffer, editorDoc, sourceSegments, extraSegmentsMap);
+      const result = await applyProseMirrorDocToHwpx(sourceBuffer, editorDoc, sourceSegments, extraSegmentsMap, hwpxDocumentModel);
       setEditsPreview(result.edits);
       setExportWarnings(result.warnings);
       if (result.integrityIssues.length) {
-        setStatus(`내보내기 실패: 무결성 경고 ${result.integrityIssues.join(" | ")}`);
-        return;
+        throw new Error(`무결성 경고 ${result.integrityIssues.join(" | ")}`);
       }
-      const nextName = fileName ? fileName.replace(/\.hwpx$/i, "") + "-edited.hwpx" : "edited.hwpx";
+
+      const nextName = params.overrideFileName ?? createUniqueHwpxFileName(fileName || "document.hwpx", params.fileLabel);
       setDownload({
         blob: result.blob,
         fileName: nextName,
       });
-      setDirty(false);
-      pushHistory(`내보내기 완료 (${result.edits.length}건)`, result.edits.length);
-      setStatus(`내보내기 완료: 수정 ${result.edits.length}건`);
+
+      if (params.triggerDownload) {
+        triggerBrowserDownload(result.blob, nextName);
+      }
+
+      if (params.markClean) {
+        setDirty(false);
+      }
+
+      lastAutoSavedRevisionRef.current = docRevisionRef.current;
+
+      try {
+        const snapshotMeta = await saveRecentFileSnapshot({
+          name: nextName,
+          blob: result.blob,
+          kind: params.kind,
+        });
+        if (snapshotMeta) {
+          await refreshRecentSnapshots(snapshotMeta.id);
+        }
+      } catch {
+        // IndexedDB unavailable or blocked
+      }
+
+      return {
+        edits: result.edits.length,
+        fileName: nextName,
+      };
+    },
+    [
+      sourceBuffer,
+      editorDoc,
+      sourceSegments,
+      extraSegmentsMap,
+      hwpxDocumentModel,
+      fileName,
+      setEditsPreview,
+      setExportWarnings,
+      setDownload,
+      setDirty,
+      refreshRecentSnapshots,
+    ],
+  );
+
+  // 다른 이름으로 저장 다이얼로그 열기
+  const onSave = () => setSaveDialogOpen(true);
+  const onExport = () => setSaveDialogOpen(true);
+
+  // 다이얼로그 확인 시 실제 저장 실행
+  const onConfirmSave = async (customFileName: string) => {
+    setSaveDialogOpen(false);
+    setBusy(true);
+    setStatus("저장 중입니다...");
+    try {
+      const result = await runHwpxExport({
+        kind: "manual-save",
+        fileLabel: "saved",
+        triggerDownload: true,
+        markClean: true,
+        overrideFileName: customFileName,
+      });
+      pushHistory(`저장 완료 (${result.edits}건)`, result.edits);
+      setStatus(`저장 완료: ${result.fileName}`);
     } catch (error) {
-      const message = error instanceof Error ? error.message : "내보내기 실패";
+      const message = error instanceof Error ? error.message : "저장 실패";
       setStatus(message);
     } finally {
       setBusy(false);
     }
   };
 
-  /* ── Ctrl+S 저장 단축키 ── */
-  const onExportRef = useRef(onExport);
-  onExportRef.current = onExport;
+  const onAutoSave = useCallback(async () => {
+    if (autoSaveInFlightRef.current) {
+      return;
+    }
+    if (!editorDoc || !sourceBuffer || !hwpxDocumentModel || !isDirty || isBusy || aiBusy) {
+      return;
+    }
+    if (docRevisionRef.current === lastAutoSavedRevisionRef.current) {
+      return;
+    }
+
+    autoSaveInFlightRef.current = true;
+    try {
+      const result = await runHwpxExport({
+        kind: "auto-save",
+        fileLabel: "autosave",
+        triggerDownload: false,
+        markClean: false,
+      });
+      setStatus(`자동 저장 완료: ${result.fileName}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "자동 저장 실패";
+      setStatus(`자동 저장 실패: ${message}`);
+    } finally {
+      autoSaveInFlightRef.current = false;
+    }
+  }, [editorDoc, sourceBuffer, hwpxDocumentModel, isDirty, isBusy, aiBusy, runHwpxExport, setStatus]);
 
   useEffect(() => {
-    const handler = (e: KeyboardEvent) => {
-      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
-        e.preventDefault();
-        onExportRef.current();
-      }
-    };
-    window.addEventListener("keydown", handler);
-    return () => window.removeEventListener("keydown", handler);
-  }, []);
+    const timer = window.setInterval(() => {
+      void onAutoSave();
+    }, AUTOSAVE_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [onAutoSave]);
 
   const onSelectOutlineSegment = (segmentId: string) => {
     if (!editor) {
@@ -815,8 +1167,28 @@ export default function Home() {
 
     const sourceBySegmentId = new Map(sourceSegments.map((s) => [s.segmentId, s]));
     const segments: DocumentContext["segments"] = [];
+    const tables: TableContext[] = [];
+    let tableCount = 0;
 
     const walk = (node: JSONContent): void => {
+      if (node.type === "table") {
+        const attrs = (node.attrs || {}) as { tableId?: string };
+        const firstRow = node.content?.[0];
+        const headers = (firstRow?.content || []).map((cell: JSONContent) => extractNodeText(cell));
+        const rowCount = node.content?.length ?? 0;
+        const colCount = firstRow?.content?.length ?? 0;
+        if (attrs.tableId) {
+          tables.push({
+            tableIndex: tableCount,
+            tableId: attrs.tableId,
+            headers,
+            rowCount,
+            colCount,
+          });
+        }
+        tableCount++;
+        // 표 내부도 계속 탐색 (표 안의 단락도 segments에 포함)
+      }
       if (node.type === "paragraph" || node.type === "heading") {
         const attrs = (node.attrs || {}) as { segmentId?: string; level?: number };
         if (attrs.segmentId) {
@@ -844,6 +1216,7 @@ export default function Home() {
     return {
       segments,
       fileName,
+      tables,
     };
   }, [editor, editorDoc, sourceSegments, fileName]);
 
@@ -896,10 +1269,74 @@ export default function Home() {
           summary: `"${search}" → "${replace}" (${affected.length}건)`,
         };
       }
+      if (toolCall.name === "fill_table_rows") {
+        const ftInput = input as {
+          tableIndex: number;
+          startRow?: number;
+          rows: Array<Record<string, string>>;
+        };
+        const ctx = buildDocumentContext();
+        const tableCtx = ctx.tables?.[ftInput.tableIndex];
+        const rowCount = ftInput.rows.length;
+        const summary = tableCtx
+          ? `표 ${ftInput.tableIndex + 1} (${tableCtx.headers.slice(0, 3).join(", ")}...) — ${rowCount}행 채우기`
+          : `표 ${ftInput.tableIndex + 1} — ${rowCount}행 채우기`;
+        const edits = ftInput.rows.map((row, i) => ({
+          segmentId: `table-${ftInput.tableIndex}-row-${(ftInput.startRow ?? 1) + i}`,
+          before: "",
+          after: Object.values(row).join(" | "),
+        }));
+        return { edits, summary };
+      }
       return { edits: [], summary: "" };
     },
     [buildDocumentContext],
   );
+
+  /* ── Chat agent: patch write tool into messages (API 400 bug fix) ── */
+  function patchWriteToolIntoMessages(
+    messages: ChatMessageAPI[],
+    toolCall: ToolCallInfo,
+    resultContent: string,
+  ): ChatMessageAPI[] {
+    const result = [...messages];
+
+    // 마지막 assistant 메시지에 write_tool_use 주입
+    let lastAsstIdx = -1;
+    for (let i = result.length - 1; i >= 0; i--) {
+      if (result[i].role === "assistant") { lastAsstIdx = i; break; }
+    }
+    if (lastAsstIdx === -1) return result;
+
+    const lastAsst = result[lastAsstIdx];
+    const asstContent: ContentBlock[] =
+      typeof lastAsst.content === "string"
+        ? [{ type: "text", text: lastAsst.content }]
+        : [...(lastAsst.content as ContentBlock[])];
+    asstContent.push({ type: "tool_use", id: toolCall.id, name: toolCall.name, input: toolCall.input });
+    result[lastAsstIdx] = { ...lastAsst, content: asstContent };
+
+    // write_tool_result를 바로 다음 user 메시지에 추가 (없으면 새로 생성)
+    const nextIdx = lastAsstIdx + 1;
+    const toolResultBlock: ContentBlock = {
+      type: "tool_result",
+      tool_use_id: toolCall.id,
+      content: resultContent,
+    };
+    if (nextIdx < result.length && result[nextIdx].role === "user") {
+      const existingUser = result[nextIdx];
+      const userContent: ContentBlock[] =
+        typeof existingUser.content === "string"
+          ? []
+          : [...(existingUser.content as ContentBlock[])];
+      userContent.push(toolResultBlock);
+      result[nextIdx] = { ...existingUser, content: userContent };
+    } else {
+      result.push({ role: "user", content: [toolResultBlock] });
+    }
+
+    return result;
+  }
 
   /* ── Chat agent: convert UI messages to API format ── */
   const buildApiMessages = useCallback((): ChatMessageAPI[] => {
@@ -991,7 +1428,20 @@ export default function Home() {
       });
 
       const apiMessages = buildApiMessages();
-      apiMessages.push({ role: "user", content: text });
+      // read 툴 자동 실행 후 assistant가 tool_results user 메시지를 남긴 경우,
+      // 새 user 텍스트를 별도 push하면 user→user 연속이 되어 API 400 발생.
+      // → 마지막 user 메시지에 tool_result가 있으면 텍스트를 그 안에 합친다.
+      const lastApiMsg = apiMessages[apiMessages.length - 1];
+      if (
+        lastApiMsg &&
+        lastApiMsg.role === "user" &&
+        Array.isArray(lastApiMsg.content) &&
+        (lastApiMsg.content as ContentBlock[]).some((b) => b.type === "tool_result")
+      ) {
+        (lastApiMsg.content as ContentBlock[]).push({ type: "text", text });
+      } else {
+        apiMessages.push({ role: "user", content: text });
+      }
 
       try {
         await streamChat(
@@ -1117,12 +1567,29 @@ export default function Home() {
       }
       resultMsg = `${totalReplacedSegments}개 세그먼트 치환 완료 (${totalMatched}회 일치)`;
       pushHistory(`AI 채팅 찾아바꾸기 (${totalReplacedSegments}건)`, totalReplacedSegments);
+    } else if (toolCall.name === "fill_table_rows") {
+      const ftInput = toolCall.input as {
+        tableIndex: number;
+        startRow?: number;
+        rows: Array<Record<string, string>>;
+      };
+      const ctx = buildDocumentContext();
+      const tableCtx = ctx.tables?.[ftInput.tableIndex];
+      const headers = tableCtx?.headers ?? [];
+      resultMsg = fillTableRows(
+        editor,
+        ftInput.tableIndex,
+        ftInput.startRow ?? 1,
+        ftInput.rows,
+        headers,
+      );
+      pushHistory(`AI 표 채우기 (${ftInput.rows.length}행)`, ftInput.rows.length);
     }
 
     setPendingToolCall(null);
 
-    // Continue the conversation with the tool result
-    const continuationMessages = buildApiMessages();
+    // Continue the conversation with the tool result (patchWriteToolIntoMessages fixes API 400)
+    const continuationMessages = patchWriteToolIntoMessages(buildApiMessages(), toolCall, resultMsg);
 
     addChatMessage({
       id: `assistant-continue-${Date.now()}`,
@@ -1138,11 +1605,6 @@ export default function Home() {
       {
         messages: continuationMessages,
         documentContext: buildDocumentContext(),
-        approvedToolCall: {
-          toolCallId: toolCall.id,
-          toolName: toolCall.name,
-          result: resultMsg,
-        },
       },
       {
         onTextDelta: (delta) => {
@@ -1196,7 +1658,8 @@ export default function Home() {
     setPendingToolCall(null);
 
     // Continue conversation telling the agent the tool was rejected
-    const continuationMessages = buildApiMessages();
+    const rejectMsg = "사용자가 이 수정을 거부했습니다. 다른 방법을 제안하거나 사용자의 추가 지시를 기다려주세요.";
+    const continuationMessages = patchWriteToolIntoMessages(buildApiMessages(), toolCall, rejectMsg);
 
     addChatMessage({
       id: `assistant-reject-${Date.now()}`,
@@ -1212,11 +1675,6 @@ export default function Home() {
       {
         messages: continuationMessages,
         documentContext: buildDocumentContext(),
-        approvedToolCall: {
-          toolCallId: toolCall.id,
-          toolName: toolCall.name,
-          result: "사용자가 이 수정을 거부했습니다. 다른 방법을 제안하거나 사용자의 추가 지시를 기다려주세요.",
-        },
       },
       {
         onTextDelta: (delta) => {
@@ -1278,6 +1736,10 @@ export default function Home() {
           setActiveSidebarTab("ai");
           void onGenerateSuggestion();
         }}
+        recentSnapshots={recentSnapshots}
+        selectedRecentSnapshotId={selectedRecentSnapshotId}
+        onSelectRecentSnapshot={setSelectedRecentSnapshotId}
+        onLoadRecentSnapshot={onLoadRecentSnapshot}
         onPickFile={onPickFile}
         onExport={onExport}
         onExportPdf={() => {
@@ -1303,7 +1765,9 @@ export default function Home() {
             setBusy(false);
           }
         }}
-        onSave={onExport}
+        onSave={onSave}
+        formMode={formMode}
+        onToggleFormMode={() => setFormMode(!formMode)}
       />
 
       {/* ── 경고 배너 ── */}
@@ -1356,6 +1820,7 @@ export default function Home() {
               <EditorLayout>
                 <DocumentEditor
                   content={editorDoc}
+                  formMode={formMode}
                   onUpdateDoc={onEditorUpdateDoc}
                   onSelectionChange={setSelection}
                   onEditorReady={setEditor}
@@ -1371,6 +1836,8 @@ export default function Home() {
                       el?.scrollIntoView({ behavior: "smooth", block: "center" });
                     }, 100);
                   }}
+                  onNewParaCreated={onNewParaCreated}
+                  getHwpxDocumentModel={getHwpxDocumentModel}
                 />
               </EditorLayout>
             </div>
@@ -1467,6 +1934,22 @@ export default function Home() {
         dirtyFileCount={dirtySummary.dirtyFileCount}
         isDirty={isDirty}
         status={status}
+      />
+
+      {/* ── 다른 이름으로 저장 다이얼로그 ── */}
+      <HwpxSaveDialog
+        open={saveDialogOpen}
+        defaultFileName={`${toFileStem(fileName || "document")}.hwpx`}
+        sourceFormat={
+          fileName.toLowerCase().endsWith(".docx")
+            ? "docx"
+            : fileName.toLowerCase().endsWith(".pptx")
+              ? "pptx"
+              : "hwpx"
+        }
+        editorDoc={editorDoc}
+        onClose={() => setSaveDialogOpen(false)}
+        onConfirm={onConfirmSave}
       />
     </div>
   );

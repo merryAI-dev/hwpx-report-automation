@@ -4,6 +4,7 @@ import type { EditorSegment } from "@/lib/editor/hwpx-to-prosemirror";
 import type { TextEdit } from "@/lib/hwpx";
 import type { OutlineItem } from "@/lib/editor/document-store";
 import type { PresetKey } from "@/lib/editor/ai-presets";
+import type { HwpxDocumentModel } from "@/types/hwpx-model";
 
 import type { ChatMessageUI, PendingToolCall } from "@/types/chat";
 
@@ -93,6 +94,12 @@ type DocumentState = {
   // Batch mode
   batchMode: "section" | "document";
 
+  // Form mode
+  formMode: boolean;
+
+  // OWPML in-memory document model (para-snapshot round-trip)
+  hwpxDocumentModel: HwpxDocumentModel | null;
+
   // Chat agent
   chatMessages: ChatMessageUI[];
   chatBusy: boolean;
@@ -106,7 +113,9 @@ type DocumentState = {
     segments: EditorSegment[];
     extraSegmentsMap: Record<string, string[]>;
     integrityIssues: string[];
+    hwpxDocumentModel: HwpxDocumentModel | null;
   }) => void;
+  setHwpxDocumentModel: (model: HwpxDocumentModel | null) => void;
   setEditorDoc: (doc: JSONContent) => void;
   setOutline: (outline: OutlineItem[]) => void;
   setEditsPreview: (edits: TextEdit[]) => void;
@@ -142,6 +151,8 @@ type DocumentState = {
   setVerificationLoading: (loading: boolean) => void;
   // Batch mode
   setBatchMode: (mode: "section" | "document") => void;
+  // Form mode
+  setFormMode: (formMode: boolean) => void;
 
   // Chat agent
   addChatMessage: (msg: ChatMessageUI) => void;
@@ -197,6 +208,9 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   verificationResult: null,
   verificationLoading: false,
   batchMode: "section",
+  formMode: false,
+
+  hwpxDocumentModel: null,
 
   chatMessages: [],
   chatBusy: false,
@@ -224,6 +238,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       verificationResult: null,
       verificationLoading: false,
       batchMode: "section",
+      hwpxDocumentModel: null,
       chatMessages: [],
       chatBusy: false,
       pendingToolCall: null,
@@ -234,7 +249,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       history: [],
     }),
 
-  setLoadedDocument: ({ fileName, buffer, doc, segments, extraSegmentsMap, integrityIssues }) =>
+  setLoadedDocument: ({ fileName, buffer, doc, segments, extraSegmentsMap, integrityIssues, hwpxDocumentModel }) =>
     set({
       fileName,
       sourceBuffer: buffer,
@@ -242,6 +257,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       sourceSegments: segments,
       extraSegmentsMap,
       integrityIssues,
+      hwpxDocumentModel,
       exportWarnings: [],
       editsPreview: [],
       isDirty: false,
@@ -263,6 +279,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         : "문서 로드 완료",
     }),
 
+  setHwpxDocumentModel: (hwpxDocumentModel) => set({ hwpxDocumentModel }),
   setEditorDoc: (doc) => set({ editorDoc: doc, isDirty: true }),
   setOutline: (outline) => set({ outline }),
   setEditsPreview: (edits) => set({ editsPreview: edits }),
@@ -325,6 +342,9 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   // Batch mode
   setBatchMode: (batchMode) => set({ batchMode }),
+
+  // Form mode
+  setFormMode: (formMode) => set({ formMode }),
 
   // Chat agent
   addChatMessage: (msg) =>

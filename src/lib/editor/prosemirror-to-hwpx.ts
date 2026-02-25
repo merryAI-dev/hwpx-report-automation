@@ -1,8 +1,10 @@
 import JSZip from "jszip";
 import type { JSONContent } from "@tiptap/core";
-import { applyTextEdits, validateHwpxArchive } from "../hwpx";
+import { applyTextEdits, applyEditsToXmlText, scanXmlTextSegments, validateHwpxArchive } from "../hwpx";
 import type { TextEdit } from "../hwpx";
 import type { EditorSegment } from "./hwpx-to-prosemirror";
+import type { HwpxDocumentModel, HwpxRun } from "../../types/hwpx-model";
+import { markFingerprint, ensureCharPrForMarks } from "./marks-to-charpr";
 
 type MetadataAttrs = {
   segmentId?: string;
@@ -66,6 +68,17 @@ type LetterSpacingEdit = {
   textIndex: number;
   sourceCharPrIDRef: string;
   newSpacing: number;
+};
+
+type ParaPrAttrs = {
+  hwpxParaPrId?: string | null;
+  hwpxLineSpacing?: number | null;
+  hwpxAlign?: string | null;
+  hwpxLeftIndent?: number | null;
+  hwpxRightIndent?: number | null;
+  hwpxFirstLineIndent?: number | null;
+  hwpxSpaceBefore?: number | null;
+  hwpxSpaceAfter?: number | null;
 };
 
 type CollectLetterSpacingResult = {
@@ -172,7 +185,9 @@ function getRowNodes(tableNode: JSONContent): JSONContent[] {
 }
 
 function getCellNodes(rowNode: JSONContent): JSONContent[] {
-  return (rowNode.content || []).filter((child) => child.type === "tableCell");
+  return (rowNode.content || []).filter(
+    (child) => child.type === "tableCell" || child.type === "tableHeader",
+  );
 }
 
 function getCellSpans(cellAttrs: TableCellMetadataAttrs): { colSpan: number; rowSpan: number } {
@@ -274,9 +289,9 @@ function collectTablePatches(doc: JSONContent): TablePatchCollectResult {
       structureChanged = true;
     }
 
-    if (!structureChanged) {
-      return;
-    }
+    // tableId가 있는 표는 내용 변경(fill_table_rows 등)도 반영해야 하므로 항상 패치 생성.
+    // structureChanged는 경고 목적으로만 유지.
+    void structureChanged;
 
     patches.push({
       tableId,
@@ -788,6 +803,137 @@ function setSpacingAttributes(spacingElement: Element, value: number): void {
   }
 }
 
+/** Read paraPr values from a <hh:paraPr> element. */
+function readParaPrValues(paraPrEl: Element): Required<Omit<ParaPrAttrs, "hwpxParaPrId">> {
+  const descendants = Array.from(paraPrEl.getElementsByTagName("*"));
+
+  const alignEl = descendants.find((c) => c.localName === "align");
+  const hwpxAlign = (alignEl?.getAttribute("horizontal") ?? "JUSTIFY").toUpperCase();
+
+  const lsEl = descendants.find((c) => c.localName === "lineSpacing");
+  let hwpxLineSpacing = 160;
+  if (lsEl) {
+    const type = (lsEl.getAttribute("type") ?? "").toUpperCase();
+    if (type === "PERCENT") {
+      const val = Number.parseInt(lsEl.getAttribute("value") ?? "160", 10);
+      if (Number.isFinite(val) && val > 0) hwpxLineSpacing = val;
+    }
+  }
+
+  const marginEl = descendants.find((c) => c.localName === "margin");
+  let hwpxLeftIndent = 0;
+  let hwpxRightIndent = 0;
+  let hwpxFirstLineIndent = 0;
+  let hwpxSpaceBefore = 0;
+  let hwpxSpaceAfter = 0;
+  if (marginEl) {
+    for (const child of Array.from(marginEl.children)) {
+      const val = Number.parseInt(child.getAttribute("value") ?? "0", 10);
+      if (!Number.isFinite(val)) continue;
+      switch (child.localName) {
+        case "left":   hwpxLeftIndent = val;      break;
+        case "right":  hwpxRightIndent = val;     break;
+        case "intent":
+        case "indent": hwpxFirstLineIndent = val; break;
+        case "prev":   hwpxSpaceBefore = val;     break;
+        case "next":   hwpxSpaceAfter = val;      break;
+      }
+    }
+  }
+
+  return { hwpxAlign, hwpxLineSpacing, hwpxLeftIndent, hwpxRightIndent, hwpxFirstLineIndent, hwpxSpaceBefore, hwpxSpaceAfter };
+}
+
+/** Update paraPr fields in a cloned <hh:paraPr> element. */
+function updateParaPrElement(paraPrEl: Element, attrs: ParaPrAttrs): void {
+  const descendants = Array.from(paraPrEl.getElementsByTagName("*"));
+
+  if (attrs.hwpxAlign != null) {
+    const alignEl = descendants.find((c) => c.localName === "align");
+    if (alignEl) alignEl.setAttribute("horizontal", attrs.hwpxAlign);
+  }
+
+  if (attrs.hwpxLineSpacing != null) {
+    const lsEl = descendants.find((c) => c.localName === "lineSpacing");
+    if (lsEl) lsEl.setAttribute("value", String(attrs.hwpxLineSpacing));
+  }
+
+  const marginEl = descendants.find((c) => c.localName === "margin");
+  if (marginEl) {
+    for (const child of Array.from(marginEl.children)) {
+      switch (child.localName) {
+        case "left":   if (attrs.hwpxLeftIndent != null) child.setAttribute("value", String(attrs.hwpxLeftIndent)); break;
+        case "right":  if (attrs.hwpxRightIndent != null) child.setAttribute("value", String(attrs.hwpxRightIndent)); break;
+        case "intent":
+        case "indent": if (attrs.hwpxFirstLineIndent != null) child.setAttribute("value", String(attrs.hwpxFirstLineIndent)); break;
+        case "prev":   if (attrs.hwpxSpaceBefore != null) child.setAttribute("value", String(attrs.hwpxSpaceBefore)); break;
+        case "next":   if (attrs.hwpxSpaceAfter != null) child.setAttribute("value", String(attrs.hwpxSpaceAfter)); break;
+      }
+    }
+  }
+}
+
+/**
+ * Ensure a paraPr element exists for the given attrs.
+ * If the desired values match the original paraPr, returns the original ID.
+ * Otherwise clones the original, updates it, appends it to container, returns new ID.
+ */
+function ensureParaPrForAttrs(params: {
+  paraPrContainer: Element;
+  paraPrById: Map<string, Element>;
+  paraPrCache: Map<string, string>;
+  nextParaPrId: { value: number };
+  sourceParaPrId: string;
+  attrs: ParaPrAttrs;
+}): string {
+  const { paraPrContainer, paraPrById, paraPrCache, nextParaPrId, sourceParaPrId, attrs } = params;
+
+  const sourceEl = paraPrById.get(sourceParaPrId);
+  if (!sourceEl) return sourceParaPrId;
+
+  const original = readParaPrValues(sourceEl);
+
+  // Resolve desired values (fall back to original if attr is null/undefined)
+  const desired: Required<Omit<ParaPrAttrs, "hwpxParaPrId">> = {
+    hwpxAlign:          attrs.hwpxAlign          ?? original.hwpxAlign,
+    hwpxLineSpacing:    attrs.hwpxLineSpacing     ?? original.hwpxLineSpacing,
+    hwpxLeftIndent:     attrs.hwpxLeftIndent      ?? original.hwpxLeftIndent,
+    hwpxRightIndent:    attrs.hwpxRightIndent     ?? original.hwpxRightIndent,
+    hwpxFirstLineIndent: attrs.hwpxFirstLineIndent ?? original.hwpxFirstLineIndent,
+    hwpxSpaceBefore:    attrs.hwpxSpaceBefore     ?? original.hwpxSpaceBefore,
+    hwpxSpaceAfter:     attrs.hwpxSpaceAfter      ?? original.hwpxSpaceAfter,
+  };
+
+  // Check if anything changed
+  const changed =
+    desired.hwpxAlign          !== original.hwpxAlign          ||
+    desired.hwpxLineSpacing    !== original.hwpxLineSpacing     ||
+    desired.hwpxLeftIndent     !== original.hwpxLeftIndent      ||
+    desired.hwpxRightIndent    !== original.hwpxRightIndent     ||
+    desired.hwpxFirstLineIndent !== original.hwpxFirstLineIndent ||
+    desired.hwpxSpaceBefore    !== original.hwpxSpaceBefore     ||
+    desired.hwpxSpaceAfter     !== original.hwpxSpaceAfter;
+
+  if (!changed) return sourceParaPrId;
+
+  const cacheKey = `${sourceParaPrId}::${desired.hwpxAlign}::${desired.hwpxLineSpacing}::${desired.hwpxLeftIndent}::${desired.hwpxRightIndent}::${desired.hwpxFirstLineIndent}::${desired.hwpxSpaceBefore}::${desired.hwpxSpaceAfter}`;
+  if (paraPrCache.has(cacheKey)) return paraPrCache.get(cacheKey)!;
+
+  const cloned = sourceEl.cloneNode(true) as Element;
+  const newId = String(nextParaPrId.value++);
+  cloned.setAttribute("id", newId);
+  updateParaPrElement(cloned, desired);
+  paraPrContainer.appendChild(cloned);
+  paraPrById.set(newId, cloned);
+  paraPrCache.set(cacheKey, newId);
+  return newId;
+}
+
+/** Patch paraPrIDRef attribute in a paraXml string. */
+function patchParaPrIDRef(paraXml: string, newParaPrIDRef: string): string {
+  return paraXml.replace(/\bparaPrIDRef="[^"]*"/, `paraPrIDRef="${newParaPrIDRef}"`);
+}
+
 async function applyLetterSpacingPatches(
   fileBuffer: ArrayBuffer,
   edits: LetterSpacingEdit[],
@@ -994,6 +1140,243 @@ async function applyLetterSpacingPatches(
   };
 }
 
+// ── Para-snapshot round-trip helpers ─────────────────────────────────────────
+
+/**
+ * ProseMirror doc에서 paraId가 있는 모든 텍스트 블록의 { paraId → 현재 텍스트 } 인덱스.
+ */
+function buildParaIdIndex(doc: JSONContent): Map<string, string> {
+  const result = new Map<string, string>();
+  walk(doc, (node) => {
+    if (!isTextBlockNode(node)) return;
+    const paraId = ((node.attrs || {}) as { paraId?: string }).paraId;
+    if (paraId) result.set(paraId, extractNodeText(node));
+  });
+  return result;
+}
+
+/**
+ * paraId → ProseMirror JSONContent 노드 맵 (marks 정보 포함).
+ * buildParaIdIndex의 확장 버전으로, 텍스트 외에 content(marks 포함)도 보관.
+ */
+function buildParaIdNodeMap(doc: JSONContent): Map<string, JSONContent> {
+  const result = new Map<string, JSONContent>();
+  walk(doc, (node) => {
+    if (!isTextBlockNode(node)) return;
+    const paraId = ((node.attrs || {}) as { paraId?: string }).paraId;
+    if (paraId) result.set(paraId, node);
+  });
+  return result;
+}
+
+type RunChunk = {
+  text: string;
+  marks: JSONContent["marks"];
+};
+
+/**
+ * ProseMirror 노드의 content 배열을 연속된 동일 mark 조합 청크로 묶는다.
+ * hardBreak·비text 노드는 현재 청크에 포함하지 않는다.
+ */
+function groupContentByMarks(content: JSONContent[]): RunChunk[] {
+  const chunks: RunChunk[] = [];
+  for (const node of content) {
+    if (node.type !== "text") continue;
+    const text = node.text ?? "";
+    if (!text) continue;
+    const fp = markFingerprint(node.marks);
+    const last = chunks[chunks.length - 1];
+    if (last && markFingerprint(last.marks) === fp) {
+      last.text += text;
+    } else {
+      chunks.push({ text, marks: node.marks });
+    }
+  }
+  return chunks;
+}
+
+function escapeXml(text: string): string {
+  return text
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+}
+
+/**
+ * para.paraXml 구조를 보존하며 멀티런 <hp:p>를 재생성.
+ *   - paraPrIDRef, styleIDRef, linesegarray 등 구조 요소 원본 보존
+ *   - ProseMirror content의 mark 조합별로 <hp:run> 분리
+ *   - 각 run의 charPrIDRef는 ensureCharPrForMarks로 동적 조회/생성
+ */
+function rebuildParaXmlWithMarks(
+  para: { paraXml: string; runs: HwpxRun[] },
+  node: JSONContent,
+  charPropertiesEl: Element,
+  charPrById: Map<string, Element>,
+  charPrCache: Map<string, string>,
+  nextCharPrId: { value: number },
+  headerDoc: Document,
+  newParaPrIDRef?: string,
+): string {
+  const baseCharPrId = para.runs[0]?.charPrIDRef ?? "0";
+  const chunks = groupContentByMarks(node.content ?? []);
+
+  // 기존 paraXml에서 구조 속성 추출 (DOMParser)
+  const paraDoc = new DOMParser().parseFromString(para.paraXml, "text/xml");
+  const paraEl = paraDoc.documentElement;
+  const paraPrIDRef = newParaPrIDRef ?? paraEl.getAttribute("paraPrIDRef") ?? "0";
+  const styleIDRef = paraEl.getAttribute("styleIDRef") ?? "0";
+  const pageBreak = paraEl.getAttribute("pageBreak") ?? "0";
+  const columnBreak = paraEl.getAttribute("columnBreak") ?? "0";
+  const merged = paraEl.getAttribute("merged") ?? "0";
+
+  // linesegarray 원본 그대로 보존
+  const linesegEl = Array.from(paraEl.children).find((c) => c.localName === "linesegarray");
+  const linesegXml = linesegEl
+    ? new XMLSerializer().serializeToString(linesegEl)
+    : "<hp:linesegarray/>";
+
+  // mark 조합별 run 생성
+  const runXmls =
+    chunks.length === 0
+      ? [`<hp:run charPrIDRef="${baseCharPrId}"><hp:t></hp:t></hp:run>`]
+      : chunks.map((chunk) => {
+          const charPrId = ensureCharPrForMarks({
+            charPropertiesEl,
+            charPrById,
+            charPrCache,
+            nextCharPrId,
+            baseCharPrId,
+            marks: chunk.marks,
+            headerDoc,
+          });
+          return `<hp:run charPrIDRef="${charPrId}"><hp:t>${escapeXml(chunk.text)}</hp:t></hp:run>`;
+        });
+
+  // id 속성: 원본에서 보존, 합성 문단(없는 경우)은 생략
+  const originalId = paraEl.getAttribute("id");
+  const idAttr = originalId ? ` id="${originalId}"` : "";
+
+  return (
+    `<hp:p${idAttr} paraPrIDRef="${paraPrIDRef}" styleIDRef="${styleIDRef}" ` +
+    `pageBreak="${pageBreak}" columnBreak="${columnBreak}" merged="${merged}">` +
+    runXmls.join("") +
+    linesegXml +
+    `</hp:p>`
+  );
+}
+
+/**
+ * HwpxDocumentModel에 존재하지만 현재 doc에 없는 hasContent=true 문단 paraId Set.
+ * "삭제됨" 기준: 파싱 시 존재했던 non-empty 문단이 doc에서 사라진 경우.
+ */
+function buildDeletedParaIds(doc: JSONContent, model: HwpxDocumentModel): Set<string> {
+  const presentParaIds = new Set<string>();
+  walk(doc, (node) => {
+    const paraId = ((node.attrs || {}) as { paraId?: string }).paraId;
+    if (paraId) presentParaIds.add(paraId);
+  });
+  const deleted = new Set<string>();
+  for (const section of model.sections) {
+    for (const block of section.blocks) {
+      if (block.type !== "para") continue;
+      const para = model.paraStore.get(block.paraId);
+      if (para?.hasContent && !presentParaIds.has(block.paraId)) {
+        deleted.add(block.paraId);
+      }
+    }
+  }
+  return deleted;
+}
+
+/**
+ * 다중 런 문단에서 편집된 텍스트를 원래 런 경계로 분배.
+ *
+ * 각 런의 원본 텍스트가 currentText 안에 순서대로 나타나면 런 경계 유지.
+ * 그렇지 않으면(크게 달라진 경우) 런[0]에 전체 텍스트, 나머지 공백화.
+ *
+ * 예시: runs=["Hello ", "World", " bye"], currentText="Hello World there"
+ *   → "Hello " 발견(pos 0), "World" 발견(pos 6), 마지막 런=" there" → 유지
+ */
+function distributeTextAcrossRuns(currentText: string, runs: HwpxRun[]): Map<number, string> {
+  const result = new Map<number, string>();
+  if (runs.length === 1) {
+    result.set(0, currentText);
+    return result;
+  }
+
+  let cursor = 0;
+  const distribution: string[] = [];
+  let valid = true;
+
+  for (let i = 0; i < runs.length; i++) {
+    if (i === runs.length - 1) {
+      // 마지막 런: 나머지 전체
+      distribution.push(currentText.slice(cursor));
+      break;
+    }
+    const runText = runs[i].text;
+    if (!runText) {
+      // 빈 런은 그대로 빈 문자열
+      distribution.push("");
+      continue;
+    }
+    const idx = currentText.indexOf(runText, cursor);
+    if (idx === -1) {
+      valid = false;
+      break;
+    }
+    distribution.push(runText);
+    cursor = idx + runText.length;
+  }
+
+  if (!valid) {
+    // 폴백: 런[0]에 전체, 나머지 공백화
+    result.set(0, currentText);
+    for (let i = 1; i < runs.length; i++) result.set(i, "");
+    return result;
+  }
+
+  for (let i = 0; i < distribution.length; i++) result.set(i, distribution[i]);
+  return result;
+}
+
+/**
+ * 하나의 paraXml 안의 텍스트 노드들을 현재 텍스트로 교체.
+ * 다중 런이면 distributeTextAcrossRuns로 원래 런 경계 유지 시도.
+ */
+function applyLocalTextPatch(
+  paraXml: string,
+  runs: HwpxRun[],
+  currentText: string,
+): string {
+  const segments = scanXmlTextSegments(paraXml);
+  if (segments.length === 0) return paraXml;
+
+  const patchMap = new Map<number, string>();
+
+  if (runs.length > 1 && segments.length === runs.length) {
+    // 다중 런 — 런 경계 유지 시도
+    const distribution = distributeTextAcrossRuns(currentText, runs);
+    for (const [localIdx, text] of distribution) {
+      if (localIdx < segments.length) {
+        patchMap.set(segments[localIdx].textIndex, text);
+      }
+    }
+  } else {
+    // 단일 런 또는 세그먼트 수 불일치 → 런[0]에 전체
+    patchMap.set(segments[0].textIndex, currentText);
+    for (let i = 1; i < segments.length; i++) {
+      patchMap.set(segments[i].textIndex, "");
+    }
+  }
+
+  return applyEditsToXmlText(paraXml, patchMap);
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+
 export function collectDocumentEdits(
   doc: JSONContent,
   sourceSegments: EditorSegment[],
@@ -1068,7 +1451,213 @@ export async function applyProseMirrorDocToHwpx(
   doc: JSONContent,
   sourceSegments: EditorSegment[],
   extraSegmentsMap?: Record<string, string[]>,
+  hwpxDocumentModel?: HwpxDocumentModel | null,
 ): Promise<{ blob: Blob; edits: TextEdit[]; warnings: string[]; integrityIssues: string[] }> {
+  // ── 새 para-snapshot 조립 경로 (hwpxDocumentModel 있을 때) ────────────────
+  if (hwpxDocumentModel) {
+    const paraNodeIndex = buildParaIdNodeMap(doc);
+    const deletedParaIds = buildDeletedParaIds(doc, hwpxDocumentModel);
+    const warnings: string[] = [];
+
+    // baseBuffer: HWPX 원본 또는 템플릿 ZIP (DOCX/PPTX 변환 시 base.hwpx)
+    const zip = await JSZip.loadAsync(hwpxDocumentModel.baseBuffer);
+
+    // ── marks 지원을 위한 header.xml charPr 동적 관리 준비 ──
+    const headerFile = zip.files[HEADER_FILE];
+    let charPropertiesEl: Element | null = null;
+    let charPrById: Map<string, Element> = new Map();
+    let charPrCache: Map<string, string> = new Map();
+    let nextCharPrId = { value: 41 }; // base.hwpx 기준 maxId(40) + 1
+    let headerDoc: Document | null = null;
+    // paraPr 동적 관리
+    let paraPrContainer: Element | null = null;
+    let paraPrById: Map<string, Element> = new Map();
+    let paraPrCache: Map<string, string> = new Map();
+    let nextParaPrId = { value: 1 };
+
+    if (headerFile && !headerFile.dir) {
+      const rawHeaderXml = await headerFile.async("string");
+      const parsed = new DOMParser().parseFromString(rawHeaderXml, "application/xml");
+      if (!parsed.querySelector("parsererror")) {
+        headerDoc = parsed;
+        charPropertiesEl =
+          Array.from(headerDoc.getElementsByTagName("*")).find(
+            (n) => n.localName === "charProperties",
+          ) ?? null;
+        if (charPropertiesEl) {
+          let maxId = 0;
+          for (const cp of Array.from(charPropertiesEl.children).filter(
+            (c) => c.localName === "charPr",
+          )) {
+            const id = cp.getAttribute("id");
+            if (!id) continue;
+            charPrById.set(id, cp);
+            const parsed2 = asInt(id);
+            if (parsed2 !== null) maxId = Math.max(maxId, parsed2);
+          }
+          nextCharPrId = { value: maxId + 1 };
+        }
+        // paraPr 컨테이너 및 맵 초기화
+        const firstParaPr = Array.from(headerDoc.getElementsByTagName("*")).find(
+          (n) => n.localName === "paraPr",
+        );
+        paraPrContainer = firstParaPr?.parentElement ?? null;
+        if (paraPrContainer) {
+          let maxParaPrId = 0;
+          for (const pp of Array.from(paraPrContainer.children).filter(
+            (c) => c.localName === "paraPr",
+          )) {
+            const id = pp.getAttribute("id");
+            if (!id) continue;
+            paraPrById.set(id, pp);
+            const parsed3 = asInt(id);
+            if (parsed3 !== null) maxParaPrId = Math.max(maxParaPrId, parsed3);
+          }
+          nextParaPrId = { value: maxParaPrId + 1 };
+        }
+      }
+    }
+
+    for (const section of hwpxDocumentModel.sections) {
+      let sectionXml = section.xmlPrefix;
+
+      for (const block of section.blocks) {
+        sectionXml += block.leadingWhitespace;
+
+        if (block.type === "raw") {
+          sectionXml += block.xml;
+          continue;
+        }
+
+        const para = hwpxDocumentModel.paraStore.get(block.paraId);
+        if (!para) {
+          warnings.push(`paraId ${block.paraId}의 XML을 찾지 못해 건너뜁니다.`);
+          continue;
+        }
+
+        // 빈 구조 문단 (원본 소스, 내용 없음 = 테이블 래퍼 등) → 항상 verbatim
+        if (!para.hasContent && !para.isSynthesized) {
+          sectionXml += para.paraXml;
+          continue;
+        }
+
+        // 삭제된 문단 → 출력 생략
+        if (deletedParaIds.has(block.paraId)) {
+          continue;
+        }
+
+        const currentNode = paraNodeIndex.get(block.paraId);
+        if (currentNode === undefined) {
+          // doc에 없는 문단 → 삭제로 처리
+          continue;
+        }
+
+        // paraPr 변경 여부 확인 및 새 paraPrIDRef 결정
+        let newParaPrIDRef: string | undefined;
+        if (headerDoc && paraPrContainer) {
+          const nodeAttrs = (currentNode.attrs ?? {}) as ParaPrAttrs;
+          const sourceParaPrId = nodeAttrs.hwpxParaPrId;
+          if (sourceParaPrId && paraPrById.has(sourceParaPrId)) {
+            newParaPrIDRef = ensureParaPrForAttrs({
+              paraPrContainer,
+              paraPrById,
+              paraPrCache,
+              nextParaPrId,
+              sourceParaPrId,
+              attrs: nodeAttrs,
+            });
+          }
+        }
+
+        // marks가 있으면 멀티런 재생성, 없으면 기존 텍스트 패치 경로
+        const hasMarks = (currentNode.content ?? []).some(
+          (n) => n.marks && n.marks.length > 0,
+        );
+
+        if (hasMarks && charPropertiesEl && headerDoc) {
+          sectionXml += rebuildParaXmlWithMarks(
+            para,
+            currentNode,
+            charPropertiesEl,
+            charPrById,
+            charPrCache,
+            nextCharPrId,
+            headerDoc,
+            newParaPrIDRef,
+          );
+        } else {
+          const currentText = extractNodeText(currentNode);
+          const originalText = para.runs.map((r) => r.text).join("");
+          if (currentText === originalText && !para.isSynthesized && !newParaPrIDRef) {
+            sectionXml += para.paraXml;
+          } else if (newParaPrIDRef && currentText === originalText && !para.isSynthesized) {
+            sectionXml += patchParaPrIDRef(para.paraXml, newParaPrIDRef);
+          } else {
+            const patched = applyLocalTextPatch(para.paraXml, para.runs, currentText);
+            sectionXml += newParaPrIDRef ? patchParaPrIDRef(patched, newParaPrIDRef) : patched;
+          }
+        }
+      }
+
+      sectionXml += section.xmlSuffix;
+      zip.file(section.fileName, sectionXml);
+    }
+
+    // mark / paraPr로 인해 새 요소가 추가된 경우 header.xml 업데이트
+    const headerNeedsUpdate =
+      (charPropertiesEl && charPrCache.size > 0) ||
+      (paraPrContainer && paraPrCache.size > 0);
+    if (headerDoc && headerNeedsUpdate) {
+      if (charPropertiesEl && charPrCache.size > 0) {
+        const newCount = Array.from(charPropertiesEl.children).filter(
+          (c) => c.localName === "charPr",
+        ).length;
+        charPropertiesEl.setAttribute("itemCnt", String(newCount));
+      }
+      if (paraPrContainer && paraPrCache.size > 0) {
+        const newCount = Array.from(paraPrContainer.children).filter(
+          (c) => c.localName === "paraPr",
+        ).length;
+        paraPrContainer.setAttribute("itemCnt", String(newCount));
+      }
+      zip.file(HEADER_FILE, new XMLSerializer().serializeToString(headerDoc));
+    }
+
+    let workingBuffer = await zip.generateAsync({ type: "arraybuffer" });
+
+    // Phase 2: 테이블 구조 패치 (기존 경로 유지)
+    const { patches: tablePatches, warnings: tableWarnings } = collectTablePatches(doc);
+    warnings.push(...tableWarnings);
+    if (tablePatches.length) {
+      const patched = await applyTablePatches(workingBuffer, tablePatches);
+      workingBuffer = patched.buffer;
+      warnings.push(...patched.warnings);
+    }
+
+    // Phase 3: 자간 패치 (HWPX 원본 세그먼트가 있을 때만 — DOCX/PPTX 변환 시 base.hwpx에 charPr 없음)
+    const hasHwpxSegments = sourceSegments.some(
+      (s) => !s.segmentId.startsWith("pptx::") && !s.segmentId.startsWith("docx::"),
+    );
+    if (hasHwpxSegments) {
+      const { edits: lsEdits, warnings: lsWarnings } = collectLetterSpacingEdits(doc, sourceSegments, extraSegmentsMap);
+      warnings.push(...lsWarnings);
+      if (lsEdits.length) {
+        const patched = await applyLetterSpacingPatches(workingBuffer, lsEdits, sourceSegments);
+        workingBuffer = patched.buffer;
+        warnings.push(...patched.warnings);
+      }
+    }
+
+    const integrityIssues = await validateHwpxArchive(workingBuffer);
+    return {
+      blob: new Blob([workingBuffer], { type: "application/zip" }),
+      edits: [], // para-snapshot 경로에서는 TextEdit 대신 파라 스냅숏 사용
+      warnings: uniqueWarnings(warnings),
+      integrityIssues,
+    };
+  }
+
+  // ── 기존 byte-offset 패치 경로 (hwpxDocumentModel 없을 때 폴백) ────────────
   const { edits, warnings: previewWarnings } = collectDocumentEdits(doc, sourceSegments, extraSegmentsMap);
   const { patches: tablePatches, warnings: tableWarnings } = collectTablePatches(doc);
   const { edits: letterSpacingEdits, warnings: letterSpacingWarnings } = collectLetterSpacingEdits(

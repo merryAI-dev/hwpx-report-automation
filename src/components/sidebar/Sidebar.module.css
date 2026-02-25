@@ -1,41 +1,67 @@
-/* HWP-style fixed-width right panel */
+/* ── Sidebar panel wrapper ── */
 .panel {
-  width: 280px;
-  flex-shrink: 0;
+  height: 100%;
+  background: rgba(255, 255, 255, 0.6);
+  backdrop-filter: blur(20px);
+  -webkit-backdrop-filter: blur(20px);
+  border-left: 1px solid rgba(229, 231, 235, 0.5);
   display: flex;
   flex-direction: column;
-  background: #f8f8f8;
-  border-left: 1px solid #c0c0c0;
-  height: 100%;
   overflow: hidden;
-}
-
-.panelTitleBar {
-  height: 28px;
-  background: #e8e8e8;
-  border-bottom: 1px solid #c0c0c0;
-  display: flex;
-  align-items: center;
-  padding: 0 10px;
-  font-size: 12px;
-  font-weight: 600;
-  color: #1a1a1a;
-  font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
   flex-shrink: 0;
+  position: relative;
+  /* width은 인라인 스타일로 제어 (리사이즈) */
 }
 
+/* ── Resize handle (left edge) ── */
+.resizeHandle {
+  position: absolute;
+  left: 0;
+  top: 0;
+  width: 4px;
+  height: 100%;
+  cursor: col-resize;
+  z-index: 10;
+  background: transparent;
+  transition: background 0.15s;
+}
+
+.resizeHandle:hover,
+.resizeHandle.dragging {
+  background: rgba(59, 130, 246, 0.35);
+}
+
+/* ── Title bar ── */
+.panelTitleBar {
+  padding: 8px 14px;
+  border-bottom: 1px solid rgba(209, 213, 219, 0.6);
+  font-size: 11px;
+  font-weight: 700;
+  color: #374151;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+  flex-shrink: 0;
+  user-select: none;
+  font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+}
+
+/* ── Content area (scrollable, fixed height) ── */
 .panelContent {
   flex: 1;
-  min-height: 0;
+  min-height: 0;        /* flex 자식이 shrink되게 */
   overflow-y: auto;
-  padding: 10px;
+  overflow-x: hidden;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
 }
 
+/* ── Chat tab: no padding, full height ── */
 .panelContentChat {
   flex: 1;
   min-height: 0;
   overflow: hidden;
-  padding: 0;
   display: flex;
   flex-direction: column;
 }

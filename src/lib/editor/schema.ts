@@ -1,5 +1,8 @@
 import { Extension } from "@tiptap/core";
 
+/** 1 HWPUNIT = 1/7200 inch = 25.4/7200 mm. */
+const HWPUNIT_PER_MM = 7200 / 25.4; // ≈ 283.465
+
 function parseLetterSpacingValue(raw: string | null): number | null {
   if (!raw) {
     return null;
@@ -96,6 +99,116 @@ export const HwpxMetadataExtension = Extension.create({
             },
             renderHTML: (attributes: Record<string, unknown>) =>
               renderLetterSpacingAttributes(attributes.letterSpacing),
+          },
+          fieldType: {
+            default: null,
+            parseHTML: (element: HTMLElement) => element.getAttribute("data-field-type"),
+            renderHTML: (attributes: Record<string, unknown>) => {
+              if (!attributes.fieldType) {
+                return {};
+              }
+              return { "data-field-type": String(attributes.fieldType) };
+            },
+          },
+          paraId: {
+            default: null,
+            parseHTML: (element: HTMLElement) => element.getAttribute("data-para-id") ?? null,
+            renderHTML: (attributes: Record<string, unknown>) => {
+              if (!attributes.paraId) return {};
+              return { "data-para-id": String(attributes.paraId) };
+            },
+          },
+          hwpxParaPrId: {
+            default: null,
+            parseHTML: (element: HTMLElement) => element.getAttribute("data-hwpx-para-pr-id") ?? null,
+            renderHTML: (attributes: Record<string, unknown>) => {
+              if (!attributes.hwpxParaPrId) return {};
+              return { "data-hwpx-para-pr-id": String(attributes.hwpxParaPrId) };
+            },
+          },
+          hwpxLineSpacing: {
+            default: null,
+            parseHTML: (element: HTMLElement) => {
+              const v = element.getAttribute("data-hwpx-line-spacing");
+              return v === null ? null : Number(v);
+            },
+            renderHTML: (attributes: Record<string, unknown>) => {
+              if (attributes.hwpxLineSpacing === null || attributes.hwpxLineSpacing === undefined) return {};
+              const pct = Number(attributes.hwpxLineSpacing);
+              return {
+                "data-hwpx-line-spacing": String(pct),
+                style: `line-height: ${(pct / 100).toFixed(2)}`,
+              };
+            },
+          },
+          hwpxAlign: {
+            default: null,
+            parseHTML: (element: HTMLElement) => element.getAttribute("data-hwpx-align") ?? null,
+            renderHTML: (attributes: Record<string, unknown>) => {
+              if (!attributes.hwpxAlign) return {};
+              return { "data-hwpx-align": String(attributes.hwpxAlign) };
+            },
+          },
+          hwpxLeftIndent: {
+            default: null,
+            parseHTML: (element: HTMLElement) => {
+              const v = element.getAttribute("data-hwpx-left-indent");
+              return v === null ? null : Number(v);
+            },
+            renderHTML: (attributes: Record<string, unknown>) => {
+              if (!attributes.hwpxLeftIndent) return {};
+              const mm = (Number(attributes.hwpxLeftIndent) / HWPUNIT_PER_MM).toFixed(2);
+              return { "data-hwpx-left-indent": String(attributes.hwpxLeftIndent), style: `margin-left: ${mm}mm` };
+            },
+          },
+          hwpxRightIndent: {
+            default: null,
+            parseHTML: (element: HTMLElement) => {
+              const v = element.getAttribute("data-hwpx-right-indent");
+              return v === null ? null : Number(v);
+            },
+            renderHTML: (attributes: Record<string, unknown>) => {
+              if (!attributes.hwpxRightIndent) return {};
+              const mm = (Number(attributes.hwpxRightIndent) / HWPUNIT_PER_MM).toFixed(2);
+              return { "data-hwpx-right-indent": String(attributes.hwpxRightIndent), style: `margin-right: ${mm}mm` };
+            },
+          },
+          hwpxFirstLineIndent: {
+            default: null,
+            parseHTML: (element: HTMLElement) => {
+              const v = element.getAttribute("data-hwpx-first-line-indent");
+              return v === null ? null : Number(v);
+            },
+            renderHTML: (attributes: Record<string, unknown>) => {
+              if (attributes.hwpxFirstLineIndent === null || attributes.hwpxFirstLineIndent === undefined) return {};
+              const mm = (Number(attributes.hwpxFirstLineIndent) / HWPUNIT_PER_MM).toFixed(2);
+              return { "data-hwpx-first-line-indent": String(attributes.hwpxFirstLineIndent), style: `text-indent: ${mm}mm` };
+            },
+          },
+          hwpxSpaceBefore: {
+            default: null,
+            parseHTML: (element: HTMLElement) => {
+              const v = element.getAttribute("data-hwpx-space-before");
+              return v === null ? null : Number(v);
+            },
+            renderHTML: (attributes: Record<string, unknown>) => {
+              if (!attributes.hwpxSpaceBefore) return {};
+              // 1 HWPUNIT = 1/100 pt → convert to px (1pt = 1.333px)
+              const px = ((Number(attributes.hwpxSpaceBefore) / 100) * 1.333).toFixed(1);
+              return { "data-hwpx-space-before": String(attributes.hwpxSpaceBefore), style: `margin-top: ${px}px` };
+            },
+          },
+          hwpxSpaceAfter: {
+            default: null,
+            parseHTML: (element: HTMLElement) => {
+              const v = element.getAttribute("data-hwpx-space-after");
+              return v === null ? null : Number(v);
+            },
+            renderHTML: (attributes: Record<string, unknown>) => {
+              if (!attributes.hwpxSpaceAfter) return {};
+              const px = ((Number(attributes.hwpxSpaceAfter) / 100) * 1.333).toFixed(1);
+              return { "data-hwpx-space-after": String(attributes.hwpxSpaceAfter), style: `margin-bottom: ${px}px` };
+            },
           },
         },
       },

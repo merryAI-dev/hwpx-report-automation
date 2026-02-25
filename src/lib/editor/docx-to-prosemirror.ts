@@ -116,6 +116,7 @@ export async function parseDocxToProseMirror(
     segments,
     extraSegmentsMap: {},
     integrityIssues: warnings,
+    hwpxDocumentModel: null,
   };
 }
 

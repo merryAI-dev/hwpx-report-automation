@@ -172,15 +172,58 @@ export function ChatPanel({
   );
 }
 
+const THINKING_MESSAGES = [
+  "요청 사항 확인 중",
+  "문서 읽는 중",
+  "내용 분석 중",
+  "답변 작성 중",
+  "문단 검토 중",
+  "수정 사항 정리 중",
+  "표 구조 파악 중",
+  "데이터 정리 중",
+  "문서 구조 파악 중",
+  "맥락 파악 중",
+];
+
+function ThinkingIndicator() {
+  const [idx, setIdx] = useState(() => Math.floor(Math.random() * THINKING_MESSAGES.length));
+  const [dots, setDots] = useState(1);
+
+  useEffect(() => {
+    const msgTimer = setInterval(() => {
+      setIdx((prev) => (prev + 1) % THINKING_MESSAGES.length);
+    }, 2200);
+    return () => clearInterval(msgTimer);
+  }, []);
+
+  useEffect(() => {
+    const dotTimer = setInterval(() => {
+      setDots((prev) => (prev % 3) + 1);
+    }, 500);
+    return () => clearInterval(dotTimer);
+  }, []);
+
+  return (
+    <span className="chat-thinking">
+      {THINKING_MESSAGES[idx]}
+      <span className="chat-thinking-dots">{"·".repeat(dots)}</span>
+    </span>
+  );
+}
+
 function ChatMessage({ message }: { message: ChatMessageUI }) {
   const isUser = message.role === "user";
 
   return (
     <div className={`chat-msg ${isUser ? "chat-msg-user" : "chat-msg-assistant"}`}>
       <div className={`chat-bubble ${isUser ? "chat-bubble-user" : "chat-bubble-assistant"}`}>
-        <p className="chat-bubble-text">{message.content}</p>
-        {message.isStreaming && !message.content && (
-          <span className="chat-typing">...</span>
+        {message.isStreaming && !message.content ? (
+          <ThinkingIndicator />
+        ) : (
+          <p className="chat-bubble-text">
+            {message.content}
+            {message.isStreaming && <span className="streaming-cursor" />}
+          </p>
         )}
       </div>
       {/* Tool calls display */}

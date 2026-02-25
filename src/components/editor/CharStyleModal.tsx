@@ -66,6 +66,20 @@ export function CharStyleModal({ editor, onClose }: CharStyleModalProps) {
     if (state.underline) chain.setUnderline(); else chain.unsetUnderline();
     if (state.strikethrough) chain.setStrike(); else chain.unsetStrike();
 
+    // Text color
+    if (state.textColor && state.textColor !== "#000000") {
+      chain.setColor(state.textColor);
+    } else {
+      chain.unsetColor();
+    }
+
+    // Background (highlight) color
+    if (state.bgColor && state.bgColor !== "#ffffff") {
+      chain.setHighlight({ color: state.bgColor });
+    } else {
+      chain.unsetHighlight();
+    }
+
     chain.run();
     onClose();
   };

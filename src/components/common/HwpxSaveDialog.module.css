@@ -1,0 +1,226 @@
+/* Word-style "다른 이름으로 저장" 다이얼로그 */
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.4);
+  z-index: 2000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.modal {
+  background: #f5f5f5;
+  border: 1px solid #808080;
+  border-radius: 4px;
+  box-shadow: 4px 4px 16px rgba(0, 0, 0, 0.4);
+  width: 480px;
+  max-width: 96vw;
+  display: flex;
+  flex-direction: column;
+  font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+  font-size: 13px;
+  color: #1a1a1a;
+}
+
+/* ── 타이틀 바 (HWP 스타일) ── */
+.titleBar {
+  background: linear-gradient(to bottom, #4878b8 0%, #2458a0 100%);
+  color: #fff;
+  padding: 6px 10px;
+  font-size: 13px;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border-radius: 4px 4px 0 0;
+}
+
+.closeBtn {
+  background: transparent;
+  border: none;
+  color: #fff;
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+  line-height: 1;
+}
+
+.closeBtn:hover {
+  background: rgba(255, 255, 255, 0.2);
+  border-radius: 3px;
+}
+
+/* ── 바디 ── */
+.body {
+  padding: 14px 16px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: #f5f5f5;
+}
+
+/* ── 포맷 변환 경고 ── */
+.conversionBanner {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: #fff8e1;
+  border: 1px solid #f0c040;
+  border-radius: 4px;
+  padding: 8px 10px;
+}
+
+.conversionBadge {
+  font-size: 11px;
+  font-weight: 700;
+  background: #e08a00;
+  color: #fff;
+  border-radius: 3px;
+  padding: 2px 7px;
+  white-space: nowrap;
+  flex-shrink: 0;
+}
+
+.conversionNote {
+  font-size: 12px;
+  color: #7a6000;
+  line-height: 1.5;
+}
+
+/* ── 파일 이름 입력 ── */
+.fieldGroup {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.fieldLabel {
+  font-size: 12px;
+  font-weight: 600;
+  color: #444;
+}
+
+.fileNameInput {
+  width: 100%;
+  height: 28px;
+  border: 1px solid #b4b4b4;
+  border-radius: 3px;
+  padding: 0 8px;
+  font-size: 13px;
+  font-family: inherit;
+  background: #fff;
+  box-sizing: border-box;
+  outline: none;
+}
+
+.fileNameInput:focus {
+  border-color: #2458a0;
+  box-shadow: 0 0 0 2px rgba(36, 88, 160, 0.15);
+}
+
+/* ── 문서 내용 요약 ── */
+.summaryBox {
+  border: 1px solid #c0c0c0;
+  border-radius: 3px;
+  padding: 8px 10px 10px;
+  margin: 0;
+}
+
+.summaryBox legend {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 0 4px;
+  color: #555;
+}
+
+.summaryRow {
+  display: flex;
+  gap: 0;
+}
+
+.summaryItem {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 2px;
+  padding: 6px 0;
+  border-right: 1px solid #e0e0e0;
+}
+
+.summaryItem:last-child {
+  border-right: none;
+}
+
+.summaryCount {
+  font-size: 22px;
+  font-weight: 700;
+  color: #2458a0;
+  line-height: 1;
+}
+
+.summaryLabel {
+  font-size: 11px;
+  color: #666;
+}
+
+/* ── 저장 형식 표시 ── */
+.formatNote {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  color: #555;
+}
+
+.hwpxBadge {
+  font-size: 11px;
+  font-weight: 700;
+  background: #2458a0;
+  color: #fff;
+  border-radius: 3px;
+  padding: 2px 7px;
+}
+
+/* ── 푸터 버튼 ── */
+.footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 8px 14px 12px;
+  border-top: 1px solid #d0d0d0;
+  background: #ececec;
+  border-radius: 0 0 4px 4px;
+}
+
+.saveBtn {
+  padding: 4px 24px;
+  font-size: 12px;
+  font-family: inherit;
+  border-radius: 3px;
+  cursor: pointer;
+  background: #2458a0;
+  color: #fff;
+  border: 1px solid #1a4080;
+}
+
+.saveBtn:hover {
+  background: #1a4080;
+}
+
+.cancelBtn {
+  padding: 4px 18px;
+  font-size: 12px;
+  font-family: inherit;
+  border-radius: 3px;
+  cursor: pointer;
+  background: #f0f0f0;
+  color: #333;
+  border: 1px solid #aaa;
+}
+
+.cancelBtn:hover {
+  background: #e0e0e0;
+}

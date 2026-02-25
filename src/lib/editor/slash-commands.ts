@@ -43,6 +43,30 @@ function baseCommands(): Omit<SlashCommandItem, "run">[] {
       description: "이미지 자리 표시 문단을 삽입합니다. (Phase 2)",
       keywords: ["이미지", "image", "placeholder"],
     },
+    {
+      id: "set-field-recipient",
+      title: "필드: 수신",
+      description: "현재 문단을 '수신' 필드로 지정합니다.",
+      keywords: ["field", "recipient", "수신"],
+    },
+    {
+      id: "set-field-sender",
+      title: "필드: 발신",
+      description: "현재 문단을 '발신' 필드로 지정합니다.",
+      keywords: ["field", "sender", "발신"],
+    },
+    {
+      id: "set-field-title",
+      title: "필드: 제목",
+      description: "현재 문단을 '제목' 필드로 지정합니다.",
+      keywords: ["field", "title", "제목"],
+    },
+    {
+      id: "set-field-body",
+      title: "필드: 본문",
+      description: "현재 문단을 '본문' 필드로 지정합니다.",
+      keywords: ["field", "body", "본문"],
+    },
   ];
 }
 
@@ -63,6 +87,11 @@ export function getSlashCommandItems(query: string, context: SlashCommandContext
       }
       if (command.id === "divider") {
         editor.chain().focus().deleteRange(range).setHorizontalRule().run();
+        return;
+      }
+      if (command.id.startsWith("set-field-")) {
+        const fieldType = command.id.replace("set-field-", "");
+        editor.chain().focus().deleteRange(range).updateAttributes("paragraph", { fieldType }).updateAttributes("heading", { fieldType }).run();
         return;
       }
       editor.chain().focus().deleteRange(range).insertContent("[이미지 자리]").run();

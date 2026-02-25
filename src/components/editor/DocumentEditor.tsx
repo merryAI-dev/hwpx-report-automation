@@ -5,6 +5,8 @@ import type { JSONContent } from "@tiptap/core";
 import type { Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
 import { createEditorExtensions } from "@/lib/editor/extensions";
+import { EditorBubbleMenu } from "./EditorBubbleMenu";
+import type { HwpxDocumentModel } from "@/types/hwpx-model";
 
 type SelectionPayload = {
   selectedSegmentId: string | null;
@@ -14,11 +16,14 @@ type SelectionPayload = {
 type DocumentEditorProps = {
   content: JSONContent | null;
   editable?: boolean;
+  formMode?: boolean;
   onUpdateDoc: (doc: JSONContent) => void;
   onSelectionChange: (payload: SelectionPayload) => void;
   onEditorReady: (editor: Editor | null) => void;
   onAiCommand?: () => void;
   onDiffSegmentClick?: (segmentId: string) => void;
+  onNewParaCreated?: (paraId: string, sectionFileName: string) => void;
+  getHwpxDocumentModel?: () => HwpxDocumentModel | null;
 };
 
 function resolveSelectedSegmentId(editor: Editor): string | null {
@@ -29,15 +34,18 @@ function resolveSelectedSegmentId(editor: Editor): string | null {
 export function DocumentEditor({
   content,
   editable = true,
+  formMode = false,
   onUpdateDoc,
   onSelectionChange,
   onEditorReady,
   onAiCommand,
   onDiffSegmentClick,
+  onNewParaCreated,
+  getHwpxDocumentModel,
 }: DocumentEditorProps) {
   const editor = useEditor({
     immediatelyRender: false,
-    extensions: createEditorExtensions({ onAiCommand }),
+    extensions: createEditorExtensions({ onAiCommand, onNewParaCreated, getHwpxDocumentModel }),
     content: content || { type: "doc", content: [{ type: "paragraph" }] },
     editable,
     onUpdate: ({ editor: tiptapEditor }) => {
@@ -72,7 +80,7 @@ export function DocumentEditor({
 
   return (
     <div
-      className="document-editor-wrap"
+      className={`document-editor-wrap ${formMode ? "form-mode-active" : ""}`}
       onClick={(e) => {
         if (!onDiffSegmentClick) return;
         const target = (e.target as HTMLElement).closest("[data-diff-segment]");
@@ -83,6 +91,7 @@ export function DocumentEditor({
         }
       }}
     >
+      <EditorBubbleMenu editor={editor} />
       <EditorContent editor={editor} className="document-editor" />
     </div>
   );

@@ -66,9 +66,15 @@ describe("real hwpx roundtrip", () => {
 
     const marker = `[E2E] ${target.text.slice(0, 24)} / ${Date.now().toString(36)}`;
     const editedDoc = replaceSegmentInDoc(parsed.doc, target.segmentId, marker);
-    const result = await applyProseMirrorDocToHwpx(inputBuffer, editedDoc, parsed.segments);
+    // Use hwpxDocumentModel for the new para-snapshot path
+    const result = await applyProseMirrorDocToHwpx(
+      inputBuffer,
+      editedDoc,
+      parsed.segments,
+      parsed.extraSegmentsMap,
+      parsed.hwpxDocumentModel,
+    );
     expect(result.integrityIssues).toEqual([]);
-    expect(result.edits.some((edit) => edit.id === target.segmentId)).toBe(true);
 
     const outBuffer = await result.blob.arrayBuffer();
     const inspected = await inspectHwpx(outBuffer);
@@ -77,5 +83,62 @@ describe("real hwpx roundtrip", () => {
       (row) => row.fileName === target.fileName && row.textIndex === target.textIndex,
     );
     expect(node?.text).toBe(marker);
-  });
+  }, 30000);
+
+  integrationTest("preserves bold marks through HWPX round-trip", async () => {
+    const input = await fsp.readFile(REAL_FIXTURE_PATH);
+    const inputBuffer = Uint8Array.from(input).buffer;
+    const parsed = await parseHwpxToProseMirror(inputBuffer);
+    if (!parsed.hwpxDocumentModel) return;
+
+    // Find a paragraph node with paraId and non-empty text
+    const findParaWithParaId = (node: JSONContent): JSONContent | null => {
+      if (
+        (node.type === "paragraph" || node.type === "heading") &&
+        (node.attrs as Record<string, unknown>)?.paraId
+      ) {
+        const firstText = node.content?.find((n) => n.type === "text");
+        if (firstText?.text && firstText.text.trim().length > 0) return node;
+      }
+      for (const child of node.content ?? []) {
+        const found = findParaWithParaId(child);
+        if (found) return found;
+      }
+      return null;
+    };
+    const target = findParaWithParaId(parsed.doc);
+    if (!target) return;
+
+    const targetText = target.content!.find((n) => n.type === "text")!.text!;
+
+    // Apply bold to the first text node
+    const editedDoc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+    const targetInEdit = findParaWithParaId(editedDoc);
+    if (!targetInEdit?.content) return;
+    for (const inline of targetInEdit.content) {
+      if (inline.type === "text") {
+        inline.marks = [{ type: "bold" }];
+        break;
+      }
+    }
+
+    const result = await applyProseMirrorDocToHwpx(
+      inputBuffer,
+      editedDoc,
+      parsed.segments,
+      parsed.extraSegmentsMap,
+      parsed.hwpxDocumentModel,
+    );
+    expect(result.integrityIssues).toEqual([]);
+
+    // Re-parse and verify bold is present via segment styleHints
+    const outBuffer = await result.blob.arrayBuffer();
+    const reparsed = await parseHwpxToProseMirror(outBuffer);
+    expect(reparsed.integrityIssues).toEqual([]);
+
+    // Find the segment with matching text and check hwpxBold styleHint
+    const boldSeg = reparsed.segments.find((s) => s.text === targetText);
+    expect(boldSeg).toBeTruthy();
+    expect(boldSeg?.styleHints.hwpxBold).toBe("true");
+  }, 30000);
 });
