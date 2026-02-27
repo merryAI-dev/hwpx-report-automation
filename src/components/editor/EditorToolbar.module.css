@@ -1,0 +1,129 @@
+/* HWP-like toolbar: dense, flat, desktop-app feel */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px;
+  padding: 3px 6px;
+  background: #f0f0f0;
+  border-bottom: 1px solid #c0c0c0;
+  border-top: 1px solid #c0c0c0;
+  min-height: 36px;
+  user-select: none;
+}
+
+/* Visual separator between groups */
+.sep {
+  width: 1px;
+  height: 22px;
+  background: #b8b8b8;
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+}
+
+/* Toolbar button */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 26px;
+  height: 26px;
+  padding: 0 5px;
+  border: 1px solid transparent;
+  border-radius: 3px;
+  background: transparent;
+  font-size: 12px;
+  font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+  color: #1a1a1a;
+  transition: background 0.08s, border-color 0.08s;
+}
+
+.btn:hover:not(:disabled) {
+  background: #d8e8f8;
+  border-color: #90b4d4;
+}
+
+.btn:active:not(:disabled) {
+  background: #c0d8f0;
+  border-color: #6090c0;
+}
+
+.btn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.btnActive {
+  background: #d0e4f8 !important;
+  border-color: #5590c8 !important;
+}
+
+/* Font family dropdown */
+.fontSelect {
+  height: 24px;
+  width: 120px;
+  font-size: 12px;
+  font-family: '맑은 고딕', 'Malgun Gothic', sans-serif;
+  border: 1px solid #b4b4b4;
+  border-radius: 2px;
+  background: #fff;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.fontSelect:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Font size dropdown */
+.sizeSelect {
+  height: 24px;
+  width: 52px;
+  font-size: 12px;
+  font-family: '맑은 고딕', 'Malgun Gothic', sans-serif;
+  border: 1px solid #b4b4b4;
+  border-radius: 2px;
+  background: #fff;
+  padding: 0 2px;
+  cursor: pointer;
+}
+
+.sizeSelect:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+/* Download link next to export button */
+.downloadLink {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 22px;
+  height: 26px;
+  font-size: 14px;
+  color: #0369a1;
+  text-decoration: none;
+  font-weight: 700;
+}
+
+.downloadLink:hover {
+  color: #0284c7;
+  text-decoration: underline;
+}
+
+/* Panel toggle buttons pushed to the right */
+.panelToggles {
+  display: flex;
+  align-items: center;
+  gap: 1px;
+  margin-left: auto;
+}

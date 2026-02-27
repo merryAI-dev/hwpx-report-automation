@@ -18,6 +18,7 @@ type DocumentEditorProps = {
   onSelectionChange: (payload: SelectionPayload) => void;
   onEditorReady: (editor: Editor | null) => void;
   onAiCommand?: () => void;
+  onDiffSegmentClick?: (segmentId: string) => void;
 };
 
 function resolveSelectedSegmentId(editor: Editor): string | null {
@@ -32,6 +33,7 @@ export function DocumentEditor({
   onSelectionChange,
   onEditorReady,
   onAiCommand,
+  onDiffSegmentClick,
 }: DocumentEditorProps) {
   const editor = useEditor({
     immediatelyRender: false,
@@ -69,7 +71,18 @@ export function DocumentEditor({
   }, [content, editor]);
 
   return (
-    <div className="document-editor-wrap">
+    <div
+      className="document-editor-wrap"
+      onClick={(e) => {
+        if (!onDiffSegmentClick) return;
+        const target = (e.target as HTMLElement).closest("[data-diff-segment]");
+        if (!target) return;
+        const segmentId = target.getAttribute("data-diff-segment");
+        if (segmentId) {
+          onDiffSegmentClick(segmentId);
+        }
+      }}
+    >
       <EditorContent editor={editor} className="document-editor" />
     </div>
   );

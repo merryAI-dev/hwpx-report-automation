@@ -333,6 +333,40 @@ async function makeTableFixtureHwpx(): Promise<ArrayBuffer> {
   return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
 }
 
+async function makeLetterSpacingFixtureHwpx(): Promise<ArrayBuffer> {
+  const zip = new JSZip();
+  zip.file("mimetype", "application/hwp+zip", { compression: "STORE" });
+  zip.file("version.xml", `<?xml version="1.0" encoding="UTF-8"?><version app="test"/>`);
+  zip.file(
+    "Contents/content.hpf",
+    `<?xml version="1.0" encoding="UTF-8"?><opf:package xmlns:opf="http://www.idpf.org/2007/opf"></opf:package>`,
+  );
+  zip.file(
+    "Contents/header.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head">
+  <hh:refList>
+    <hh:charProperties itemCnt="2">
+      <hh:charPr id="1">
+        <hh:spacing hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/>
+      </hh:charPr>
+      <hh:charPr id="2">
+        <hh:spacing hangul="-5" latin="-5" hanja="-5" japanese="-5" other="-5" symbol="-5" user="-5"/>
+      </hh:charPr>
+    </hh:charProperties>
+  </hh:refList>
+</hh:head>`,
+  );
+  zip.file(
+    "Contents/section0.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hp:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">
+  <hp:p><hp:run charPrIDRef="1"><hp:t>자간 변경 테스트</hp:t></hp:run></hp:p>
+</hp:sec>`,
+  );
+  return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
+}
+
 describe("applyProseMirrorDocToHwpx table patch", () => {
   it("applies row/col/merge changes by patching table XML fragment", async () => {
     const input = await makeTableFixtureHwpx();
@@ -387,5 +421,56 @@ describe("applyProseMirrorDocToHwpx table patch", () => {
     expect(outXml).toContain("<hp:t>TOP</hp:t>");
     expect(outXml).toContain("<hp:t>C</hp:t>");
     expect(outXml).toContain("<hp:t>D</hp:t>");
+  });
+});
+
+describe("applyProseMirrorDocToHwpx letter spacing patch", () => {
+  it("creates/rewires charPr in header.xml and updates run charPrIDRef by textIndex", async () => {
+    const input = await makeLetterSpacingFixtureHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+    const doc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+    const paragraph = (doc.content || []).find((node) => node.type === "paragraph");
+    if (!paragraph) {
+      throw new Error("paragraph not found in fixture");
+    }
+    paragraph.attrs = {
+      ...(paragraph.attrs || {}),
+      letterSpacing: 12,
+    };
+
+    const result = await applyProseMirrorDocToHwpx(input, doc, parsed.segments, parsed.extraSegmentsMap);
+    expect(result.integrityIssues).toEqual([]);
+    expect(result.edits).toEqual([]);
+
+    const outBuffer = await result.blob.arrayBuffer();
+    const outZip = await JSZip.loadAsync(outBuffer);
+    const headerXml = await outZip.file("Contents/header.xml")!.async("string");
+    const sectionXml = await outZip.file("Contents/section0.xml")!.async("string");
+
+    const headerDoc = new DOMParser().parseFromString(headerXml, "application/xml");
+    const charProperties = Array.from(headerDoc.getElementsByTagName("*")).find(
+      (node) => node.localName === "charProperties",
+    );
+    expect(charProperties).toBeTruthy();
+    if (!charProperties) {
+      return;
+    }
+
+    const charPrNodes = Array.from(charProperties.children).filter((child) => child.localName === "charPr");
+    expect(charPrNodes.length).toBe(3);
+    expect(charProperties.getAttribute("itemCnt")).toBe("3");
+
+    const spacing12CharPr = charPrNodes.find((charPr) => {
+      const spacing = Array.from(charPr.children).find((child) => child.localName === "spacing");
+      return spacing?.getAttribute("hangul") === "12";
+    });
+    expect(spacing12CharPr).toBeTruthy();
+    if (!spacing12CharPr) {
+      return;
+    }
+
+    const newCharPrId = spacing12CharPr.getAttribute("id");
+    expect(newCharPrId).toBeTruthy();
+    expect(sectionXml).toContain(`charPrIDRef="${newCharPrId}"`);
   });
 });

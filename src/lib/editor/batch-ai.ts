@@ -8,6 +8,8 @@ export type BatchSuggestionInput = {
   id: string;
   text: string;
   styleHints: Record<string, string>;
+  prevText?: string;
+  nextText?: string;
 };
 
 export type BatchSuggestionResult = {
@@ -106,16 +108,20 @@ export function collectSectionBatchItems(
     }
   }
 
-  return segments
-    .filter((segment) => targetSectionId === null || segment.sectionId === targetSectionId)
-    .map((segment) => ({
-      id: segment.segmentId,
-      text: segment.text,
-      styleHints: {
-        sectionTitle: segment.sectionTitle,
-        nodeType: segment.nodeType,
-      },
-    }));
+  const filtered = segments.filter(
+    (segment) => targetSectionId === null || segment.sectionId === targetSectionId,
+  );
+
+  return filtered.map((segment, index) => ({
+    id: segment.segmentId,
+    text: segment.text,
+    styleHints: {
+      sectionTitle: segment.sectionTitle,
+      nodeType: segment.nodeType,
+    },
+    prevText: index > 0 ? filtered[index - 1].text : undefined,
+    nextText: index < filtered.length - 1 ? filtered[index + 1].text : undefined,
+  }));
 }
 
 export function buildBatchApplyPlan(

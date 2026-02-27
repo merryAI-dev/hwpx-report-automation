@@ -1,23 +1,36 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import type { Editor } from "@tiptap/core";
+import { useEffect, useMemo, useRef, useState } from "react";
+import type { Editor, JSONContent } from "@tiptap/core";
 import { Fragment, type Node as PMNode } from "@tiptap/pm/model";
+import { useCallback } from "react";
 import { DocumentEditor } from "@/components/editor/DocumentEditor";
 import { EditorToolbar } from "@/components/editor/EditorToolbar";
-import { FileUpload } from "@/components/common/FileUpload";
-import { DownloadButton } from "@/components/common/DownloadButton";
+import { EditorLayout } from "@/components/editor/EditorLayout";
+import { EditorRuler } from "@/components/editor/EditorRuler";
 import { StatusBar } from "@/components/common/StatusBar";
 import { Sidebar } from "@/components/sidebar/Sidebar";
 import { DocumentOutline } from "@/components/sidebar/DocumentOutline";
 import { AiSuggestionPanel } from "@/components/sidebar/AiSuggestionPanel";
+import { ChatPanel } from "@/components/sidebar/ChatPanel";
 import { EditHistoryPanel } from "@/components/sidebar/EditHistoryPanel";
+import { DocumentAnalysisPanel } from "@/components/sidebar/DocumentAnalysisPanel";
+import { streamChat } from "@/lib/chat/chat-stream";
+import type { ChatMessageAPI, DocumentContext, EditPreview, ToolCallInfo } from "@/types/chat";
 import { buildBatchApplyPlan, collectSectionBatchItems } from "@/lib/editor/batch-ai";
 import { buildDirtySummary, buildOutlineFromDoc } from "@/lib/editor/document-store";
 import { parseHwpxToProseMirror } from "@/lib/editor/hwpx-to-prosemirror";
+import { parseDocxToProseMirror } from "@/lib/editor/docx-to-prosemirror";
+import { parsePptxToProseMirror } from "@/lib/editor/pptx-to-prosemirror";
 import { applyProseMirrorDocToHwpx, collectDocumentEdits } from "@/lib/editor/prosemirror-to-hwpx";
+import { exportToPdf } from "@/lib/editor/export-pdf";
+import { exportToDocx } from "@/lib/editor/export-docx";
+import { triggerDiffHighlightUpdate } from "@/lib/editor/diff-highlight-extension";
+import type { DiffHighlightSuggestion } from "@/lib/editor/diff-highlight-extension";
+import { INSTRUCTION_PRESETS } from "@/lib/editor/ai-presets";
+import type { PresetKey } from "@/lib/editor/ai-presets";
 import { useDocumentStore } from "@/store/document-store";
-import type { RenderElementInfo } from "@/store/document-store";
+import type { RenderElementInfo, SidebarTab } from "@/store/document-store";
 import styles from "./page.module.css";
 
 function replaceSegmentText(editor: Editor, segmentId: string, nextText: string): boolean {
@@ -121,6 +134,62 @@ function applyBatchSegmentTexts(editor: Editor, updates: SegmentTextUpdate[]): n
   return ranges.length;
 }
 
+function extractNodeText(node: JSONContent): string {
+  if (node.type === "text") {
+    return node.text || "";
+  }
+  if (node.type === "hardBreak") {
+    return "\n";
+  }
+  if (!node.content?.length) {
+    return "";
+  }
+  return node.content.map((child) => extractNodeText(child)).join("");
+}
+
+function escapeRegExp(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function applySearchReplace(
+  text: string,
+  search: string,
+  replace: string,
+  caseSensitive: boolean,
+): { nextText: string; replacements: number } {
+  if (!search) {
+    return { nextText: text, replacements: 0 };
+  }
+
+  if (caseSensitive) {
+    let index = 0;
+    let replacements = 0;
+    while (true) {
+      const found = text.indexOf(search, index);
+      if (found === -1) {
+        break;
+      }
+      replacements += 1;
+      index = found + search.length;
+    }
+    if (!replacements) {
+      return { nextText: text, replacements: 0 };
+    }
+    return {
+      nextText: text.split(search).join(replace),
+      replacements,
+    };
+  }
+
+  const re = new RegExp(escapeRegExp(search), "gi");
+  let replacements = 0;
+  const nextText = text.replace(re, () => {
+    replacements += 1;
+    return replace;
+  });
+  return { nextText, replacements };
+}
+
 type JavaRenderPayload = {
   html?: string;
   elementMap?: Record<string, RenderElementInfo>;
@@ -156,6 +225,26 @@ export default function Home() {
     renderHtml,
     renderElementMap,
 
+    // Phase 2-1: Accept/Reject
+    batchDecisions,
+    // Phase 2-3: Presets
+    selectedPreset,
+    // Phase 2-4: Document Intelligence
+    documentAnalysis,
+    analysisLoading,
+    // Phase 2-5: Terminology
+    terminologyDict,
+    // Phase 2-6: Verification
+    verificationResult,
+    verificationLoading,
+    // Batch mode
+    batchMode,
+
+    // Chat agent
+    chatMessages,
+    chatBusy,
+    pendingToolCall,
+
     setLoadedDocument,
     setEditorDoc,
     setOutline,
@@ -174,6 +263,33 @@ export default function Home() {
     setDownload,
     setRenderResult,
     pushHistory,
+
+    // Phase 2-1
+    setBatchDecision,
+    clearBatchDecisions,
+    // Phase 2-3
+    setSelectedPreset,
+    // Phase 2-4
+    setDocumentAnalysis,
+    setAnalysisLoading,
+    // Phase 2-5
+    updateTerminologyEntry,
+    removeTerminologyEntry,
+    // Phase 2-6
+    setVerificationResult,
+    setVerificationLoading,
+    // Batch mode
+    setBatchMode,
+
+    // Chat agent
+    addChatMessage,
+    updateLastAssistantMessage,
+    finalizeLastAssistantMessage,
+    setChatBusy,
+    setPendingToolCall,
+    clearChat,
+    appendToolCallToLastMessage,
+    appendToolResultToLastMessage,
   } = useDocumentStore();
 
   const downloadUrl = useMemo(() => {
@@ -185,8 +301,8 @@ export default function Home() {
 
   const dirtySummary = useMemo(() => buildDirtySummary(editsPreview), [editsPreview]);
   const batchItems = useMemo(
-    () => collectSectionBatchItems(editorDoc, selection.selectedSegmentId),
-    [editorDoc, selection.selectedSegmentId],
+    () => collectSectionBatchItems(editorDoc, batchMode === "document" ? null : selection.selectedSegmentId),
+    [editorDoc, selection.selectedSegmentId, batchMode],
   );
   const batchPlan = useMemo(
     () => buildBatchApplyPlan(batchItems, batchSuggestions),
@@ -217,30 +333,67 @@ export default function Home() {
     };
   }, [downloadUrl]);
 
+  /* ── Diff highlight sync: React → Editor ── */
+  useEffect(() => {
+    if (!editor) return;
+    const suggestions: DiffHighlightSuggestion[] = batchPlan
+      .filter((item) => item.changed)
+      .map((item) => ({
+        segmentId: item.id,
+        originalText: item.originalText,
+        suggestion: item.suggestion,
+        decision: batchDecisions[item.id],
+      }));
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (editor.storage as any).diffHighlight.suggestions = suggestions;
+    triggerDiffHighlightUpdate(editor);
+  }, [editor, batchPlan, batchDecisions]);
+
+  /* ── Sidebar tab toggle (from toolbar buttons) ── */
+  const handleSetSidebarTab = (tab: SidebarTab) => {
+    if (!sidebarCollapsed && activeSidebarTab === tab) {
+      toggleSidebar(); // same tab click → collapse
+    } else {
+      if (sidebarCollapsed) toggleSidebar();
+      setActiveSidebarTab(tab);
+    }
+  };
+
+  /* ── File I/O ── */
   const onPickFile = async (file: File) => {
     setBusy(true);
     setViewMode("editor");
-    setStatus("HWPX를 분석하고 WYSIWYG 문서로 변환 중입니다...");
+    const ext = file.name.toLowerCase().split(".").pop() || "";
+    const formatLabel = ext === "docx" ? "DOCX" : ext === "pptx" ? "PPTX" : "HWPX";
+    const isHwpx = ext === "hwpx";
+    setStatus(`${formatLabel}를 분석하고 변환 중입니다...`);
     try {
       const buffer = await file.arrayBuffer();
+      let parsePromise;
+      if (ext === "docx") parsePromise = parseDocxToProseMirror(buffer);
+      else if (ext === "pptx") parsePromise = parsePptxToProseMirror(buffer);
+      else parsePromise = parseHwpxToProseMirror(buffer);
+
       const [parsed] = await Promise.all([
-        parseHwpxToProseMirror(buffer),
-        // Fire Java rendering request concurrently; ignore errors (server may not be running)
-        (async () => {
-          try {
-            const fd = new FormData();
-            fd.append("file", file);
-            const resp = await fetch("/api/hwpx-render", { method: "POST", body: fd });
-            if (resp.ok) {
-              const payload = (await resp.json()) as JavaRenderPayload;
-              if (payload.html && payload.elementMap) {
-                setRenderResult(payload.html, payload.elementMap);
+        parsePromise,
+        // Fire Java rendering request concurrently (HWPX only)
+        !isHwpx
+          ? Promise.resolve()
+          : (async () => {
+              try {
+                const fd = new FormData();
+                fd.append("file", file);
+                const resp = await fetch("/api/hwpx-render", { method: "POST", body: fd });
+                if (resp.ok) {
+                  const payload = (await resp.json()) as JavaRenderPayload;
+                  if (payload.html && payload.elementMap) {
+                    setRenderResult(payload.html, payload.elementMap);
+                  }
+                }
+              } catch {
+                // Java server not running
               }
-            }
-          } catch {
-            // Java server not running – preview will show a placeholder
-          }
-        })(),
+            })(),
       ]);
       setLoadedDocument({
         fileName: file.name,
@@ -253,15 +406,58 @@ export default function Home() {
       setOutline(buildOutlineFromDoc(parsed.doc));
       setStatus(
         parsed.integrityIssues.length
-          ? `로드 완료: 세그먼트 ${parsed.segments.length}개 (무결성 경고 ${parsed.integrityIssues.length}개)`
+          ? `로드 완료: 세그먼트 ${parsed.segments.length}개 (경고 ${parsed.integrityIssues.length}개)`
           : `로드 완료: 세그먼트 ${parsed.segments.length}개`,
       );
+
+      // Phase 2-4: Auto-analyze document on upload
+      fireDocumentAnalysis(parsed.segments);
     } catch (error) {
       const message = error instanceof Error ? error.message : "문서 로드 실패";
       setStatus(message);
     } finally {
       setBusy(false);
     }
+  };
+
+  /* ── Phase 2-4: Document Analysis ── */
+  const fireDocumentAnalysis = (segments: Array<{ segmentId: string; text: string }>) => {
+    setAnalysisLoading(true);
+    const items = segments
+      .filter((s) => s.text.trim())
+      .slice(0, 100)
+      .map((s) => ({
+        id: s.segmentId,
+        text: s.text.slice(0, 200),
+      }));
+    if (!items.length) {
+      setAnalysisLoading(false);
+      return;
+    }
+    fetch("/api/analyze-document", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ segments: items }),
+    })
+      .then(async (resp) => {
+        if (!resp.ok) return;
+        const data = await resp.json();
+        setDocumentAnalysis(data);
+        // Auto-select preset if suggested
+        if (data.suggestedPreset) {
+          const preset = INSTRUCTION_PRESETS.find((p) => p.key === data.suggestedPreset);
+          if (preset) {
+            setSelectedPreset(preset.key);
+            if (preset.instruction) {
+              setInstruction(preset.instruction);
+            }
+          }
+        }
+      })
+      .catch(() => {
+        // Analysis is optional
+      })
+      .finally(() => setAnalysisLoading(false));
   };
 
   const onEditorUpdateDoc = (doc: Parameters<typeof setEditorDoc>[0]) => {
@@ -280,6 +476,7 @@ export default function Home() {
     }
     setAiBusy(true);
     setActiveSidebarTab("ai");
+    setVerificationResult(null);
     setStatus("AI 제안을 생성 중입니다...");
     try {
       const response = await fetch("/api/suggest", {
@@ -329,9 +526,15 @@ export default function Home() {
     setStatus(replaced ? "문단 전체에 AI 제안을 적용했습니다." : "대상 문단을 찾지 못했습니다.");
   };
 
+  const isHwpxFile = fileName.toLowerCase().endsWith(".hwpx");
+
   const onExport = async () => {
     if (!sourceBuffer || !editorDoc) {
-      setStatus("먼저 HWPX 파일을 업로드하세요.");
+      setStatus("먼저 문서 파일을 업로드하세요.");
+      return;
+    }
+    if (!isHwpxFile) {
+      setStatus("DOCX 파일은 아직 HWPX 내보내기만 지원합니다. PDF/DOCX 내보내기는 곧 지원 예정입니다.");
       return;
     }
     setBusy(true);
@@ -360,6 +563,21 @@ export default function Home() {
     }
   };
 
+  /* ── Ctrl+S 저장 단축키 ── */
+  const onExportRef = useRef(onExport);
+  onExportRef.current = onExport;
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if ((e.ctrlKey || e.metaKey) && e.key === "s") {
+        e.preventDefault();
+        onExportRef.current();
+      }
+    };
+    window.addEventListener("keydown", handler);
+    return () => window.removeEventListener("keydown", handler);
+  }, []);
+
   const onSelectOutlineSegment = (segmentId: string) => {
     if (!editor) {
       setStatus("에디터가 아직 준비되지 않았습니다.");
@@ -373,6 +591,7 @@ export default function Home() {
     setStatus("개요에서 문단으로 이동했습니다.");
   };
 
+  /* ── Phase 2-7: Progressive batch suggestions ── */
   const onGenerateBatchSuggestions = async () => {
     if (!editorDoc) {
       setStatus("먼저 HWPX 파일을 업로드하세요.");
@@ -385,42 +604,46 @@ export default function Home() {
 
     setAiBusy(true);
     setActiveSidebarTab("ai");
+    clearBatchDecisions();
+    setBatchSuggestions([]);
+
     const chunks: Array<typeof batchItems> = [];
     for (let index = 0; index < batchItems.length; index += BATCH_API_CHUNK_SIZE) {
       chunks.push(batchItems.slice(index, index + BATCH_API_CHUNK_SIZE));
     }
-    setStatus(`AI 섹션 일괄 제안을 생성 중입니다... (${batchItems.length}개 / ${chunks.length}회 요청)`);
+
+    let accumulated: Array<{ id: string; suggestion: string }> = [];
+
     try {
-      const responses = await Promise.all(
-        chunks.map(async (chunk) => {
-          const response = await fetch("/api/suggest-batch", {
-            method: "POST",
-            headers: { "Content-Type": "application/json" },
-            body: JSON.stringify({
-              items: chunk,
-              instruction,
-              model: undefined,
-            }),
-          });
-          const payload = (await response.json()) as {
-            results?: Array<{ id?: string; suggestion?: string }>;
-            error?: string;
-          };
-          if (!response.ok) {
-            throw new Error(payload.error || "AI 일괄 제안 생성 실패");
-          }
-          return payload.results || [];
-        }),
-      );
-      const next = responses
-        .flat()
-        .map((row) => ({
-          id: String(row.id || "").trim(),
-          suggestion: String(row.suggestion || "").trim(),
-        }))
-        .filter((row) => row.id && row.suggestion);
-      setBatchSuggestions(next);
-      const nextPlan = buildBatchApplyPlan(batchItems, next);
+      for (let ci = 0; ci < chunks.length; ci++) {
+        setStatus(`AI 생성 중... (${ci + 1}/${chunks.length})`);
+        const chunk = chunks[ci];
+        const response = await fetch("/api/suggest-batch", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            items: chunk,
+            instruction,
+            model: undefined,
+          }),
+        });
+        const payload = (await response.json()) as {
+          results?: Array<{ id?: string; suggestion?: string }>;
+          error?: string;
+        };
+        if (!response.ok) {
+          throw new Error(payload.error || "AI 일괄 제안 생성 실패");
+        }
+        const chunkResults = (payload.results || [])
+          .map((row) => ({
+            id: String(row.id || "").trim(),
+            suggestion: String(row.suggestion || "").trim(),
+          }))
+          .filter((row) => row.id && row.suggestion);
+        accumulated = [...accumulated, ...chunkResults];
+        setBatchSuggestions([...accumulated]); // progressive UI update
+      }
+      const nextPlan = buildBatchApplyPlan(batchItems, accumulated);
       const changedCount = nextPlan.filter((row) => row.changed).length;
       setStatus(`AI 섹션 일괄 제안 완료: 대상 ${nextPlan.length}개 중 변경 ${changedCount}개`);
     } catch (error) {
@@ -453,38 +676,637 @@ export default function Home() {
       return;
     }
     setBatchSuggestions([]);
+    clearBatchDecisions();
     pushHistory(`AI 섹션 일괄 적용 (${appliedCount}건)`, appliedCount);
     setStatus(`AI 섹션 일괄 적용 완료: ${appliedCount}건`);
   };
 
+  /* ── Phase 2-1: Apply only accepted batch suggestions ── */
+  const onApplySelectedBatchSuggestions = () => {
+    if (!editor) {
+      setStatus("에디터가 아직 준비되지 않았습니다.");
+      return;
+    }
+    const acceptedIds = new Set(
+      Object.entries(batchDecisions)
+        .filter(([, decision]) => decision === "accepted")
+        .map(([id]) => id),
+    );
+    if (!acceptedIds.size) {
+      setStatus("수락된 항목이 없습니다.");
+      return;
+    }
+    const plan = buildBatchApplyPlan(batchItems, batchSuggestions)
+      .filter((item) => item.changed && acceptedIds.has(item.id));
+    const appliedCount = applyBatchSegmentTexts(
+      editor,
+      plan.map((item) => ({
+        segmentId: item.id,
+        text: item.suggestion,
+      })),
+    );
+    if (!appliedCount) {
+      setStatus("적용 가능한 변경이 없습니다.");
+      return;
+    }
+    setBatchSuggestions([]);
+    clearBatchDecisions();
+    pushHistory(`AI 선택 적용 (${appliedCount}건)`, appliedCount);
+    setStatus(`AI 선택 적용 완료: ${appliedCount}건`);
+  };
+
+  /* ── Phase 2-6: Verify AI suggestion ── */
+  const onVerifySuggestion = async () => {
+    const text = selection.selectedText.trim();
+    if (!text || !aiSuggestion.trim()) {
+      setStatus("검증할 원문과 AI 제안이 필요합니다.");
+      return;
+    }
+    setVerificationLoading(true);
+    setVerificationResult(null);
+    try {
+      const resp = await fetch("/api/verify", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          originalText: text,
+          modifiedText: aiSuggestion,
+          instruction,
+        }),
+      });
+      const data = await resp.json();
+      if (!resp.ok) {
+        throw new Error(data.error || "검증 실패");
+      }
+      setVerificationResult(data);
+      setStatus(data.passed ? "검증 통과" : `검증 이슈 ${data.issues?.length || 0}건`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "검증 실패";
+      setStatus(message);
+    } finally {
+      setVerificationLoading(false);
+    }
+  };
+
+  /* ── Phase 2-5: Apply terminology replacements ── */
+  const onApplyTerminology = () => {
+    if (!editor) {
+      setStatus("에디터가 아직 준비되지 않았습니다.");
+      return;
+    }
+    const entries = Object.entries(terminologyDict);
+    if (!entries.length) {
+      setStatus("용어 사전이 비어 있습니다.");
+      return;
+    }
+
+    let totalReplaced = 0;
+    let tr = editor.state.tr;
+    editor.state.doc.descendants((node, pos) => {
+      if (!node.isText || !node.text) return true;
+      let text = node.text;
+      let modified = false;
+      for (const [variant, canonical] of entries) {
+        if (text.includes(variant)) {
+          text = text.split(variant).join(canonical);
+          modified = true;
+        }
+      }
+      if (modified) {
+        const from = pos;
+        const to = pos + node.nodeSize;
+        tr = tr.replaceWith(from, to, editor.schema.text(text, node.marks));
+        totalReplaced++;
+      }
+      return true;
+    });
+    if (tr.docChanged) {
+      editor.view.dispatch(tr.scrollIntoView());
+      pushHistory(`용어 일괄 치환 (${totalReplaced}건)`, totalReplaced);
+      setStatus(`용어 일괄 치환 완료: ${totalReplaced}건`);
+    } else {
+      setStatus("치환할 용어가 문서에 없습니다.");
+    }
+  };
+
+  /* ── Phase 2-3: Preset selection ── */
+  const onSelectPreset = (key: PresetKey) => {
+    setSelectedPreset(key);
+    const preset = INSTRUCTION_PRESETS.find((p) => p.key === key);
+    if (preset && preset.instruction) {
+      setInstruction(preset.instruction);
+    }
+  };
+
+  /* ── Chat agent: build DocumentContext for API ── */
+  const buildDocumentContext = useCallback((): DocumentContext => {
+    const liveDoc = (editor?.getJSON() as JSONContent | undefined) || editorDoc;
+    if (!liveDoc) {
+      return {
+        segments: sourceSegments.map((s) => ({
+          segmentId: s.segmentId,
+          text: s.text,
+          tag: s.tag === "t" ? "p" : s.tag,
+          styleHints: s.styleHints,
+        })),
+        fileName,
+      };
+    }
+
+    const sourceBySegmentId = new Map(sourceSegments.map((s) => [s.segmentId, s]));
+    const segments: DocumentContext["segments"] = [];
+
+    const walk = (node: JSONContent): void => {
+      if (node.type === "paragraph" || node.type === "heading") {
+        const attrs = (node.attrs || {}) as { segmentId?: string; level?: number };
+        if (attrs.segmentId) {
+          const source = sourceBySegmentId.get(attrs.segmentId);
+          const headingLevel = Number(attrs.level || 2);
+          const tag =
+            node.type === "heading"
+              ? `h${Math.max(1, Math.min(6, Number.isFinite(headingLevel) ? headingLevel : 2))}`
+              : "p";
+          segments.push({
+            segmentId: attrs.segmentId,
+            text: extractNodeText(node),
+            tag,
+            styleHints: source?.styleHints || {},
+          });
+        }
+      }
+      for (const child of node.content || []) {
+        walk(child);
+      }
+    };
+
+    walk(liveDoc);
+
+    return {
+      segments,
+      fileName,
+    };
+  }, [editor, editorDoc, sourceSegments, fileName]);
+
+  /* ── Chat agent: build EditPreview from a write tool call ── */
+  const buildEditPreview = useCallback(
+    (toolCall: ToolCallInfo): EditPreview => {
+      const input = toolCall.input;
+      const contextBySegmentId = new Map(
+        buildDocumentContext().segments.map((segment) => [segment.segmentId, segment]),
+      );
+      if (toolCall.name === "edit_segment") {
+        const seg = contextBySegmentId.get(String(input.segmentId));
+        return {
+          edits: [
+            {
+              segmentId: input.segmentId as string,
+              before: seg?.text || "",
+              after: input.newText as string,
+            },
+          ],
+          summary: "1개 문단 수정",
+        };
+      }
+      if (toolCall.name === "edit_segments") {
+        const edits = (input.edits as Array<{ segmentId: string; newText: string }>).map((e) => {
+          const seg = contextBySegmentId.get(e.segmentId);
+          return { segmentId: e.segmentId, before: seg?.text || "", after: e.newText };
+        });
+        return { edits, summary: `${edits.length}개 문단 수정` };
+      }
+      if (toolCall.name === "search_replace") {
+        const search = input.search as string;
+        const replace = input.replace as string;
+        const caseSensitive = input.caseSensitive === undefined ? true : Boolean(input.caseSensitive);
+        const affected = Array.from(contextBySegmentId.values())
+          .map((segment) => {
+            const replaced = applySearchReplace(segment.text, search, replace, caseSensitive);
+            if (!replaced.replacements) {
+              return null;
+            }
+            return {
+              segmentId: segment.segmentId,
+              before: segment.text,
+              after: replaced.nextText,
+            };
+          })
+          .filter((row): row is { segmentId: string; before: string; after: string } => !!row);
+        return {
+          edits: affected,
+          summary: `"${search}" → "${replace}" (${affected.length}건)`,
+        };
+      }
+      return { edits: [], summary: "" };
+    },
+    [buildDocumentContext],
+  );
+
+  /* ── Chat agent: convert UI messages to API format ── */
+  const buildApiMessages = useCallback((): ChatMessageAPI[] => {
+    const apiMessages: ChatMessageAPI[] = [];
+
+    for (const message of chatMessages) {
+      if (message.role === "user") {
+        if (message.content.trim()) {
+          apiMessages.push({
+            role: "user",
+            content: message.content,
+          });
+        }
+        continue;
+      }
+
+      const assistantBlocks: Array<{
+        type: "text";
+        text: string;
+      } | {
+        type: "tool_use";
+        id: string;
+        name: string;
+        input: Record<string, unknown>;
+      }> = [];
+
+      if (message.content.trim()) {
+        assistantBlocks.push({ type: "text", text: message.content });
+      }
+      for (const toolCall of message.toolCalls || []) {
+        assistantBlocks.push({
+          type: "tool_use",
+          id: toolCall.id,
+          name: toolCall.name,
+          input: toolCall.input,
+        });
+      }
+
+      if (assistantBlocks.length === 1 && assistantBlocks[0].type === "text") {
+        apiMessages.push({
+          role: "assistant",
+          content: message.content,
+        });
+      } else if (assistantBlocks.length > 1 || message.toolCalls?.length) {
+        apiMessages.push({
+          role: "assistant",
+          content: assistantBlocks,
+        });
+      }
+
+      if (message.toolResults?.length) {
+        apiMessages.push({
+          role: "user",
+          content: message.toolResults.map((toolResult) => ({
+            type: "tool_result" as const,
+            tool_use_id: toolResult.toolCallId,
+            content:
+              typeof toolResult.result === "string"
+                ? toolResult.result
+                : JSON.stringify(toolResult.result),
+          })),
+        });
+      }
+    }
+
+    return apiMessages;
+  }, [chatMessages]);
+
+  /* ── Chat agent: send message ── */
+  const onSendChatMessage = useCallback(
+    async (text: string) => {
+      const userMsgId = `user-${Date.now()}`;
+      addChatMessage({
+        id: userMsgId,
+        role: "user",
+        content: text,
+        timestamp: Date.now(),
+      });
+
+      setChatBusy(true);
+
+      const assistantMsgId = `assistant-${Date.now()}`;
+      addChatMessage({
+        id: assistantMsgId,
+        role: "assistant",
+        content: "",
+        timestamp: Date.now(),
+        isStreaming: true,
+      });
+
+      const apiMessages = buildApiMessages();
+      apiMessages.push({ role: "user", content: text });
+
+      try {
+        await streamChat(
+          {
+            messages: apiMessages,
+            documentContext: buildDocumentContext(),
+          },
+          {
+            onTextDelta: (delta) => {
+              updateLastAssistantMessage((prev) => prev + delta);
+            },
+            onToolCall: (tc) => {
+              appendToolCallToLastMessage(tc);
+            },
+            onToolResult: (tr) => {
+              appendToolResultToLastMessage(tr);
+            },
+            onToolPending: (tc) => {
+              const preview = buildEditPreview(tc);
+              setPendingToolCall({ toolCall: tc, preview });
+            },
+            onDone: () => {
+              finalizeLastAssistantMessage();
+              setChatBusy(false);
+            },
+            onError: (msg) => {
+              updateLastAssistantMessage((prev) =>
+                prev + (prev ? "\n" : "") + `오류: ${msg}`,
+              );
+              finalizeLastAssistantMessage();
+              setChatBusy(false);
+            },
+          },
+        );
+      } catch (err) {
+        const message = err instanceof Error ? err.message : "채팅 오류";
+        updateLastAssistantMessage((prev) =>
+          prev + (prev ? "\n" : "") + `오류: ${message}`,
+        );
+        finalizeLastAssistantMessage();
+        setChatBusy(false);
+      }
+    },
+    [
+      addChatMessage,
+      setChatBusy,
+      updateLastAssistantMessage,
+      finalizeLastAssistantMessage,
+      appendToolCallToLastMessage,
+      appendToolResultToLastMessage,
+      setPendingToolCall,
+      buildApiMessages,
+      buildDocumentContext,
+      buildEditPreview,
+    ],
+  );
+
+  /* ── Chat agent: approve pending tool ── */
+  const onApproveToolCall = useCallback(() => {
+    if (!pendingToolCall || !editor) return;
+    const { toolCall } = pendingToolCall;
+    let resultMsg = "적용 완료";
+
+    if (toolCall.name === "edit_segment") {
+      const ok = replaceSegmentText(
+        editor,
+        toolCall.input.segmentId as string,
+        toolCall.input.newText as string,
+      );
+      resultMsg = ok ? "1개 문단 수정 완료" : "대상 문단을 찾지 못했습니다";
+    } else if (toolCall.name === "edit_segments") {
+      const edits = toolCall.input.edits as Array<{ segmentId: string; newText: string }>;
+      const count = applyBatchSegmentTexts(
+        editor,
+        edits.map((e) => ({ segmentId: e.segmentId, text: e.newText })),
+      );
+      resultMsg = `${count}개 문단 수정 완료`;
+      pushHistory(`AI 채팅 일괄 수정 (${count}건)`, count);
+    } else if (toolCall.name === "search_replace") {
+      const search = toolCall.input.search as string;
+      const replace = toolCall.input.replace as string;
+      const caseSensitive =
+        toolCall.input.caseSensitive === undefined
+          ? true
+          : Boolean(toolCall.input.caseSensitive);
+      let totalMatched = 0;
+      let totalReplacedSegments = 0;
+      const replacements: Array<{
+        from: number;
+        to: number;
+        text: string;
+        marks: PMNode["marks"];
+      }> = [];
+
+      editor.state.doc.descendants((node, pos) => {
+        if (!node.isText || !node.text) return true;
+        const replaced = applySearchReplace(node.text, search, replace, caseSensitive);
+        if (replaced.replacements > 0) {
+          replacements.push({
+            from: pos,
+            to: pos + node.nodeSize,
+            text: replaced.nextText,
+            marks: node.marks,
+          });
+          totalMatched += replaced.replacements;
+          totalReplacedSegments += 1;
+        }
+        return true;
+      });
+
+      let tr = editor.state.tr;
+      replacements.sort((a, b) => b.from - a.from);
+      for (const replacement of replacements) {
+        tr = tr.replaceWith(
+          replacement.from,
+          replacement.to,
+          editor.schema.text(replacement.text, replacement.marks),
+        );
+      }
+
+      if (tr.docChanged) {
+        editor.view.dispatch(tr.scrollIntoView());
+      }
+      resultMsg = `${totalReplacedSegments}개 세그먼트 치환 완료 (${totalMatched}회 일치)`;
+      pushHistory(`AI 채팅 찾아바꾸기 (${totalReplacedSegments}건)`, totalReplacedSegments);
+    }
+
+    setPendingToolCall(null);
+
+    // Continue the conversation with the tool result
+    const continuationMessages = buildApiMessages();
+
+    addChatMessage({
+      id: `assistant-continue-${Date.now()}`,
+      role: "assistant",
+      content: "",
+      timestamp: Date.now(),
+      isStreaming: true,
+    });
+
+    setChatBusy(true);
+
+    streamChat(
+      {
+        messages: continuationMessages,
+        documentContext: buildDocumentContext(),
+        approvedToolCall: {
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          result: resultMsg,
+        },
+      },
+      {
+        onTextDelta: (delta) => {
+          updateLastAssistantMessage((prev) => prev + delta);
+        },
+        onToolCall: (tc) => {
+          appendToolCallToLastMessage(tc);
+        },
+        onToolResult: (tr) => {
+          appendToolResultToLastMessage(tr);
+        },
+        onToolPending: (tc) => {
+          const preview = buildEditPreview(tc);
+          setPendingToolCall({ toolCall: tc, preview });
+        },
+        onDone: () => {
+          finalizeLastAssistantMessage();
+          setChatBusy(false);
+        },
+        onError: (msg) => {
+          updateLastAssistantMessage((prev) =>
+            prev + (prev ? "\n" : "") + `오류: ${msg}`,
+          );
+          finalizeLastAssistantMessage();
+          setChatBusy(false);
+        },
+      },
+    ).catch(() => {
+      setChatBusy(false);
+    });
+  }, [
+    pendingToolCall,
+    editor,
+    setPendingToolCall,
+    setChatBusy,
+    addChatMessage,
+    updateLastAssistantMessage,
+    finalizeLastAssistantMessage,
+    appendToolCallToLastMessage,
+    appendToolResultToLastMessage,
+    buildApiMessages,
+    buildDocumentContext,
+    buildEditPreview,
+    pushHistory,
+  ]);
+
+  /* ── Chat agent: reject pending tool ── */
+  const onRejectToolCall = useCallback(() => {
+    if (!pendingToolCall) return;
+    const { toolCall } = pendingToolCall;
+    setPendingToolCall(null);
+
+    // Continue conversation telling the agent the tool was rejected
+    const continuationMessages = buildApiMessages();
+
+    addChatMessage({
+      id: `assistant-reject-${Date.now()}`,
+      role: "assistant",
+      content: "",
+      timestamp: Date.now(),
+      isStreaming: true,
+    });
+
+    setChatBusy(true);
+
+    streamChat(
+      {
+        messages: continuationMessages,
+        documentContext: buildDocumentContext(),
+        approvedToolCall: {
+          toolCallId: toolCall.id,
+          toolName: toolCall.name,
+          result: "사용자가 이 수정을 거부했습니다. 다른 방법을 제안하거나 사용자의 추가 지시를 기다려주세요.",
+        },
+      },
+      {
+        onTextDelta: (delta) => {
+          updateLastAssistantMessage((prev) => prev + delta);
+        },
+        onToolCall: (tc) => {
+          appendToolCallToLastMessage(tc);
+        },
+        onToolResult: (tr) => {
+          appendToolResultToLastMessage(tr);
+        },
+        onToolPending: (tc) => {
+          const preview = buildEditPreview(tc);
+          setPendingToolCall({ toolCall: tc, preview });
+        },
+        onDone: () => {
+          finalizeLastAssistantMessage();
+          setChatBusy(false);
+        },
+        onError: (msg) => {
+          updateLastAssistantMessage((prev) =>
+            prev + (prev ? "\n" : "") + `오류: ${msg}`,
+          );
+          finalizeLastAssistantMessage();
+          setChatBusy(false);
+        },
+      },
+    ).catch(() => {
+      setChatBusy(false);
+    });
+  }, [
+    pendingToolCall,
+    setPendingToolCall,
+    setChatBusy,
+    addChatMessage,
+    updateLastAssistantMessage,
+    finalizeLastAssistantMessage,
+    appendToolCallToLastMessage,
+    appendToolResultToLastMessage,
+    buildApiMessages,
+    buildDocumentContext,
+    buildEditPreview,
+  ]);
+
   return (
     <div className={styles.page}>
-      <header className={styles.header}>
-        <div>
-          <h1>HWPX Interactive WYSIWYG Editor</h1>
-          <p>한글 문서를 실제 문서처럼 보면서 편집하고, 손상 방지 검증 후 다시 HWPX로 저장합니다.</p>
-        </div>
-        <div className={styles.headerActions}>
-          <FileUpload disabled={isBusy} onPickFile={onPickFile} />
-          <DownloadButton
-            onGenerate={onExport}
-            disabled={isBusy || !editorDoc}
-            downloadUrl={downloadUrl}
-            downloadName={download.fileName}
-          />
-        </div>
-      </header>
-
+      {/* ── HWP-style 통합 툴바 ── */}
       <EditorToolbar
         editor={editor}
         sidebarCollapsed={sidebarCollapsed}
+        activeSidebarTab={activeSidebarTab}
+        disabled={isBusy}
+        hasDocument={!!editorDoc}
+        downloadUrl={downloadUrl}
+        downloadName={download.fileName}
         onToggleSidebar={toggleSidebar}
+        onSetSidebarTab={handleSetSidebarTab}
         onAiCommand={() => {
           setActiveSidebarTab("ai");
           void onGenerateSuggestion();
         }}
+        onPickFile={onPickFile}
+        onExport={onExport}
+        onExportPdf={() => {
+          const editorWrap = document.querySelector(".document-editor-wrap");
+          if (editorWrap) exportToPdf(editorWrap as HTMLElement, fileName || "document");
+          else setStatus("에디터를 찾을 수 없습니다.");
+        }}
+        onExportDocx={async () => {
+          if (!editorDoc) {
+            setStatus("먼저 문서를 업로드하세요.");
+            return;
+          }
+          setBusy(true);
+          setStatus("DOCX 파일을 생성하고 있습니다...");
+          try {
+            const result = await exportToDocx(editorDoc, fileName || "document");
+            setDownload({ blob: result.blob, fileName: result.fileName });
+            setStatus(`DOCX 내보내기 완료: ${result.fileName}`);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "DOCX 내보내기 실패";
+            setStatus(message);
+          } finally {
+            setBusy(false);
+          }
+        }}
+        onSave={onExport}
       />
 
+      {/* ── 경고 배너 ── */}
       {integrityIssues.length ? (
         <div className={styles.warning}>
           <strong>무결성 경고</strong>
@@ -493,7 +1315,6 @@ export default function Home() {
           ))}
         </div>
       ) : null}
-
       {exportWarnings.length ? (
         <div className={styles.warningSoft}>
           <strong>내보내기 주의</strong>
@@ -503,60 +1324,80 @@ export default function Home() {
         </div>
       ) : null}
 
+      {/* ── 메인: 에디터 캔버스 + 사이드바 ── */}
       <main className={styles.main}>
         <section className={styles.editorArea}>
-          {editorDoc ? (
-            <div className={styles.viewTabs}>
-              <button
-                className={`${styles.viewTabBtn} ${viewMode === "editor" ? styles.viewTabBtnActive : ""}`}
-                onClick={() => setViewMode("editor")}
-              >
-                편집
-              </button>
-              <button
-                className={`${styles.viewTabBtn} ${viewMode === "preview" ? styles.viewTabBtnActive : ""}`}
-                onClick={() => setViewMode("preview")}
-                disabled={!renderHtml}
-                title={renderHtml ? undefined : "Java 서버에 연결되지 않았습니다"}
-              >
-                미리보기
-              </button>
+          <div className={styles.editorCenter}>
+            {editorDoc ? (
+              <div className={styles.viewTabs}>
+                <button
+                  type="button"
+                  className={`${styles.viewTabBtn} ${viewMode === "editor" ? styles.viewTabBtnActive : ""}`}
+                  onClick={() => setViewMode("editor")}
+                >
+                  편집
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.viewTabBtn} ${viewMode === "preview" ? styles.viewTabBtnActive : ""}`}
+                  onClick={() => setViewMode("preview")}
+                  disabled={!renderHtml}
+                  title={renderHtml ? undefined : "Java 서버에 연결되지 않았습니다"}
+                >
+                  미리보기
+                </button>
+              </div>
+            ) : null}
+
+            <EditorRuler />
+
+            {/* 편집 탭 */}
+            <div style={{ display: viewMode === "editor" ? "block" : "none" }}>
+              <EditorLayout>
+                <DocumentEditor
+                  content={editorDoc}
+                  onUpdateDoc={onEditorUpdateDoc}
+                  onSelectionChange={setSelection}
+                  onEditorReady={setEditor}
+                  onAiCommand={() => {
+                    setActiveSidebarTab("ai");
+                    void onGenerateSuggestion();
+                  }}
+                  onDiffSegmentClick={(segmentId) => {
+                    if (sidebarCollapsed) toggleSidebar();
+                    setActiveSidebarTab("ai");
+                    setTimeout(() => {
+                      const el = document.querySelector(`[data-batch-diff-id="${segmentId}"]`);
+                      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }, 100);
+                  }}
+                />
+              </EditorLayout>
             </div>
-          ) : null}
-          <div style={{ display: viewMode === "editor" ? "block" : "none" }}>
-            <DocumentEditor
-              content={editorDoc}
-              onUpdateDoc={onEditorUpdateDoc}
-              onSelectionChange={setSelection}
-              onEditorReady={setEditor}
-              onAiCommand={() => {
-                setActiveSidebarTab("ai");
-                void onGenerateSuggestion();
-              }}
-            />
+
+            {/* 미리보기 탭 */}
+            {viewMode === "preview" && renderHtml ? (
+              <div
+                className={styles.previewPane}
+                // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted Java server output
+                dangerouslySetInnerHTML={{ __html: renderHtml }}
+                onClick={(e) => {
+                  const target = (e.target as HTMLElement).closest("[data-segment-id]");
+                  if (!target) return;
+                  const segmentId = target.getAttribute("data-segment-id");
+                  if (!segmentId) return;
+                  setViewMode("editor");
+                  setSelection({ selectedSegmentId: segmentId, selectedText: renderElementMap?.[segmentId]?.text ?? "" });
+                  if (editor) focusSegment(editor, segmentId);
+                }}
+              />
+            ) : null}
           </div>
-          {viewMode === "preview" && renderHtml ? (
-            <div
-              className={styles.previewPane}
-              // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted Java server output
-              dangerouslySetInnerHTML={{ __html: renderHtml }}
-              onClick={(e) => {
-                const target = (e.target as HTMLElement).closest("[data-segment-id]");
-                if (!target) return;
-                const segmentId = target.getAttribute("data-segment-id");
-                if (!segmentId) return;
-                setViewMode("editor");
-                setSelection({ selectedSegmentId: segmentId, selectedText: renderElementMap?.[segmentId]?.text ?? "" });
-                if (editor) focusSegment(editor, segmentId);
-              }}
-            />
-          ) : null}
         </section>
 
         <Sidebar
           collapsed={sidebarCollapsed}
           activeTab={activeSidebarTab}
-          onChangeTab={setActiveSidebarTab}
           outline={
             <DocumentOutline
               outline={outline}
@@ -578,12 +1419,47 @@ export default function Home() {
               onApplySuggestion={onApplySuggestion}
               onRequestBatchSuggestion={() => void onGenerateBatchSuggestions()}
               onApplyBatchSuggestion={onApplyBatchSuggestions}
+              batchDecisions={batchDecisions}
+              onSetBatchDecision={setBatchDecision}
+              onApplySelectedBatchSuggestion={onApplySelectedBatchSuggestions}
+              presets={INSTRUCTION_PRESETS}
+              selectedPreset={selectedPreset}
+              onSelectPreset={onSelectPreset}
+              verificationResult={verificationResult}
+              verificationLoading={verificationLoading}
+              onVerifySuggestion={() => void onVerifySuggestion()}
+              batchMode={batchMode}
+              onSetBatchMode={setBatchMode}
+            />
+          }
+          chat={
+            <ChatPanel
+              messages={chatMessages}
+              isBusy={chatBusy}
+              pendingToolCall={pendingToolCall}
+              hasDocument={!!editorDoc}
+              onSendMessage={(text) => void onSendChatMessage(text)}
+              onApproveTool={onApproveToolCall}
+              onRejectTool={onRejectToolCall}
+              onClearChat={clearChat}
+            />
+          }
+          analysis={
+            <DocumentAnalysisPanel
+              analysis={documentAnalysis}
+              isLoading={analysisLoading}
+              terminologyDict={terminologyDict}
+              onUpdateEntry={updateTerminologyEntry}
+              onRemoveEntry={removeTerminologyEntry}
+              onApplyTerminology={onApplyTerminology}
+              isBusy={isBusy}
             />
           }
           history={<EditHistoryPanel history={history} />}
         />
       </main>
 
+      {/* ── 하단 상태 표시줄 ── */}
       <StatusBar
         fileName={fileName}
         nodeCount={sourceSegments.length}

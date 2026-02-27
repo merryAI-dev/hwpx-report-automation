@@ -1,0 +1,41 @@
+/* HWP-style fixed-width right panel */
+.panel {
+  width: 280px;
+  flex-shrink: 0;
+  display: flex;
+  flex-direction: column;
+  background: #f8f8f8;
+  border-left: 1px solid #c0c0c0;
+  height: 100%;
+  overflow: hidden;
+}
+
+.panelTitleBar {
+  height: 28px;
+  background: #e8e8e8;
+  border-bottom: 1px solid #c0c0c0;
+  display: flex;
+  align-items: center;
+  padding: 0 10px;
+  font-size: 12px;
+  font-weight: 600;
+  color: #1a1a1a;
+  font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+  flex-shrink: 0;
+}
+
+.panelContent {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 10px;
+}
+
+.panelContentChat {
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+}

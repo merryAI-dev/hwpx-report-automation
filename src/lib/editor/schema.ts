@@ -1,5 +1,40 @@
 import { Extension } from "@tiptap/core";
 
+function parseLetterSpacingValue(raw: string | null): number | null {
+  if (!raw) {
+    return null;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function parseLetterSpacingFromStyle(style: string | null): number | null {
+  if (!style) {
+    return null;
+  }
+  const match = style.match(/letter-spacing\s*:\s*(-?\d+(?:\.\d+)?)em/i);
+  if (!match) {
+    return null;
+  }
+  const em = Number.parseFloat(match[1]);
+  if (!Number.isFinite(em)) {
+    return null;
+  }
+  return Math.round(em * 100);
+}
+
+function renderLetterSpacingAttributes(value: unknown): Record<string, string> {
+  const parsed = parseLetterSpacingValue(value === null || value === undefined ? null : String(value));
+  if (parsed === null) {
+    return {};
+  }
+  const em = (parsed / 100).toFixed(4);
+  return {
+    "data-letter-spacing": String(parsed),
+    style: `letter-spacing: ${em}em`,
+  };
+}
+
 export const HwpxMetadataExtension = Extension.create({
   name: "hwpxMetadata",
   addGlobalAttributes() {
@@ -49,6 +84,18 @@ export const HwpxMetadataExtension = Extension.create({
               }
               return { "data-original-text": String(attributes.originalText) };
             },
+          },
+          letterSpacing: {
+            default: null,
+            parseHTML: (element: HTMLElement) => {
+              const fromData = parseLetterSpacingValue(element.getAttribute("data-letter-spacing"));
+              if (fromData !== null) {
+                return fromData;
+              }
+              return parseLetterSpacingFromStyle(element.getAttribute("style"));
+            },
+            renderHTML: (attributes: Record<string, unknown>) =>
+              renderLetterSpacingAttributes(attributes.letterSpacing),
           },
         },
       },
@@ -187,6 +234,20 @@ export const HwpxMetadataExtension = Extension.create({
                 return {};
               }
               return { "data-source-colspan": String(attributes.sourceColspan) };
+            },
+          },
+          backgroundColor: {
+            default: null,
+            parseHTML: (element: HTMLElement) => element.getAttribute("data-bg-color"),
+            renderHTML: (attributes: Record<string, unknown>) => {
+              if (!attributes.backgroundColor) {
+                return {};
+              }
+              const color = String(attributes.backgroundColor);
+              return {
+                "data-bg-color": color,
+                style: `background-color: ${color};`,
+              };
             },
           },
         },

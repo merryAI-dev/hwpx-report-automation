@@ -21,6 +21,101 @@ export type ParsedProseMirrorDocument = {
 };
 
 const SECTION_FILE_RE = /^Contents\/section\d+\.xml$/;
+const HEADER_FILE = "Contents/header.xml";
+
+/**
+ * Parse Contents/header.xml and build a map from borderFill id → CSS background color.
+ * HWPX stores cell/paragraph fill info as <borderFill> elements in the header.
+ * The fill color is in <fillBrush><winBrush faceColor="#RRGGBB"/></fillBrush>.
+ */
+function extractBorderFillColors(doc: Document): Map<string, string> {
+  const map = new Map<string, string>();
+  const allElements = Array.from(doc.getElementsByTagName("*"));
+  for (const el of allElements) {
+    if (el.localName !== "borderFill") {
+      continue;
+    }
+    const id = el.getAttribute("id");
+    if (!id) {
+      continue;
+    }
+    // Navigate: borderFill → fillBrush → winBrush @faceColor
+    for (const child of Array.from(el.children)) {
+      if (child.localName !== "fillBrush") {
+        continue;
+      }
+      for (const grandchild of Array.from(child.children)) {
+        if (grandchild.localName !== "winBrush") {
+          continue;
+        }
+        const faceColor = grandchild.getAttribute("faceColor");
+        if (faceColor && faceColor !== "none" && faceColor !== "#FFFFFF" && faceColor !== "#ffffff") {
+          // Normalize: HWPX sometimes uses 8-digit #AARRGGBB; strip leading FF alpha
+          let color = faceColor;
+          if (/^#[0-9a-fA-F]{8}$/.test(color)) {
+            const alpha = Number.parseInt(color.slice(1, 3), 16);
+            if (alpha === 0) {
+              break; // fully transparent
+            }
+            color = `#${color.slice(3)}`;
+          }
+          map.set(id, color);
+        }
+      }
+    }
+  }
+  return map;
+}
+
+function readSignedIntAttr(element: Element, aliases: string[]): number | null {
+  const aliasSet = new Set(aliases.map((alias) => alias.toLowerCase()));
+  for (const attr of Array.from(element.attributes)) {
+    const normalizedName = attr.name.toLowerCase().replace(/^[^:]+:/, "");
+    if (!aliasSet.has(normalizedName)) {
+      continue;
+    }
+    const parsed = Number.parseInt(attr.value, 10);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  return null;
+}
+
+/**
+ * Parse Contents/header.xml and build a map from charPr id → spacing value.
+ * We use hangul spacing first; if missing, fall back to latin/other slots.
+ */
+function extractCharPrSpacingMap(doc: Document): Map<string, number> {
+  const map = new Map<string, number>();
+  const allElements = Array.from(doc.getElementsByTagName("*"));
+  for (const el of allElements) {
+    if (el.localName !== "charPr") {
+      continue;
+    }
+    const id = el.getAttribute("id");
+    if (!id) {
+      continue;
+    }
+
+    const spacing = Array.from(el.children).find((child) => child.localName === "spacing");
+    if (!spacing) {
+      map.set(id, 0);
+      continue;
+    }
+    const value =
+      readSignedIntAttr(spacing, ["hangul"]) ??
+      readSignedIntAttr(spacing, ["latin"]) ??
+      readSignedIntAttr(spacing, ["hanja"]) ??
+      readSignedIntAttr(spacing, ["japanese"]) ??
+      readSignedIntAttr(spacing, ["other"]) ??
+      readSignedIntAttr(spacing, ["symbol"]) ??
+      readSignedIntAttr(spacing, ["user"]) ??
+      0;
+    map.set(id, value);
+  }
+  return map;
+}
 
 function isHeadingLike(text: string): boolean {
   const trimmed = text.trim();
@@ -51,13 +146,60 @@ function readPositiveIntAttr(element: Element, aliases: string[]): number | null
   return null;
 }
 
+/**
+ * Read colspan or rowspan from a <hp:tc> element.
+ * Real HWPX files store span info in a <hp:cellSpan colSpan="N" rowSpan="M"/>
+ * child element. Synthetic test fixtures may use direct attributes on <hp:tc>.
+ * This function checks direct attributes first, then <hp:cellSpan> children.
+ */
+function readCellSpan(cell: Element, attrAliases: string[], cellSpanAttr: string): number {
+  // 1. Check direct attributes on <hp:tc> (used by synthetic test fixtures)
+  const direct = readPositiveIntAttr(cell, attrAliases);
+  if (direct !== null) {
+    return direct;
+  }
+  // 2. Check <hp:cellSpan> child element (used in real HWPX files)
+  for (const child of Array.from(cell.children)) {
+    if (child.localName === "cellSpan") {
+      // The child uses camelCase attribute names: colSpan / rowSpan
+      const val = Number.parseInt(child.getAttribute(cellSpanAttr) || "0", 10);
+      if (Number.isFinite(val) && val > 1) {
+        return val;
+      }
+    }
+  }
+  return 1;
+}
+
+/**
+ * Returns true if this <hp:tc> is a "dirty" covered cell that should be
+ * hidden — i.e., it is subsumed by a spanning cell elsewhere in the table.
+ * In OWPML format, covered cells carry dirty="1".
+ */
+function isCoveredCell(cell: Element): boolean {
+  return cell.getAttribute("dirty") === "1";
+}
+
+function readSegmentLetterSpacing(segment: EditorSegment): number | null {
+  const raw = segment.styleHints.hwpxCharSpacing;
+  if (raw === undefined) {
+    return null;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
 function toParagraphNode(segment: EditorSegment, asHeading: boolean): JSONContent {
-  const attrs = {
+  const letterSpacing = readSegmentLetterSpacing(segment);
+  const attrs: Record<string, string | number> = {
     segmentId: segment.segmentId,
     fileName: segment.fileName,
     textIndex: segment.textIndex,
     originalText: segment.originalText,
   };
+  if (letterSpacing !== null) {
+    attrs.letterSpacing = letterSpacing;
+  }
   const inlineContent: JSONContent[] = [];
   const chunks = segment.text.split(/\r\n|\r|\n/);
   for (const [index, chunk] of chunks.entries()) {
@@ -139,6 +281,37 @@ function getTextElementsExcludingNestedTables(parent: Element): Element[] {
   return result;
 }
 
+function findClosestRunElement(element: Element): Element | null {
+  let current: Element | null = element;
+  while (current) {
+    if (current.localName === "run") {
+      return current;
+    }
+    current = current.parentElement;
+  }
+  return null;
+}
+
+function applyRunStyleHintsToSegment(
+  segment: EditorSegment,
+  textElement: Element,
+  charPrSpacingById: Map<string, number>,
+): void {
+  const run = findClosestRunElement(textElement);
+  if (!run) {
+    return;
+  }
+  const charPrIDRef = run.getAttribute("charPrIDRef");
+  if (!charPrIDRef) {
+    return;
+  }
+  segment.styleHints.charPrIDRef = charPrIDRef;
+  const spacing = charPrSpacingById.get(charPrIDRef);
+  if (spacing !== undefined) {
+    segment.styleHints.hwpxCharSpacing = String(spacing);
+  }
+}
+
 /**
  * For each <hp:t> element in textEls, retrieve its segment via direct Element
  * identity lookup (built by buildElementSegmentMap), merge multiple runs from
@@ -150,6 +323,7 @@ function consumeAndMergeParagraph(
   usedSegments: EditorSegment[],
   usedSet: Set<EditorSegment>,
   extraSegmentsMap: Record<string, string[]>,
+  charPrSpacingById: Map<string, number>,
   asHeading: boolean,
 ): JSONContent | null {
   const segments: EditorSegment[] = [];
@@ -161,6 +335,7 @@ function consumeAndMergeParagraph(
     if (!seg || usedSet.has(seg)) {
       continue;
     }
+    applyRunStyleHintsToSegment(seg, el, charPrSpacingById);
     usedSet.add(seg);
     usedSegments.push(seg);
     segments.push(seg);
@@ -188,6 +363,8 @@ function parseSectionNode(
   usedSegments: EditorSegment[],
   usedSet: Set<EditorSegment>,
   extraSegmentsMap: Record<string, string[]>,
+  borderFillColors: Map<string, string>,
+  charPrSpacingById: Map<string, number>,
 ): JSONContent[] {
   const content: JSONContent[] = [];
   const paragraphs = Array.from(sectionElement.children).filter((child) => child.localName === "p");
@@ -215,9 +392,15 @@ function parseSectionNode(
         for (const [rowIndex, row] of tableRows.entries()) {
           const tableCells = Array.from(row.children).filter((child) => child.localName === "tc");
           const cellNodes: JSONContent[] = [];
-          for (const [colIndex, cell] of tableCells.entries()) {
-            const sourceRowspan = readPositiveIntAttr(cell, ["rowspan", "row_span"]) || 1;
-            const sourceColspan = readPositiveIntAttr(cell, ["colspan", "col_span"]) || 1;
+          let colIndex = 0;
+          for (const cell of tableCells) {
+            // Skip covered/dirty cells — they are subsumed by a spanning cell
+            if (isCoveredCell(cell)) {
+              colIndex += 1;
+              continue;
+            }
+            const sourceRowspan = readCellSpan(cell, ["rowspan", "row_span"], "rowSpan");
+            const sourceColspan = readCellSpan(cell, ["colspan", "col_span"], "colSpan");
             const paragraphsInCell: JSONContent[] = [];
 
             // Group <hp:t> by their enclosing <hp:p> within <hp:subList>.
@@ -235,6 +418,7 @@ function parseSectionNode(
                     usedSegments,
                     usedSet,
                     extraSegmentsMap,
+                    charPrSpacingById,
                     false,
                   );
                   if (node) {
@@ -251,6 +435,7 @@ function parseSectionNode(
                 usedSegments,
                 usedSet,
                 extraSegmentsMap,
+                charPrSpacingById,
                 false,
               );
               if (node) {
@@ -271,11 +456,20 @@ function parseSectionNode(
             if (sourceColspan > 1) {
               cellAttrs.colspan = sourceColspan;
             }
+            // Apply cell background color from HWPX borderFill definition
+            const bfRef = cell.getAttribute("borderFillIDRef");
+            if (bfRef) {
+              const bgColor = borderFillColors.get(bfRef);
+              if (bgColor) {
+                cellAttrs.backgroundColor = bgColor;
+              }
+            }
             cellNodes.push({
               type: "tableCell",
               attrs: cellAttrs,
               content: paragraphsInCell.length ? paragraphsInCell : [{ type: "paragraph" }],
             });
+            colIndex += 1;
           }
           rowNodes.push({
             type: "tableRow",
@@ -307,6 +501,7 @@ function parseSectionNode(
       usedSegments,
       usedSet,
       extraSegmentsMap,
+      charPrSpacingById,
       false,
     );
     if (node) {
@@ -359,6 +554,22 @@ export async function parseHwpxToProseMirror(fileBuffer: ArrayBuffer): Promise<P
     file.sort((a, b) => a.textIndex - b.textIndex);
   }
 
+  // Extract cell background colors from Contents/header.xml borderFill definitions
+  let borderFillColors = new Map<string, string>();
+  let charPrSpacingById = new Map<string, number>();
+  if (zip.files[HEADER_FILE] && !zip.files[HEADER_FILE].dir) {
+    try {
+      const headerXml = await zip.files[HEADER_FILE].async("string");
+      const headerDoc = new DOMParser().parseFromString(headerXml, "application/xml");
+      if (!headerDoc.querySelector("parsererror")) {
+        borderFillColors = extractBorderFillColors(headerDoc);
+        charPrSpacingById = extractCharPrSpacingMap(headerDoc);
+      }
+    } catch {
+      // Non-fatal — proceed without fill colors
+    }
+  }
+
   const usedSegments: EditorSegment[] = [];
   const content: JSONContent[] = [];
   const extraSegmentsMap: Record<string, string[]> = {};
@@ -387,6 +598,8 @@ export async function parseHwpxToProseMirror(fileBuffer: ArrayBuffer): Promise<P
       usedSegments,
       usedSet,
       extraSegmentsMap,
+      borderFillColors,
+      charPrSpacingById,
     );
     content.push(...sectionBlocks);
   }

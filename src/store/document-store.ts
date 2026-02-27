@@ -3,8 +3,11 @@ import type { JSONContent } from "@tiptap/core";
 import type { EditorSegment } from "@/lib/editor/hwpx-to-prosemirror";
 import type { TextEdit } from "@/lib/hwpx";
 import type { OutlineItem } from "@/lib/editor/document-store";
+import type { PresetKey } from "@/lib/editor/ai-presets";
 
-export type SidebarTab = "outline" | "ai" | "history";
+import type { ChatMessageUI, PendingToolCall } from "@/types/chat";
+
+export type SidebarTab = "outline" | "ai" | "chat" | "history" | "analysis";
 
 export type RenderElementInfo = {
   segmentId: string;
@@ -22,6 +25,22 @@ export type EditHistoryItem = {
 export type BatchSuggestionItem = {
   id: string;
   suggestion: string;
+};
+
+export type DocumentAnalysis = {
+  documentType: string;
+  suggestedPreset: string;
+  readabilityScore: number;
+  globalIssues: string[];
+  inconsistentTerms: Array<{
+    variants: string[];
+    suggestedTerm: string;
+  }>;
+};
+
+export type VerificationResult = {
+  passed: boolean;
+  issues: string[];
 };
 
 type DownloadState = {
@@ -59,6 +78,26 @@ type DocumentState = {
   renderHtml: string | null;
   renderElementMap: Record<string, RenderElementInfo> | null;
 
+  // Phase 2-1: Accept/Reject
+  batchDecisions: Record<string, "accepted" | "rejected">;
+  // Phase 2-3: Presets
+  selectedPreset: PresetKey;
+  // Phase 2-4: Document Intelligence
+  documentAnalysis: DocumentAnalysis | null;
+  analysisLoading: boolean;
+  // Phase 2-5: Terminology
+  terminologyDict: Record<string, string>;
+  // Phase 2-6: Verification
+  verificationResult: VerificationResult | null;
+  verificationLoading: boolean;
+  // Batch mode
+  batchMode: "section" | "document";
+
+  // Chat agent
+  chatMessages: ChatMessageUI[];
+  chatBusy: boolean;
+  pendingToolCall: PendingToolCall | null;
+
   resetDocument: () => void;
   setLoadedDocument: (params: {
     fileName: string;
@@ -81,10 +120,38 @@ type DocumentState = {
   setSelection: (selection: EditorSelectionState) => void;
   setAiSuggestion: (suggestion: string) => void;
   setBatchSuggestions: (suggestions: BatchSuggestionItem[]) => void;
-  setAiBusy: (isBusy: boolean) => void;
+  setAiBusy: (aiBusy: boolean) => void;
   setDownload: (download: DownloadState) => void;
   setRenderResult: (html: string, elementMap: Record<string, RenderElementInfo>) => void;
   pushHistory: (summary: string, editCount: number) => void;
+
+  // Phase 2-1
+  setBatchDecision: (id: string, decision: "accepted" | "rejected") => void;
+  clearBatchDecisions: () => void;
+  // Phase 2-3
+  setSelectedPreset: (preset: PresetKey) => void;
+  // Phase 2-4
+  setDocumentAnalysis: (analysis: DocumentAnalysis | null) => void;
+  setAnalysisLoading: (loading: boolean) => void;
+  // Phase 2-5
+  setTerminologyDict: (dict: Record<string, string>) => void;
+  updateTerminologyEntry: (variant: string, canonical: string) => void;
+  removeTerminologyEntry: (variant: string) => void;
+  // Phase 2-6
+  setVerificationResult: (result: VerificationResult | null) => void;
+  setVerificationLoading: (loading: boolean) => void;
+  // Batch mode
+  setBatchMode: (mode: "section" | "document") => void;
+
+  // Chat agent
+  addChatMessage: (msg: ChatMessageUI) => void;
+  updateLastAssistantMessage: (fn: (prev: string) => string) => void;
+  finalizeLastAssistantMessage: () => void;
+  setChatBusy: (busy: boolean) => void;
+  setPendingToolCall: (pending: PendingToolCall | null) => void;
+  clearChat: () => void;
+  appendToolCallToLastMessage: (tc: import("@/types/chat").ToolCallInfo) => void;
+  appendToolResultToLastMessage: (tr: import("@/types/chat").ToolResultInfo) => void;
 };
 
 const INITIAL_INSTRUCTION = "문장을 간결하게 다듬고 기술 문서 톤으로 수정해줘.";
@@ -105,7 +172,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   outline: [],
   editsPreview: [],
   history: [],
-  status: "HWPX 파일을 업로드하세요.",
+  status: "HWPX 또는 DOCX 파일을 업로드하세요.",
   isBusy: false,
   isDirty: false,
   sidebarCollapsed: false,
@@ -122,6 +189,19 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   renderHtml: null,
   renderElementMap: null,
 
+  batchDecisions: {},
+  selectedPreset: "custom",
+  documentAnalysis: null,
+  analysisLoading: false,
+  terminologyDict: {},
+  verificationResult: null,
+  verificationLoading: false,
+  batchMode: "section",
+
+  chatMessages: [],
+  chatBusy: false,
+  pendingToolCall: null,
+
   resetDocument: () =>
     set({
       fileName: "",
@@ -137,10 +217,20 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       selection: { selectedSegmentId: null, selectedText: "" },
       aiSuggestion: "",
       batchSuggestions: [],
+      batchDecisions: {},
+      documentAnalysis: null,
+      analysisLoading: false,
+      terminologyDict: {},
+      verificationResult: null,
+      verificationLoading: false,
+      batchMode: "section",
+      chatMessages: [],
+      chatBusy: false,
+      pendingToolCall: null,
       download: initialDownload,
       renderHtml: null,
       renderElementMap: null,
-      status: "HWPX 파일을 업로드하세요.",
+      status: "HWPX 또는 DOCX 파일을 업로드하세요.",
       history: [],
     }),
 
@@ -157,6 +247,12 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       isDirty: false,
       aiSuggestion: "",
       batchSuggestions: [],
+      batchDecisions: {},
+      documentAnalysis: null,
+      terminologyDict: {},
+      verificationResult: null,
+      verificationLoading: false,
+      batchMode: "section",
       selection: { selectedSegmentId: null, selectedText: "" },
       download: {
         blob: null,
@@ -195,4 +291,94 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
         ...state.history,
       ].slice(0, 100),
     })),
+
+  // Phase 2-1: Accept/Reject
+  setBatchDecision: (id, decision) =>
+    set((state) => ({
+      batchDecisions: { ...state.batchDecisions, [id]: decision },
+    })),
+  clearBatchDecisions: () => set({ batchDecisions: {} }),
+
+  // Phase 2-3: Presets
+  setSelectedPreset: (selectedPreset) => set({ selectedPreset }),
+
+  // Phase 2-4: Document Intelligence
+  setDocumentAnalysis: (documentAnalysis) => set({ documentAnalysis }),
+  setAnalysisLoading: (analysisLoading) => set({ analysisLoading }),
+
+  // Phase 2-5: Terminology
+  setTerminologyDict: (terminologyDict) => set({ terminologyDict }),
+  updateTerminologyEntry: (variant, canonical) =>
+    set((state) => ({
+      terminologyDict: { ...state.terminologyDict, [variant]: canonical },
+    })),
+  removeTerminologyEntry: (variant) =>
+    set((state) => {
+      const next = { ...state.terminologyDict };
+      delete next[variant];
+      return { terminologyDict: next };
+    }),
+
+  // Phase 2-6: Verification
+  setVerificationResult: (verificationResult) => set({ verificationResult }),
+  setVerificationLoading: (verificationLoading) => set({ verificationLoading }),
+
+  // Batch mode
+  setBatchMode: (batchMode) => set({ batchMode }),
+
+  // Chat agent
+  addChatMessage: (msg) =>
+    set((state) => ({ chatMessages: [...state.chatMessages, msg] })),
+
+  updateLastAssistantMessage: (fn) =>
+    set((state) => {
+      const msgs = [...state.chatMessages];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === "assistant") {
+          msgs[i] = { ...msgs[i], content: fn(msgs[i].content) };
+          break;
+        }
+      }
+      return { chatMessages: msgs };
+    }),
+
+  finalizeLastAssistantMessage: () =>
+    set((state) => {
+      const msgs = [...state.chatMessages];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === "assistant") {
+          msgs[i] = { ...msgs[i], isStreaming: false };
+          break;
+        }
+      }
+      return { chatMessages: msgs };
+    }),
+
+  setChatBusy: (chatBusy) => set({ chatBusy }),
+  setPendingToolCall: (pendingToolCall) => set({ pendingToolCall }),
+  clearChat: () => set({ chatMessages: [], pendingToolCall: null, chatBusy: false }),
+
+  appendToolCallToLastMessage: (tc) =>
+    set((state) => {
+      const msgs = [...state.chatMessages];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === "assistant") {
+          msgs[i] = { ...msgs[i], toolCalls: [...(msgs[i].toolCalls || []), tc] };
+          break;
+        }
+      }
+      return { chatMessages: msgs };
+    }),
+
+  appendToolResultToLastMessage: (tr) =>
+    set((state) => {
+      const msgs = [...state.chatMessages];
+      for (let i = msgs.length - 1; i >= 0; i--) {
+        if (msgs[i].role === "assistant") {
+          msgs[i] = { ...msgs[i], toolResults: [...(msgs[i].toolResults || []), tr] };
+          break;
+        }
+      }
+      return { chatMessages: msgs };
+    }),
 }));
