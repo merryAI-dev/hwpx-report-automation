@@ -20,6 +20,7 @@ import { SlashCommandExtension } from "./slash-commands";
 import { DiffHighlightExtension } from "./diff-highlight-extension";
 import { OfficePasteExtension } from "./office-paste-extension";
 import { CustomHeading } from "./custom-heading";
+import { CustomImage } from "./custom-image";
 import BubbleMenu from "@tiptap/extension-bubble-menu";
 import { synthesizeParaNode } from "./para-synthesizer";
 import type { HwpxDocumentModel } from "../../types/hwpx-model";
@@ -143,6 +144,10 @@ export function createEditorExtensions(options: EditorExtensionOptions = {}) {
     Underline,
     Superscript,
     Subscript,
+    CustomImage.configure({
+      inline: true,
+      allowBase64: true,
+    }),
     TextAlign.configure({
       types: ["heading", "paragraph"],
     }),
