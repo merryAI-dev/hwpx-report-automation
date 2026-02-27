@@ -69,19 +69,17 @@ export const DiffHighlightExtension = Extension.create({
   },
 
   addProseMirrorPlugins() {
-    const extension = this;
-
     return [
       new Plugin<DecorationSet>({
         key: DIFF_HIGHLIGHT_PLUGIN_KEY,
 
         state: {
-          init(_, state) {
-            return buildDecorations(state.doc, extension.storage.suggestions);
+          init: (_, state) => {
+            return buildDecorations(state.doc, this.storage.suggestions as DiffHighlightSuggestion[]);
           },
-          apply(tr, oldDecorations, _oldState, newState) {
+          apply: (tr, oldDecorations, _oldState, newState) => {
             if (tr.getMeta(DIFF_HIGHLIGHT_META) || tr.docChanged) {
-              return buildDecorations(newState.doc, extension.storage.suggestions);
+              return buildDecorations(newState.doc, this.storage.suggestions as DiffHighlightSuggestion[]);
             }
             return oldDecorations.map(tr.mapping, tr.doc);
           },

@@ -59,6 +59,9 @@ function createHwpxParaAutoAssignPlugin(
 
       newState.doc.descendants((node, pos) => {
         if (node.type.name !== "paragraph" && node.type.name !== "heading") return true;
+        const resolved = newState.doc.resolve(pos);
+        // 표 셀 내부 문단 등 중첩 블록은 HWPX section top-level para와 1:1 매핑이 아니므로 제외
+        if (resolved.parent.type.name !== "doc") return true;
 
         const existingParaId = node.attrs.paraId as string | undefined;
         if (existingParaId && !seenParaIds.has(existingParaId)) {
@@ -154,7 +157,7 @@ export function createEditorExtensions(options: EditorExtensionOptions = {}) {
     }),
     HwpxMetadataExtension,
     SlashCommandExtension.configure({
-      onAiCommand: options.onAiCommand,
+      onAiCommand,
     }),
     DiffHighlightExtension,
     OfficePasteExtension,
