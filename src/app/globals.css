@@ -329,24 +329,27 @@ button {
   font-size: 11px;
 }
 
-/* ── Status bar (flat HWP style) ── */
+/* ── Status bar (soft glass) ── */
 .status-bar {
-  border-top: 1px solid #c0c0c0;
-  background: #e8e8e8;
-  padding: 3px 10px;
+  border-top: 1px solid rgba(148, 163, 184, 0.32);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.78), rgba(245, 249, 255, 0.62));
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  box-shadow: 0 -8px 22px rgba(15, 23, 42, 0.06);
+  padding: 4px 12px;
   display: flex;
   flex-wrap: wrap;
-  gap: 10px;
+  gap: 12px;
   font-size: 11px;
   font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
-  color: #333;
+  color: #334155;
   flex-shrink: 0;
-  height: 22px;
+  min-height: 24px;
   align-items: center;
 }
 
 .status-bar strong {
-  color: #0f172a;
+  color: #0f4f8a;
 }
 
 /* ── Slash command menu ── */
