@@ -112,6 +112,84 @@ async function makeLetterSpacingFixtureHwpx(): Promise<ArrayBuffer> {
   return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
 }
 
+async function makeCharStyleFixtureHwpx(): Promise<ArrayBuffer> {
+  const zip = new JSZip();
+  zip.file("mimetype", "application/hwp+zip", { compression: "STORE" });
+  zip.file("version.xml", `<?xml version="1.0" encoding="UTF-8"?><version app="test"/>`);
+  zip.file(
+    "Contents/content.hpf",
+    `<?xml version="1.0" encoding="UTF-8"?><opf:package xmlns:opf="http://www.idpf.org/2007/opf"></opf:package>`,
+  );
+  zip.file(
+    "Contents/header.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head">
+  <hh:refList>
+    <hh:fontfaces itemCnt="7">
+      <hh:fontface lang="HANGUL" fontCnt="2">
+        <hh:font id="0" face="돋움" type="TTF" isEmbedded="0"/>
+        <hh:font id="1" face="바탕" type="TTF" isEmbedded="0"/>
+      </hh:fontface>
+      <hh:fontface lang="LATIN" fontCnt="2">
+        <hh:font id="0" face="Arial" type="TTF" isEmbedded="0"/>
+        <hh:font id="1" face="바탕" type="TTF" isEmbedded="0"/>
+      </hh:fontface>
+      <hh:fontface lang="HANJA" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="JAPANESE" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="OTHER" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="SYMBOL" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="USER" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+    </hh:fontfaces>
+    <hh:charProperties itemCnt="1">
+      <hh:charPr id="2" height="1400" textColor="#000000" shadeColor="#FFF2CC">
+        <hh:fontRef hangul="1" latin="1" hanja="0" japanese="0" other="0" symbol="0" user="0"/>
+        <hh:spacing hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/>
+        <hh:supscript/>
+      </hh:charPr>
+    </hh:charProperties>
+  </hh:refList>
+</hh:head>`,
+  );
+  zip.file(
+    "Contents/section0.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hp:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">
+  <hp:p><hp:run charPrIDRef="2"><hp:t>글자 모양 테스트</hp:t></hp:run></hp:p>
+</hp:sec>`,
+  );
+  return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
+}
+
+async function makeStyleHeadingFixtureHwpx(): Promise<ArrayBuffer> {
+  const zip = new JSZip();
+  zip.file("mimetype", "application/hwp+zip", { compression: "STORE" });
+  zip.file("version.xml", `<?xml version="1.0" encoding="UTF-8"?><version app="test"/>`);
+  zip.file(
+    "Contents/content.hpf",
+    `<?xml version="1.0" encoding="UTF-8"?><opf:package xmlns:opf="http://www.idpf.org/2007/opf"></opf:package>`,
+  );
+  zip.file(
+    "Contents/header.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head">
+  <hh:refList>
+    <hh:styles itemCnt="2">
+      <hh:style id="0" type="PARA" name="본문" engName="Body" paraPrIDRef="0" charPrIDRef="0" nextStyleIDRef="0"/>
+      <hh:style id="2" type="PARA" name="개요 2" engName="Outline 2" paraPrIDRef="0" charPrIDRef="0" nextStyleIDRef="2"/>
+    </hh:styles>
+  </hh:refList>
+</hh:head>`,
+  );
+  zip.file(
+    "Contents/section0.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hp:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">
+  <hp:p styleIDRef="2"><hp:run><hp:t>스타일 기반 개요 제목</hp:t></hp:run></hp:p>
+</hp:sec>`,
+  );
+  return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
+}
+
 describe("parseHwpxToProseMirror – multi-run merging", () => {
   it("merges multiple <hp:t> runs in the same <hp:p> into one paragraph", async () => {
     const dom = new JSDOM("");
@@ -216,5 +294,39 @@ describe("parseHwpxToProseMirror", () => {
 
     const paragraph = (parsed.doc.content || []).find((node) => node.type === "paragraph");
     expect((paragraph?.attrs || {}) as { letterSpacing?: number }).toMatchObject({ letterSpacing: -10 });
+  });
+
+  it("reads run charPr font/highlight/superscript into marks", async () => {
+    const dom = new JSDOM("");
+    (globalThis as unknown as { DOMParser: typeof DOMParser }).DOMParser = dom.window.DOMParser;
+    (globalThis as unknown as { NodeFilter: typeof NodeFilter }).NodeFilter = dom.window.NodeFilter;
+
+    const input = await makeCharStyleFixtureHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+
+    const paragraph = (parsed.doc.content || []).find((node) => node.type === "paragraph");
+    const textNode = paragraph?.content?.find((node) => node.type === "text");
+    const textStyleMark = textNode?.marks?.find((mark) => mark.type === "textStyle");
+    const attrs = (textStyleMark?.attrs || {}) as { fontFamily?: string; fontSize?: string };
+    const highlightMark = textNode?.marks?.find((mark) => mark.type === "highlight");
+
+    expect(attrs.fontFamily).toBe("바탕");
+    expect(attrs.fontSize).toBe("14pt");
+    expect((highlightMark?.attrs || {}) as { color?: string }).toMatchObject({ color: "#FFF2CC" });
+    expect(textNode?.marks?.some((mark) => mark.type === "superscript")).toBe(true);
+  });
+
+  it("maps styleIDRef heading styles to heading nodes", async () => {
+    const dom = new JSDOM("");
+    (globalThis as unknown as { DOMParser: typeof DOMParser }).DOMParser = dom.window.DOMParser;
+    (globalThis as unknown as { NodeFilter: typeof NodeFilter }).NodeFilter = dom.window.NodeFilter;
+
+    const input = await makeStyleHeadingFixtureHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+
+    const heading = (parsed.doc.content || []).find((node) => node.type === "heading");
+    expect(heading).toBeTruthy();
+    expect((heading?.attrs || {}) as { level?: number }).toMatchObject({ level: 2 });
+    expect(heading?.content?.[0]).toMatchObject({ type: "text", text: "스타일 기반 개요 제목" });
   });
 });

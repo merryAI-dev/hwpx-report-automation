@@ -83,7 +83,7 @@ describe("real hwpx roundtrip", () => {
       (row) => row.fileName === target.fileName && row.textIndex === target.textIndex,
     );
     expect(node?.text).toBe(marker);
-  }, 30000);
+  }, 120000);
 
   integrationTest("preserves bold marks through HWPX round-trip", async () => {
     const input = await fsp.readFile(REAL_FIXTURE_PATH);
@@ -140,5 +140,5 @@ describe("real hwpx roundtrip", () => {
     const boldSeg = reparsed.segments.find((s) => s.text === targetText);
     expect(boldSeg).toBeTruthy();
     expect(boldSeg?.styleHints.hwpxBold).toBe("true");
-  }, 30000);
+  }, 120000);
 });

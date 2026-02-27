@@ -25,6 +25,59 @@ export type ParsedProseMirrorDocument = {
 
 const SECTION_FILE_RE = /^Contents\/section\d+\.xml$/;
 const HEADER_FILE = "Contents/header.xml";
+const FONT_REF_KEYS = ["hangul", "latin", "hanja", "japanese", "other", "symbol", "user"] as const;
+type FontRefKey = (typeof FONT_REF_KEYS)[number];
+const FONTFACE_LANG_BY_KEY: Record<FontRefKey, string> = {
+  hangul: "HANGUL",
+  latin: "LATIN",
+  hanja: "HANJA",
+  japanese: "JAPANESE",
+  other: "OTHER",
+  symbol: "SYMBOL",
+  user: "USER",
+};
+const FONTFACE_KEY_BY_LANG = Object.fromEntries(
+  Object.entries(FONTFACE_LANG_BY_KEY).map(([k, v]) => [v, k as FontRefKey]),
+) as Record<string, FontRefKey>;
+
+function createEmptyFontFaceMaps(): Record<FontRefKey, Map<string, string>> {
+  return {
+    hangul: new Map(),
+    latin: new Map(),
+    hanja: new Map(),
+    japanese: new Map(),
+    other: new Map(),
+    symbol: new Map(),
+    user: new Map(),
+  };
+}
+
+function extractFontFaceMaps(doc: Document): Record<FontRefKey, Map<string, string>> {
+  const maps = createEmptyFontFaceMaps();
+  const allElements = Array.from(doc.getElementsByTagName("*"));
+  for (const el of allElements) {
+    if (el.localName !== "fontface") {
+      continue;
+    }
+    const lang = (el.getAttribute("lang") ?? "").toUpperCase();
+    const key = FONTFACE_KEY_BY_LANG[lang];
+    if (!key) {
+      continue;
+    }
+    for (const child of Array.from(el.children)) {
+      if (child.localName !== "font") {
+        continue;
+      }
+      const id = child.getAttribute("id");
+      const face = child.getAttribute("face");
+      if (!id || !face) {
+        continue;
+      }
+      maps[key].set(id, face);
+    }
+  }
+  return maps;
+}
 
 /**
  * Parse Contents/header.xml and build a map from borderFill id → CSS background color.
@@ -138,10 +191,72 @@ type CharPrMarks = {
   superscript: boolean;
   subscript: boolean;
   color?: string;
+  shadeColor?: string;
+  fontFamily?: string;
+  fontSizePt?: number;
 };
+
+function readCharPrFontFamily(
+  charPr: Element,
+  fontFaceMaps: Record<FontRefKey, Map<string, string>>,
+): string | undefined {
+  const fontRef = Array.from(charPr.children).find((child) => child.localName === "fontRef");
+  if (!fontRef) {
+    return undefined;
+  }
+  const faces = new Set<string>();
+  for (const key of FONT_REF_KEYS) {
+    const id = fontRef.getAttribute(key);
+    if (!id) {
+      continue;
+    }
+    const face = fontFaceMaps[key].get(id);
+    if (face) {
+      faces.add(face);
+    }
+  }
+  // fontRef가 언어별로 서로 다른 face를 가질 수 있으므로,
+  // 단일 family로 안전하게 표현 가능한 경우(모든 슬롯 동일)만 mark로 노출한다.
+  return faces.size === 1 ? Array.from(faces)[0] : undefined;
+}
+
+function readCharPrFontSizePt(charPr: Element): number | undefined {
+  const raw = charPr.getAttribute("height");
+  if (!raw) {
+    return undefined;
+  }
+  const parsed = Number.parseInt(raw, 10);
+  if (!Number.isFinite(parsed) || parsed <= 0) {
+    return undefined;
+  }
+  return parsed / 100;
+}
+
+function normalizeShadeColor(raw: string | null): string | undefined {
+  if (!raw) {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  if (!trimmed) {
+    return undefined;
+  }
+  const upper = trimmed.toUpperCase();
+  if (upper === "NONE" || upper === "#FFFFFF" || upper === "#FFFFFFFF") {
+    return undefined;
+  }
+  if (/^#[0-9A-F]{8}$/i.test(trimmed)) {
+    const alpha = Number.parseInt(trimmed.slice(1, 3), 16);
+    if (alpha === 0) {
+      return undefined;
+    }
+    return `#${trimmed.slice(3)}`;
+  }
+  return trimmed;
+}
 
 function extractCharPrMarksMap(doc: Document): Map<string, CharPrMarks> {
   const map = new Map<string, CharPrMarks>();
+  const fontFaceMaps = extractFontFaceMaps(doc);
   const allElements = Array.from(doc.getElementsByTagName("*"));
   for (const el of allElements) {
     if (el.localName !== "charPr") continue;
@@ -154,11 +269,25 @@ function extractCharPrMarksMap(doc: Document): Map<string, CharPrMarks> {
     const hasUnderline = underlineEl ? underlineEl.getAttribute("type") === "SINGLE" : false;
     const strikeoutEl = children.find((c) => c.localName === "strikeout");
     const hasStrike = strikeoutEl ? strikeoutEl.getAttribute("shape") !== "NONE" : false;
-    const hasSuperscript = children.some((c) => c.localName === "superscript");
+    const hasSuperscript = children.some((c) => c.localName === "superscript" || c.localName === "supscript");
     const hasSubscript = children.some((c) => c.localName === "subscript");
     const rawColor = el.getAttribute("textColor");
     const color = rawColor && rawColor.toUpperCase() !== "#000000" ? rawColor : undefined;
-    map.set(id, { bold: hasBold, italic: hasItalic, underline: hasUnderline, strike: hasStrike, superscript: hasSuperscript, subscript: hasSubscript, color });
+    const shadeColor = normalizeShadeColor(el.getAttribute("shadeColor"));
+    const fontFamily = readCharPrFontFamily(el, fontFaceMaps);
+    const fontSizePt = readCharPrFontSizePt(el);
+    map.set(id, {
+      bold: hasBold,
+      italic: hasItalic,
+      underline: hasUnderline,
+      strike: hasStrike,
+      superscript: hasSuperscript,
+      subscript: hasSubscript,
+      color,
+      shadeColor,
+      fontFamily,
+      fontSizePt,
+    });
   }
   return map;
 }
@@ -173,6 +302,66 @@ type ParaPrValues = {
   spaceBefore: number;     // HWPUNIT
   spaceAfter: number;      // HWPUNIT
 };
+
+function clampHeadingLevel(raw: number): 1 | 2 | 3 | 4 | 5 {
+  const n = Math.max(1, Math.min(5, raw));
+  return n as 1 | 2 | 3 | 4 | 5;
+}
+
+function parseHeadingLevelFromStyleNames(name: string, engName: string): number | null {
+  const normalizedName = name.trim();
+  const normalizedEngName = engName.trim();
+
+  const patterns = [
+    normalizedName.match(/개요\s*([1-9]\d*)/),
+    normalizedEngName.match(/outline\s*([1-9]\d*)/i),
+    normalizedName.match(/제목\s*([1-9]\d*)/),
+    normalizedEngName.match(/heading\s*([1-9]\d*)/i),
+  ];
+  for (const match of patterns) {
+    if (!match) {
+      continue;
+    }
+    const parsed = Number.parseInt(match[1], 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return clampHeadingLevel(parsed);
+    }
+  }
+
+  if (/(^|\s)(제목|표제)(\s|$)/.test(normalizedName) || /(^|\s)heading(\s|$)/i.test(normalizedEngName)) {
+    return 1;
+  }
+  return null;
+}
+
+/**
+ * Parse header style definitions and derive styleIDRef -> heading level map.
+ * Typical HWPX uses style names like "개요 1", "Outline 2", "Heading 1".
+ */
+function extractHeadingLevelByStyleId(doc: Document): Map<string, number> {
+  const map = new Map<string, number>();
+  const allElements = Array.from(doc.getElementsByTagName("*"));
+  for (const el of allElements) {
+    if (el.localName !== "style") {
+      continue;
+    }
+    const id = el.getAttribute("id");
+    if (!id) {
+      continue;
+    }
+    const type = (el.getAttribute("type") ?? "").toUpperCase();
+    if (type && type !== "PARA") {
+      continue;
+    }
+    const name = el.getAttribute("name") ?? "";
+    const engName = el.getAttribute("engName") ?? "";
+    const level = parseHeadingLevelFromStyleNames(name, engName);
+    if (level !== null) {
+      map.set(id, level);
+    }
+  }
+  return map;
+}
 
 /**
  * Parse Contents/header.xml and build a map from paraPr id → paragraph formatting values.
@@ -316,6 +505,19 @@ function readSegmentLetterSpacing(segment: EditorSegment): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function readSegmentFontSizePt(segment: EditorSegment): number | undefined {
+  const raw = segment.styleHints.hwpxFontSizePt;
+  if (raw === undefined) {
+    return undefined;
+  }
+  const parsed = Number.parseFloat(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : undefined;
+}
+
+function formatPt(value: number): string {
+  return `${Number.isInteger(value) ? value : Number(value.toFixed(2))}pt`;
+}
+
 /** 연속된 동일 mark 조합의 텍스트+marks 정보 */
 type ParsedRunChunk = {
   text: string;
@@ -326,11 +528,14 @@ type ParsedRunChunk = {
   superscript: boolean;
   subscript: boolean;
   color?: string;
+  shadeColor?: string;
+  fontFamily?: string;
+  fontSizePt?: number;
 };
 
 function toParagraphNode(
   segment: EditorSegment,
-  asHeading: boolean,
+  headingLevel?: number,
   runChunks?: ParsedRunChunk[],
 ): JSONContent {
   const letterSpacing = readSegmentLetterSpacing(segment);
@@ -345,7 +550,22 @@ function toParagraphNode(
   }
   const inlineContent: JSONContent[] = [];
 
-  const hasMarks = runChunks && runChunks.length > 0 && runChunks.some((r) => r.bold || r.italic || r.underline || r.strike || r.superscript || r.subscript || r.color);
+  const hasMarks =
+    runChunks &&
+    runChunks.length > 0 &&
+    runChunks.some(
+      (r) =>
+        r.bold ||
+        r.italic ||
+        r.underline ||
+        r.strike ||
+        r.superscript ||
+        r.subscript ||
+        r.color ||
+        r.shadeColor ||
+        r.fontFamily ||
+        r.fontSizePt !== undefined,
+    );
   if (hasMarks && runChunks) {
     // 런별 marks 적용
     for (const runChunk of runChunks) {
@@ -362,7 +582,22 @@ function toParagraphNode(
         if (runChunk.strike) marks.push({ type: "strike" });
         if (runChunk.superscript) marks.push({ type: "superscript" });
         if (runChunk.subscript) marks.push({ type: "subscript" });
-        if (runChunk.color) marks.push({ type: "textStyle", attrs: { color: runChunk.color } });
+        const textStyleAttrs: Record<string, string> = {};
+        if (runChunk.color) {
+          textStyleAttrs.color = runChunk.color;
+        }
+        if (runChunk.fontFamily) {
+          textStyleAttrs.fontFamily = runChunk.fontFamily;
+        }
+        if (runChunk.fontSizePt !== undefined) {
+          textStyleAttrs.fontSize = formatPt(runChunk.fontSizePt);
+        }
+        if (Object.keys(textStyleAttrs).length > 0) {
+          marks.push({ type: "textStyle", attrs: textStyleAttrs });
+        }
+        if (runChunk.shadeColor) {
+          marks.push({ type: "highlight", attrs: { color: runChunk.shadeColor } });
+        }
         inlineContent.push({
           type: "text",
           text: part,
@@ -385,8 +620,8 @@ function toParagraphNode(
   }
 
   return {
-    type: asHeading ? "heading" : "paragraph",
-    attrs: asHeading ? { ...attrs, level: 2 } : attrs,
+    type: headingLevel ? "heading" : "paragraph",
+    attrs: headingLevel ? { ...attrs, level: clampHeadingLevel(headingLevel) } : attrs,
     content: inlineContent,
   };
 }
@@ -492,6 +727,9 @@ function applyRunStyleHintsToSegment(
     if (marks.superscript) segment.styleHints.hwpxSuperscript = "true";
     if (marks.subscript) segment.styleHints.hwpxSubscript = "true";
     if (marks.color) segment.styleHints.hwpxTextColor = marks.color;
+    if (marks.shadeColor) segment.styleHints.hwpxShadeColor = marks.shadeColor;
+    if (marks.fontFamily) segment.styleHints.hwpxFontFamily = marks.fontFamily;
+    if (marks.fontSizePt !== undefined) segment.styleHints.hwpxFontSizePt = String(marks.fontSizePt);
   }
 }
 
@@ -508,7 +746,7 @@ function consumeAndMergeParagraph(
   extraSegmentsMap: Record<string, string[]>,
   charPrSpacingById: Map<string, number>,
   charPrMarksById: Map<string, CharPrMarks>,
-  asHeading: boolean,
+  headingLevel?: number,
 ): JSONContent | null {
   const segments: EditorSegment[] = [];
   for (const el of textEls) {
@@ -539,6 +777,9 @@ function consumeAndMergeParagraph(
     superscript: seg.styleHints.hwpxSuperscript === "true",
     subscript: seg.styleHints.hwpxSubscript === "true",
     color: seg.styleHints.hwpxTextColor,
+    shadeColor: seg.styleHints.hwpxShadeColor,
+    fontFamily: seg.styleHints.hwpxFontFamily,
+    fontSizePt: readSegmentFontSizePt(seg),
   }));
 
   if (segments.length > 1) {
@@ -551,7 +792,7 @@ function consumeAndMergeParagraph(
 
   return toParagraphNode(
     segments[0],
-    asHeading || isHeadingLike(segments[0].text),
+    headingLevel ?? (isHeadingLike(segments[0].text) ? 2 : undefined),
     runChunks,
   );
 }
@@ -645,6 +886,7 @@ function parseSectionNode(
   charPrMarksById: Map<string, CharPrMarks>,
   paraIdByDomElement: Map<Element, string>,
   paraPrById: Map<string, ParaPrValues>,
+  headingLevelByStyleId: Map<string, number>,
 ): JSONContent[] {
   const content: JSONContent[] = [];
   const paragraphs = Array.from(sectionElement.children).filter((child) => child.localName === "p");
@@ -700,7 +942,7 @@ function parseSectionNode(
                     extraSegmentsMap,
                     charPrSpacingById,
                     charPrMarksById,
-                    false,
+                    undefined,
                   );
                   if (node) {
                     paragraphsInCell.push(node);
@@ -718,7 +960,7 @@ function parseSectionNode(
                 extraSegmentsMap,
                 charPrSpacingById,
                 charPrMarksById,
-                false,
+                undefined,
               );
               if (node) {
                 paragraphsInCell.push(node);
@@ -777,6 +1019,8 @@ function parseSectionNode(
 
     // For a non-table <hp:p>, collect only <hp:t> not inside any nested table.
     const textElements = getTextElementsExcludingNestedTables(paragraph);
+    const styleIdRef = paragraph.getAttribute("styleIDRef") ?? "";
+    const styleHeadingLevel = headingLevelByStyleId.get(styleIdRef);
     const node = consumeAndMergeParagraph(
       textElements,
       elementSegmentMap,
@@ -785,7 +1029,7 @@ function parseSectionNode(
       extraSegmentsMap,
       charPrSpacingById,
       charPrMarksById,
-      false,
+      styleHeadingLevel,
     );
     if (node) {
       // Inject paraId from buildHwpxSectionModel (para-snapshot round-trip key)
@@ -870,6 +1114,7 @@ export async function parseHwpxToProseMirror(fileBuffer: ArrayBuffer): Promise<P
   let charPrSpacingById = new Map<string, number>();
   let charPrMarksById = new Map<string, CharPrMarks>();
   let paraPrById = new Map<string, ParaPrValues>();
+  let headingLevelByStyleId = new Map<string, number>();
   let headerXmlText = "";
   if (zip.files[HEADER_FILE] && !zip.files[HEADER_FILE].dir) {
     try {
@@ -880,6 +1125,7 @@ export async function parseHwpxToProseMirror(fileBuffer: ArrayBuffer): Promise<P
         charPrSpacingById = extractCharPrSpacingMap(headerDoc);
         charPrMarksById = extractCharPrMarksMap(headerDoc);
         paraPrById = extractParaPrMap(headerDoc);
+        headingLevelByStyleId = extractHeadingLevelByStyleId(headerDoc);
       }
     } catch {
       // Non-fatal — proceed without fill colors
@@ -935,6 +1181,7 @@ export async function parseHwpxToProseMirror(fileBuffer: ArrayBuffer): Promise<P
       charPrMarksById,
       paraIdByDomElement,
       paraPrById,
+      headingLevelByStyleId,
     );
     content.push(...sectionBlocks);
   }

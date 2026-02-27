@@ -115,6 +115,10 @@ function isTextBlockNode(node: JSONContent): boolean {
   return node.type === "paragraph" || node.type === "heading";
 }
 
+function getTopLevelTextBlocks(doc: JSONContent): JSONContent[] {
+  return (doc.content ?? []).filter((node) => isTextBlockNode(node));
+}
+
 function asPositiveInt(input: unknown): number | null {
   if (input === null || input === undefined || input === "") {
     return null;
@@ -934,6 +938,24 @@ function patchParaPrIDRef(paraXml: string, newParaPrIDRef: string): string {
   return paraXml.replace(/\bparaPrIDRef="[^"]*"/, `paraPrIDRef="${newParaPrIDRef}"`);
 }
 
+function readParaXmlId(paraXml: string): string | null {
+  const match = paraXml.match(/<\s*(?:[A-Za-z0-9]+:)?p\b[^>]*\sid="([^"]+)"/);
+  return match?.[1] ?? null;
+}
+
+function patchParaXmlId(paraXml: string, paraXmlId: string): string {
+  if (/<\s*(?:[A-Za-z0-9]+:)?p\b[^>]*\sid="[^"]+"/.test(paraXml)) {
+    return paraXml.replace(
+      /(<\s*(?:[A-Za-z0-9]+:)?p\b[^>]*?)\sid="[^"]+"/,
+      `$1 id="${paraXmlId}"`,
+    );
+  }
+  return paraXml.replace(
+    /<\s*((?:[A-Za-z0-9]+:)?p)\b/,
+    `<$1 id="${paraXmlId}"`,
+  );
+}
+
 async function applyLetterSpacingPatches(
   fileBuffer: ArrayBuffer,
   edits: LetterSpacingEdit[],
@@ -1143,29 +1165,16 @@ async function applyLetterSpacingPatches(
 // ── Para-snapshot round-trip helpers ─────────────────────────────────────────
 
 /**
- * ProseMirror doc에서 paraId가 있는 모든 텍스트 블록의 { paraId → 현재 텍스트 } 인덱스.
- */
-function buildParaIdIndex(doc: JSONContent): Map<string, string> {
-  const result = new Map<string, string>();
-  walk(doc, (node) => {
-    if (!isTextBlockNode(node)) return;
-    const paraId = ((node.attrs || {}) as { paraId?: string }).paraId;
-    if (paraId) result.set(paraId, extractNodeText(node));
-  });
-  return result;
-}
-
-/**
  * paraId → ProseMirror JSONContent 노드 맵 (marks 정보 포함).
- * buildParaIdIndex의 확장 버전으로, 텍스트 외에 content(marks 포함)도 보관.
  */
 function buildParaIdNodeMap(doc: JSONContent): Map<string, JSONContent> {
   const result = new Map<string, JSONContent>();
-  walk(doc, (node) => {
-    if (!isTextBlockNode(node)) return;
+  for (const node of getTopLevelTextBlocks(doc)) {
     const paraId = ((node.attrs || {}) as { paraId?: string }).paraId;
-    if (paraId) result.set(paraId, node);
-  });
+    if (paraId) {
+      result.set(paraId, node);
+    }
+  }
   return result;
 }
 
@@ -1177,11 +1186,10 @@ function buildOrderedDocNodes(
   doc: JSONContent,
 ): Array<{ paraId: string | null; node: JSONContent }> {
   const result: Array<{ paraId: string | null; node: JSONContent }> = [];
-  walk(doc, (node) => {
-    if (!isTextBlockNode(node)) return;
+  for (const node of getTopLevelTextBlocks(doc)) {
     const paraId = ((node.attrs || {}) as { paraId?: string }).paraId ?? null;
     result.push({ paraId, node });
-  });
+  }
   return result;
 }
 
@@ -1191,6 +1199,7 @@ function buildOrderedDocNodes(
  */
 function buildOrphanParaXml(
   node: JSONContent,
+  paraXmlId: string,
   defaultParaPrIDRef: string,
   defaultCharPrIDRef: string,
   charPropertiesEl: Element | null,
@@ -1223,7 +1232,7 @@ function buildOrphanParaXml(
         });
 
   return (
-    `<hp:p paraPrIDRef="${paraPrIDRef}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">` +
+    `<hp:p id="${paraXmlId}" paraPrIDRef="${paraPrIDRef}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">` +
     runXmls.join("") +
     `<hp:linesegarray/>` +
     `</hp:p>`
@@ -1365,10 +1374,12 @@ function rebuildParaXmlWithMarks(
  */
 function buildDeletedParaIds(doc: JSONContent, model: HwpxDocumentModel): Set<string> {
   const presentParaIds = new Set<string>();
-  walk(doc, (node) => {
+  for (const node of getTopLevelTextBlocks(doc)) {
     const paraId = ((node.attrs || {}) as { paraId?: string }).paraId;
-    if (paraId) presentParaIds.add(paraId);
-  });
+    if (paraId) {
+      presentParaIds.add(paraId);
+    }
+  }
   const deleted = new Set<string>();
   for (const section of model.sections) {
     for (const block of section.blocks) {
@@ -1557,14 +1568,14 @@ export async function applyProseMirrorDocToHwpx(
     // ── marks 지원을 위한 header.xml charPr 동적 관리 준비 ──
     const headerFile = zip.files[HEADER_FILE];
     let charPropertiesEl: Element | null = null;
-    let charPrById: Map<string, Element> = new Map();
-    let charPrCache: Map<string, string> = new Map();
+    const charPrById: Map<string, Element> = new Map();
+    const charPrCache: Map<string, string> = new Map();
     let nextCharPrId = { value: 41 }; // base.hwpx 기준 maxId(40) + 1
     let headerDoc: Document | null = null;
     // paraPr 동적 관리
     let paraPrContainer: Element | null = null;
-    let paraPrById: Map<string, Element> = new Map();
-    let paraPrCache: Map<string, string> = new Map();
+    const paraPrById: Map<string, Element> = new Map();
+    const paraPrCache: Map<string, string> = new Map();
     let nextParaPrId = { value: 1 };
 
     if (headerFile && !headerFile.dir) {
@@ -1616,7 +1627,19 @@ export async function applyProseMirrorDocToHwpx(
       charPrById.size > 0
         ? [...charPrById.keys()].sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0))[0]
         : "0";
-    const orderedDocNodes = buildOrderedDocNodes(doc);
+    const knownParaIds = new Set<string>();
+    for (const section of hwpxDocumentModel.sections) {
+      for (const block of section.blocks) {
+        if (block.type === "para") {
+          knownParaIds.add(block.paraId);
+        }
+      }
+    }
+    const orderedDocNodes = buildOrderedDocNodes(doc).map(({ paraId, node }) => ({
+      // 모델에 존재하지 않는 paraId는 orphan으로 강등해 저장 누락을 방지한다.
+      paraId: paraId && knownParaIds.has(paraId) ? paraId : null,
+      node,
+    }));
     const paraIdToDocIdx = new Map<string, number>();
     for (let i = 0; i < orderedDocNodes.length; i++) {
       const { paraId } = orderedDocNodes[i];
@@ -1626,6 +1649,27 @@ export async function applyProseMirrorDocToHwpx(
     for (const section of hwpxDocumentModel.sections) {
       let sectionXml = section.xmlPrefix;
       let lastDocIdx = -1; // 마지막으로 처리된 doc 노드 인덱스
+      const usedParaXmlIds = new Set<number>();
+      for (const block of section.blocks) {
+        if (block.type !== "para") continue;
+        const para = hwpxDocumentModel.paraStore.get(block.paraId);
+        if (!para) continue;
+        const paraXmlId = readParaXmlId(para.paraXml);
+        const parsed = asInt(paraXmlId);
+        if (parsed !== null && parsed >= 0) {
+          usedParaXmlIds.add(parsed);
+        }
+      }
+      let nextParaXmlId = usedParaXmlIds.size > 0 ? Math.max(...usedParaXmlIds) + 1 : 1;
+      const allocateParaXmlId = (): string => {
+        while (usedParaXmlIds.has(nextParaXmlId)) {
+          nextParaXmlId += 1;
+        }
+        const chosen = nextParaXmlId;
+        usedParaXmlIds.add(chosen);
+        nextParaXmlId += 1;
+        return String(chosen);
+      };
 
       for (const block of section.blocks) {
         sectionXml += block.leadingWhitespace;
@@ -1643,7 +1687,7 @@ export async function applyProseMirrorDocToHwpx(
             const { paraId: oId, node: oNode } = orderedDocNodes[j];
             if (oId !== null) continue;
             sectionXml += buildOrphanParaXml(
-              oNode, "0", defaultOrphanCharPrIDRef,
+              oNode, allocateParaXmlId(), "0", defaultOrphanCharPrIDRef,
               charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc,
             );
           }
@@ -1696,7 +1740,7 @@ export async function applyProseMirrorDocToHwpx(
         );
 
         if (hasMarks && charPropertiesEl && headerDoc) {
-          sectionXml += rebuildParaXmlWithMarks(
+          let rebuilt = rebuildParaXmlWithMarks(
             para,
             currentNode,
             charPropertiesEl,
@@ -1706,6 +1750,10 @@ export async function applyProseMirrorDocToHwpx(
             headerDoc,
             newParaPrIDRef,
           );
+          if (para.isSynthesized || !readParaXmlId(rebuilt)) {
+            rebuilt = patchParaXmlId(rebuilt, allocateParaXmlId());
+          }
+          sectionXml += rebuilt;
         } else {
           const currentText = extractNodeText(currentNode);
           const originalText = para.runs.map((r) => r.text).join("");
@@ -1719,7 +1767,7 @@ export async function applyProseMirrorDocToHwpx(
             const paraPrIDRef = para.paraXml.match(/paraPrIDRef="([^"]+)"/)?.[1] ?? "0";
             const charPrIDRef = para.runs[0]?.charPrIDRef ?? "0";
             const built = buildOrphanParaXml(
-              currentNode, paraPrIDRef, charPrIDRef,
+              currentNode, allocateParaXmlId(), paraPrIDRef, charPrIDRef,
               charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc,
             );
             sectionXml += newParaPrIDRef ? patchParaPrIDRef(built, newParaPrIDRef) : built;
@@ -1735,7 +1783,7 @@ export async function applyProseMirrorDocToHwpx(
         const { paraId: oId, node: oNode } = orderedDocNodes[j];
         if (oId !== null) continue;
         sectionXml += buildOrphanParaXml(
-          oNode, "0", defaultOrphanCharPrIDRef,
+          oNode, allocateParaXmlId(), "0", defaultOrphanCharPrIDRef,
           charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc,
         );
       }

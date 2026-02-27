@@ -367,6 +367,132 @@ async function makeLetterSpacingFixtureHwpx(): Promise<ArrayBuffer> {
   return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
 }
 
+async function makeFontStyleFixtureHwpx(): Promise<ArrayBuffer> {
+  const zip = new JSZip();
+  zip.file("mimetype", "application/hwp+zip", { compression: "STORE" });
+  zip.file("version.xml", `<?xml version="1.0" encoding="UTF-8"?><version app="test"/>`);
+  zip.file(
+    "Contents/content.hpf",
+    `<?xml version="1.0" encoding="UTF-8"?><opf:package xmlns:opf="http://www.idpf.org/2007/opf"></opf:package>`,
+  );
+  zip.file(
+    "Contents/header.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head">
+  <hh:refList>
+    <hh:fontfaces itemCnt="7">
+      <hh:fontface lang="HANGUL" fontCnt="2">
+        <hh:font id="0" face="돋움" type="TTF" isEmbedded="0"/>
+        <hh:font id="1" face="바탕" type="TTF" isEmbedded="0"/>
+      </hh:fontface>
+      <hh:fontface lang="LATIN" fontCnt="2">
+        <hh:font id="0" face="Arial" type="TTF" isEmbedded="0"/>
+        <hh:font id="1" face="Times New Roman" type="TTF" isEmbedded="0"/>
+      </hh:fontface>
+      <hh:fontface lang="HANJA" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="JAPANESE" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="OTHER" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="SYMBOL" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="USER" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+    </hh:fontfaces>
+    <hh:charProperties itemCnt="1">
+      <hh:charPr id="1" height="1000" textColor="#000000">
+        <hh:fontRef hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/>
+      </hh:charPr>
+    </hh:charProperties>
+  </hh:refList>
+</hh:head>`,
+  );
+  zip.file(
+    "Contents/section0.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hp:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">
+  <hp:p><hp:run charPrIDRef="1"><hp:t>폰트 저장 테스트</hp:t></hp:run></hp:p>
+</hp:sec>`,
+  );
+  return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
+}
+
+async function makeHighlightedFontStyleFixtureHwpx(): Promise<ArrayBuffer> {
+  const zip = new JSZip();
+  zip.file("mimetype", "application/hwp+zip", { compression: "STORE" });
+  zip.file("version.xml", `<?xml version="1.0" encoding="UTF-8"?><version app="test"/>`);
+  zip.file(
+    "Contents/content.hpf",
+    `<?xml version="1.0" encoding="UTF-8"?><opf:package xmlns:opf="http://www.idpf.org/2007/opf"></opf:package>`,
+  );
+  zip.file(
+    "Contents/header.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head">
+  <hh:refList>
+    <hh:fontfaces itemCnt="7">
+      <hh:fontface lang="HANGUL" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="LATIN" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="HANJA" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="JAPANESE" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="OTHER" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="SYMBOL" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="USER" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+    </hh:fontfaces>
+    <hh:charProperties itemCnt="1">
+      <hh:charPr id="1" height="1000" textColor="#000000" shadeColor="#FFF2CC">
+        <hh:fontRef hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/>
+      </hh:charPr>
+    </hh:charProperties>
+  </hh:refList>
+</hh:head>`,
+  );
+  zip.file(
+    "Contents/section0.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hp:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">
+  <hp:p><hp:run charPrIDRef="1"><hp:t>하이라이트 해제 테스트</hp:t></hp:run></hp:p>
+</hp:sec>`,
+  );
+  return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
+}
+
+async function makeColoredFontStyleFixtureHwpx(): Promise<ArrayBuffer> {
+  const zip = new JSZip();
+  zip.file("mimetype", "application/hwp+zip", { compression: "STORE" });
+  zip.file("version.xml", `<?xml version="1.0" encoding="UTF-8"?><version app="test"/>`);
+  zip.file(
+    "Contents/content.hpf",
+    `<?xml version="1.0" encoding="UTF-8"?><opf:package xmlns:opf="http://www.idpf.org/2007/opf"></opf:package>`,
+  );
+  zip.file(
+    "Contents/header.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head">
+  <hh:refList>
+    <hh:fontfaces itemCnt="7">
+      <hh:fontface lang="HANGUL" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="LATIN" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="HANJA" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="JAPANESE" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="OTHER" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="SYMBOL" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+      <hh:fontface lang="USER" fontCnt="1"><hh:font id="0" face="바탕" type="TTF" isEmbedded="0"/></hh:fontface>
+    </hh:fontfaces>
+    <hh:charProperties itemCnt="1">
+      <hh:charPr id="1" height="1000" textColor="#FF0000" shadeColor="none">
+        <hh:fontRef hangul="0" latin="0" hanja="0" japanese="0" other="0" symbol="0" user="0"/>
+      </hh:charPr>
+    </hh:charProperties>
+  </hh:refList>
+</hh:head>`,
+  );
+  zip.file(
+    "Contents/section0.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hp:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">
+  <hp:p><hp:run charPrIDRef="1"><hp:t>글자색 해제 테스트</hp:t></hp:run></hp:p>
+</hp:sec>`,
+  );
+  return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
+}
+
 describe("applyProseMirrorDocToHwpx table patch", () => {
   it("applies row/col/merge changes by patching table XML fragment", async () => {
     const input = await makeTableFixtureHwpx();
@@ -470,6 +596,209 @@ describe("applyProseMirrorDocToHwpx letter spacing patch", () => {
     }
 
     const newCharPrId = spacing12CharPr.getAttribute("id");
+    expect(newCharPrId).toBeTruthy();
+    expect(sectionXml).toContain(`charPrIDRef="${newCharPrId}"`);
+  });
+});
+
+describe("applyProseMirrorDocToHwpx font style patch", () => {
+  it("creates charPr with font family/size and rewires run charPrIDRef", async () => {
+    const input = await makeFontStyleFixtureHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+    const doc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+    const paragraph = (doc.content || []).find((node) => node.type === "paragraph");
+    if (!paragraph?.content?.length) {
+      throw new Error("paragraph not found in fixture");
+    }
+    const firstText = paragraph.content.find((node) => node.type === "text");
+    if (!firstText) {
+      throw new Error("text node not found");
+    }
+    firstText.marks = [
+      { type: "textStyle", attrs: { fontFamily: "바탕", fontSize: "14pt", backgroundColor: "#FFF2CC" } },
+      { type: "highlight", attrs: { color: "#FFF2CC" } },
+      { type: "superscript" },
+    ];
+
+    const result = await applyProseMirrorDocToHwpx(
+      input,
+      doc,
+      parsed.segments,
+      parsed.extraSegmentsMap,
+      parsed.hwpxDocumentModel,
+    );
+    expect(result.integrityIssues).toEqual([]);
+    expect(result.edits).toEqual([]);
+
+    const outBuffer = await result.blob.arrayBuffer();
+    const outZip = await JSZip.loadAsync(outBuffer);
+    const headerXml = await outZip.file("Contents/header.xml")!.async("string");
+    const sectionXml = await outZip.file("Contents/section0.xml")!.async("string");
+    const headerDoc = new DOMParser().parseFromString(headerXml, "application/xml");
+
+    const charProperties = Array.from(headerDoc.getElementsByTagName("*")).find(
+      (node) => node.localName === "charProperties",
+    );
+    expect(charProperties).toBeTruthy();
+    if (!charProperties) {
+      return;
+    }
+
+    const charPrNodes = Array.from(charProperties.children).filter((child) => child.localName === "charPr");
+    const created = charPrNodes.find((charPr) => {
+      if (charPr.getAttribute("height") !== "1400") {
+        return false;
+      }
+      if ((charPr.getAttribute("shadeColor") || "").toUpperCase() !== "#FFF2CC") {
+        return false;
+      }
+      const fontRef = Array.from(charPr.children).find((child) => child.localName === "fontRef");
+      const hasSupscript = Array.from(charPr.children).some((child) => child.localName === "supscript");
+      return !!fontRef?.getAttribute("hangul") && hasSupscript;
+    });
+    expect(created).toBeTruthy();
+    if (!created) {
+      return;
+    }
+    const newCharPrId = created.getAttribute("id");
+    expect(newCharPrId).toBeTruthy();
+    expect(sectionXml).toContain(`charPrIDRef="${newCharPrId}"`);
+  });
+
+  it("adds underline/strikeout elements when base charPr has none", async () => {
+    const input = await makeFontStyleFixtureHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+    const doc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+    const paragraph = (doc.content || []).find((node) => node.type === "paragraph");
+    const firstText = paragraph?.content?.find((node) => node.type === "text");
+    if (!firstText) {
+      throw new Error("text node not found");
+    }
+    firstText.marks = [{ type: "underline" }, { type: "strike" }];
+
+    const result = await applyProseMirrorDocToHwpx(
+      input,
+      doc,
+      parsed.segments,
+      parsed.extraSegmentsMap,
+      parsed.hwpxDocumentModel,
+    );
+    expect(result.integrityIssues).toEqual([]);
+
+    const outBuffer = await result.blob.arrayBuffer();
+    const outZip = await JSZip.loadAsync(outBuffer);
+    const headerXml = await outZip.file("Contents/header.xml")!.async("string");
+    const headerDoc = new DOMParser().parseFromString(headerXml, "application/xml");
+    const charPrNodes = Array.from(headerDoc.getElementsByTagName("*")).filter(
+      (node) => node.localName === "charPr",
+    );
+    const created = charPrNodes.find((charPr) => {
+      const underline = Array.from(charPr.children).find((child) => child.localName === "underline");
+      const strikeout = Array.from(charPr.children).find((child) => child.localName === "strikeout");
+      return (
+        underline?.getAttribute("type") === "SINGLE" &&
+        strikeout?.getAttribute("shape") === "SOLID"
+      );
+    });
+    expect(created).toBeTruthy();
+  });
+
+  it("does not create duplicate charPr when marks equal source charPr style", async () => {
+    const input = await makeFontStyleFixtureHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+    const doc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+
+    // import 결과를 그대로 저장 (textStyle mark가 source charPr와 동일한 상태)
+    const result = await applyProseMirrorDocToHwpx(
+      input,
+      doc,
+      parsed.segments,
+      parsed.extraSegmentsMap,
+      parsed.hwpxDocumentModel,
+    );
+    expect(result.integrityIssues).toEqual([]);
+
+    const outBuffer = await result.blob.arrayBuffer();
+    const outZip = await JSZip.loadAsync(outBuffer);
+    const headerXml = await outZip.file("Contents/header.xml")!.async("string");
+    const headerDoc = new DOMParser().parseFromString(headerXml, "application/xml");
+    const charPrNodes = Array.from(headerDoc.getElementsByTagName("*")).filter(
+      (node) => node.localName === "charPr",
+    );
+
+    // source fixture has one charPr(id=1). no-op save should not append new charPr.
+    expect(charPrNodes.length).toBe(1);
+    expect(charPrNodes[0].getAttribute("id")).toBe("1");
+  });
+
+  it("removes highlight by setting shadeColor to none", async () => {
+    const input = await makeHighlightedFontStyleFixtureHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+    const doc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+    const paragraph = (doc.content || []).find((node) => node.type === "paragraph");
+    const firstText = paragraph?.content?.find((node) => node.type === "text");
+    if (!firstText) {
+      throw new Error("text node not found");
+    }
+    // highlight/backgroundColor를 제거
+    firstText.marks = [{ type: "textStyle", attrs: { fontFamily: "바탕", fontSize: "10pt" } }];
+
+    const result = await applyProseMirrorDocToHwpx(
+      input,
+      doc,
+      parsed.segments,
+      parsed.extraSegmentsMap,
+      parsed.hwpxDocumentModel,
+    );
+    expect(result.integrityIssues).toEqual([]);
+
+    const outBuffer = await result.blob.arrayBuffer();
+    const outZip = await JSZip.loadAsync(outBuffer);
+    const headerXml = await outZip.file("Contents/header.xml")!.async("string");
+    const sectionXml = await outZip.file("Contents/section0.xml")!.async("string");
+    const headerDoc = new DOMParser().parseFromString(headerXml, "application/xml");
+
+    const charPrNodes = Array.from(headerDoc.getElementsByTagName("*")).filter(
+      (node) => node.localName === "charPr",
+    );
+    const cleared = charPrNodes.find((charPr) => (charPr.getAttribute("shadeColor") ?? "").toUpperCase() === "NONE");
+    expect(cleared).toBeTruthy();
+    const newCharPrId = cleared?.getAttribute("id");
+    expect(newCharPrId).toBeTruthy();
+    expect(sectionXml).toContain(`charPrIDRef="${newCharPrId}"`);
+  });
+
+  it("removes text color by falling back to black", async () => {
+    const input = await makeColoredFontStyleFixtureHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+    const doc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+    const paragraph = (doc.content || []).find((node) => node.type === "paragraph");
+    const firstText = paragraph?.content?.find((node) => node.type === "text");
+    if (!firstText) {
+      throw new Error("text node not found");
+    }
+    firstText.marks = [{ type: "textStyle", attrs: { fontFamily: "바탕", fontSize: "10pt" } }];
+
+    const result = await applyProseMirrorDocToHwpx(
+      input,
+      doc,
+      parsed.segments,
+      parsed.extraSegmentsMap,
+      parsed.hwpxDocumentModel,
+    );
+    expect(result.integrityIssues).toEqual([]);
+
+    const outBuffer = await result.blob.arrayBuffer();
+    const outZip = await JSZip.loadAsync(outBuffer);
+    const headerXml = await outZip.file("Contents/header.xml")!.async("string");
+    const sectionXml = await outZip.file("Contents/section0.xml")!.async("string");
+    const headerDoc = new DOMParser().parseFromString(headerXml, "application/xml");
+    const charPrNodes = Array.from(headerDoc.getElementsByTagName("*")).filter(
+      (node) => node.localName === "charPr",
+    );
+    const black = charPrNodes.find((charPr) => (charPr.getAttribute("textColor") ?? "").toUpperCase() === "#000000");
+    expect(black).toBeTruthy();
+    const newCharPrId = black?.getAttribute("id");
     expect(newCharPrId).toBeTruthy();
     expect(sectionXml).toContain(`charPrIDRef="${newCharPrId}"`);
   });
