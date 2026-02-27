@@ -96,6 +96,35 @@ function formatRecentSnapshotLabel(snapshot: RecentFileSnapshotMeta): string {
   return `${getRecentKindLabel(snapshot.kind)} | ${time} | ${snapshot.name}`;
 }
 
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") {
+        resolve(result);
+        return;
+      }
+      reject(new Error("이미지 데이터를 읽지 못했습니다."));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("이미지 로드 실패"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function readImageSize(src: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve) => {
+    const image = new window.Image();
+    image.onload = () => {
+      const width = Number.isFinite(image.naturalWidth) && image.naturalWidth > 0 ? image.naturalWidth : 320;
+      const height = Number.isFinite(image.naturalHeight) && image.naturalHeight > 0 ? image.naturalHeight : 180;
+      resolve({ width, height });
+    };
+    image.onerror = () => resolve({ width: 320, height: 180 });
+    image.src = src;
+  });
+}
+
 export function EditorToolbar({
   editor,
   sidebarCollapsed,
@@ -121,8 +150,10 @@ export function EditorToolbar({
 }: EditorToolbarProps) {
   const editorDisabled = !editor;
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [paraModalOpen, setParaModalOpen] = useState(false);
   const [charModalOpen, setCharModalOpen] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
 
   const currentFont = getCurrentFontFamily(editor);
   const currentSize = getCurrentFontSize(editor);
@@ -170,6 +201,30 @@ export function EditorToolbar({
     editor.chain().focus().updateAttributes("paragraph", attrs).run();
   };
 
+  const onPickImage = async (file: File) => {
+    if (!editor) {
+      return;
+    }
+    setImageUploading(true);
+    try {
+      const src = await readFileAsDataUrl(file);
+      const { width, height } = await readImageSize(src);
+      editor.chain().focus().setImage({
+        src,
+        alt: file.name,
+        title: file.name,
+        width,
+        height,
+        fileName: file.name,
+        mimeType: file.type || "image/png",
+      } as never).run();
+    } catch (error) {
+      console.error("이미지 삽입 실패", error);
+    } finally {
+      setImageUploading(false);
+    }
+  };
+
   return (
     <>
       <div className={styles.toolbar}>
@@ -181,6 +236,19 @@ export function EditorToolbar({
           onChange={(e) => {
             const file = e.target.files?.[0];
             if (file) onPickFile(file);
+            e.target.value = "";
+          }}
+        />
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              void onPickImage(file);
+            }
             e.target.value = "";
           }}
         />
@@ -534,6 +602,18 @@ export function EditorToolbar({
             groupClassName={styles.group}
             buttonClassName={styles.btn}
           />
+
+          <div className={styles.group}>
+            <button
+              type="button"
+              className={styles.btn}
+              disabled={editorDisabled || imageUploading}
+              onClick={() => imageInputRef.current?.click()}
+              title="이미지 삽입"
+            >
+              {imageUploading ? "이미지..." : "이미지"}
+            </button>
+          </div>
 
           <div className={styles.sep} />
 
