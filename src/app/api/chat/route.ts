@@ -319,11 +319,7 @@ async function runAgentLoop(
       messages,
     });
 
-    // Accumulate streamed text for later message reconstruction
-    let accumulatedText = "";
-
     stream.on("text", (textDelta) => {
-      accumulatedText += textDelta;
       sendSSE(controller, encoder, "text_delta", {
         type: "text_delta",
         content: textDelta,

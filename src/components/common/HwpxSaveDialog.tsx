@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useRef } from "react";
 import type { JSONContent } from "@tiptap/core";
 import styles from "./HwpxSaveDialog.module.css";
 
@@ -41,11 +41,7 @@ export function HwpxSaveDialog({
   onClose,
   onConfirm,
 }: HwpxSaveDialogProps) {
-  const [inputName, setInputName] = useState(defaultFileName);
-
-  useEffect(() => {
-    if (open) setInputName(defaultFileName);
-  }, [open, defaultFileName]);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   if (!open) return null;
 
@@ -54,7 +50,8 @@ export function HwpxSaveDialog({
   const sourceLabel = sourceFormat.toUpperCase();
 
   const handleConfirm = () => {
-    const trimmed = inputName.trim() || defaultFileName;
+    const raw = inputRef.current?.value ?? "";
+    const trimmed = raw.trim() || defaultFileName;
     const finalName = trimmed.toLowerCase().endsWith(".hwpx") ? trimmed : `${trimmed}.hwpx`;
     onConfirm(finalName);
   };
@@ -95,8 +92,8 @@ export function HwpxSaveDialog({
               id="hwpx-save-name"
               type="text"
               className={styles.fileNameInput}
-              value={inputName}
-              onChange={(e) => setInputName(e.target.value)}
+              ref={inputRef}
+              defaultValue={defaultFileName}
               onKeyDown={handleKeyDown}
               autoFocus
               spellCheck={false}

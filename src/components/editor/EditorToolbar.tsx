@@ -277,6 +277,13 @@ export function EditorToolbar({
           {/* ── 우측 패널 토글 (flex push) ── */}
           <div className={styles.panelToggles}>
             <Btn
+              label={sidebarCollapsed ? "패널+" : "패널-"}
+              title="사이드 패널 토글"
+              active={!sidebarCollapsed}
+              disabled={false}
+              onClick={onToggleSidebar}
+            />
+            <Btn
               label="개요"
               title="문서 개요"
               active={isTabActive("outline")}
