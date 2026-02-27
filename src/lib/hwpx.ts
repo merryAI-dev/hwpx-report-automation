@@ -368,7 +368,7 @@ export function scanTopLevelBlocks(xmlText: string): ScanBlocksResult {
     const blockStart = cursor;
 
     // localName 추출: '<' 이후, 콜론 있으면 콜론 뒤부터
-    let nameStart = cursor + 1;
+    const nameStart = cursor + 1;
     let nameEnd = nameStart;
     while (
       nameEnd < len &&

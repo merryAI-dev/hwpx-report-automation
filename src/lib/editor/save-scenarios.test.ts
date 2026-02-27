@@ -176,22 +176,16 @@ async function getOutputSectionXml(
   return outZip.file("Contents/section0.xml")!.async("string");
 }
 
-async function getOutputHeaderXml(
-  input: ArrayBuffer,
-  doc: JSONContent,
-  parsed: Awaited<ReturnType<typeof parseHwpxToProseMirror>>,
-): Promise<string> {
-  const result = await applyProseMirrorDocToHwpx(
-    input,
-    doc,
-    parsed.segments,
-    parsed.extraSegmentsMap,
-    parsed.hwpxDocumentModel,
-  );
-  expect(result.integrityIssues).toEqual([]);
-  const outBuf = await result.blob.arrayBuffer();
-  const outZip = await JSZip.loadAsync(outBuf);
-  return outZip.file("Contents/header.xml")?.async("string") ?? "";
+function countOccurrences(haystack: string, needle: string): number {
+  if (!needle) return 0;
+  return (haystack.match(new RegExp(needle.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"), "g")) || [])
+    .length;
+}
+
+function hasParagraphWithIdAndText(sectionXml: string, text: string): boolean {
+  const escaped = text.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  const re = new RegExp(`<hp:p\\b[^>]*\\bid="\\d+"[^>]*>[\\s\\S]*?<hp:t>${escaped}</hp:t>`);
+  return re.test(sectionXml);
 }
 
 // ─── 볼드 마크 단위 테스트 ───────────────────────────────────────────────────
@@ -228,6 +222,7 @@ describe("시나리오 2: 새 단락 추가 저장", () => {
     expect(xml).toContain("첫 번째 단락");
     expect(xml).toContain("두 번째 단락");
     expect(xml).toContain("사용자가 추가한 새 단락"); // ← 현재 실패 예상
+    expect(hasParagraphWithIdAndText(xml, "사용자가 추가한 새 단락")).toBe(true);
   });
 
   it("기존 단락 사이에 새 단락을 삽입하면 저장에 반영된다", async () => {
@@ -249,6 +244,22 @@ describe("시나리오 2: 새 단락 추가 저장", () => {
     const pos2 = xml.indexOf("두 번째 단락");
     expect(pos1).toBeLessThan(posNew);
     expect(posNew).toBeLessThan(pos2);
+  });
+
+  it("모델에 없는 paraId를 가진 새 단락도 orphan 처리되어 저장된다", async () => {
+    const input = await makeTwoParaHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+
+    const doc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+    doc.content!.push({
+      type: "paragraph",
+      attrs: { paraId: "dangling-para-id" },
+      content: [{ type: "text", text: "모델 불일치 신규 단락" }],
+    });
+
+    const xml = await getOutputSectionXml(input, doc, parsed);
+    expect(xml).toContain("모델 불일치 신규 단락");
+    expect(hasParagraphWithIdAndText(xml, "모델 불일치 신규 단락")).toBe(true);
   });
 });
 
@@ -284,7 +295,7 @@ describe("시나리오 4: 볼드 마크 저장 (핵심 버그)", () => {
       (n: JSONContent) => n.type === "text" && n.marks?.some((m) => m.type === "bold"),
     );
     const plainNode = para!.content!.find(
-      (n: JSONContent) => n.type === "text" && (!n.marks || n.marks.length === 0),
+      (n: JSONContent) => n.type === "text" && !n.marks?.some((m) => m.type === "bold"),
     );
     expect(boldNode?.text).toBe("금융위원장 김주현");
     expect(plainNode?.text).toBe("입니다.");
@@ -531,6 +542,7 @@ describe("시나리오 6: PPTX 변환 후 저장 (HWPX 경로)", () => {
     expect(sectionXml).toContain("슬라이드 제목");
     expect(sectionXml).toContain("기존 본문");
     expect(sectionXml).toContain("사용자가 추가한 내용");
+    expect(hasParagraphWithIdAndText(sectionXml, "사용자가 추가한 내용")).toBe(true);
   });
 });
 
@@ -554,7 +566,7 @@ describe("시나리오 5: 라운드트립 재파싱", () => {
       (n: JSONContent) => n.type === "text" && n.marks?.some((m) => m.type === "bold"),
     );
     const plainNode = para?.content?.find(
-      (n: JSONContent) => n.type === "text" && (!n.marks || n.marks.length === 0),
+      (n: JSONContent) => n.type === "text" && !n.marks?.some((m) => m.type === "bold"),
     );
 
     // 재파싱 후에도 볼드/비볼드 구분이 유지되어야 한다
@@ -776,5 +788,30 @@ describe("시나리오 7: 표 저장", () => {
     const outZip = await JSZip.loadAsync(outBuf);
     const sectionXml = await outZip.file("Contents/section0.xml")!.async("string");
     expect(sectionXml).toContain("기존 내용");
+  });
+
+  it("표가 있는 문서에서 새 단락을 추가해도 표 셀 텍스트가 top-level로 중복 주입되지 않는다", async () => {
+    const input = await makeTableWithParasHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+    expect(parsed.integrityIssues).toEqual([]);
+
+    const doc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+    doc.content!.push({
+      type: "paragraph",
+      content: [{ type: "text", text: "표 뒤에 추가한 신규 단락" }],
+    });
+
+    const result = await applyProseMirrorDocToHwpx(
+      input, doc, parsed.segments, parsed.extraSegmentsMap, parsed.hwpxDocumentModel,
+    );
+    expect(result.integrityIssues).toEqual([]);
+
+    const outBuf = await result.blob.arrayBuffer();
+    const outZip = await JSZip.loadAsync(outBuf);
+    const sectionXml = await outZip.file("Contents/section0.xml")!.async("string");
+
+    expect(countOccurrences(sectionXml, "A열")).toBe(1);
+    expect(countOccurrences(sectionXml, "B열")).toBe(1);
+    expect(countOccurrences(sectionXml, "표 뒤에 추가한 신규 단락")).toBe(1);
   });
 });

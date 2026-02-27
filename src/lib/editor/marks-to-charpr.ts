@@ -1,23 +1,250 @@
 import type { JSONContent } from "@tiptap/core";
 
+const FONT_REF_KEYS = ["hangul", "latin", "hanja", "japanese", "other", "symbol", "user"] as const;
+type FontRefKey = (typeof FONT_REF_KEYS)[number];
+const FONTFACE_LANG_BY_KEY: Record<FontRefKey, string> = {
+  hangul: "HANGUL",
+  latin: "LATIN",
+  hanja: "HANJA",
+  japanese: "JAPANESE",
+  other: "OTHER",
+  symbol: "SYMBOL",
+  user: "USER",
+};
+
+type TextStyleAttrs = {
+  color?: string;
+  backgroundColor?: string;
+  fontFamily?: string;
+  fontSizePt?: number;
+};
+
+function normalizeColor(raw: unknown): string | undefined {
+  if (typeof raw !== "string") {
+    return undefined;
+  }
+  const trimmed = raw.trim();
+  return trimmed.length > 0 ? trimmed : undefined;
+}
+
+function readTextStyleAttrs(marks: JSONContent["marks"]): TextStyleAttrs {
+  const textStyleMark = (marks ?? []).find((m) => m.type === "textStyle");
+  const attrs = (textStyleMark?.attrs ?? {}) as Record<string, unknown>;
+
+  const color = normalizeColor(attrs.color);
+  const backgroundColor = normalizeColor(attrs.backgroundColor);
+  const fontFamily =
+    typeof attrs.fontFamily === "string" && attrs.fontFamily.trim() ? attrs.fontFamily.trim() : undefined;
+
+  let fontSizePt: number | undefined;
+  if (typeof attrs.fontSize === "string" || typeof attrs.fontSize === "number") {
+    const raw = String(attrs.fontSize).trim();
+    const match = raw.match(/^\s*(-?\d+(?:\.\d+)?)\s*(?:pt|px)?\s*$/i);
+    if (match) {
+      const parsed = Number.parseFloat(match[1]);
+      if (Number.isFinite(parsed) && parsed > 0) {
+        fontSizePt = parsed;
+      }
+    }
+  }
+
+  return { color, backgroundColor, fontFamily, fontSizePt };
+}
+
+function hasTextStyleMark(marks: JSONContent["marks"]): boolean {
+  return (marks ?? []).some((mark) => mark.type === "textStyle");
+}
+
+function readHighlightColor(marks: JSONContent["marks"]): string | undefined {
+  const highlight = (marks ?? []).find((m) => m.type === "highlight");
+  const attrs = (highlight?.attrs ?? {}) as Record<string, unknown>;
+  return normalizeColor(attrs.color);
+}
+
+function readShadeColor(marks: JSONContent["marks"]): string | undefined {
+  const textStyle = readTextStyleAttrs(marks);
+  return textStyle.backgroundColor ?? readHighlightColor(marks);
+}
+
+function canonicalizeFontSizePt(value: number): string {
+  return String(Number(value.toFixed(2)));
+}
+
 /**
  * mark 조합의 고유 정렬 키.
  * mark 없음 → "base" (원본 charPrIDRef 그대로 사용)
  */
 export function markFingerprint(marks: JSONContent["marks"]): string {
   if (!marks || marks.length === 0) return "base";
-  return marks
+  const parts = marks
     .map((m) => {
       if (m.type === "textStyle" && m.attrs) {
-        const attrs = m.attrs as Record<string, unknown>;
-        const parts: string[] = [m.type];
-        if (attrs.color) parts.push(`color:${attrs.color}`);
-        return parts.join(",");
+        const textStyle = readTextStyleAttrs([m]);
+        const tokens: string[] = [];
+        if (textStyle.color) tokens.push(`color:${textStyle.color}`);
+        if (textStyle.backgroundColor) tokens.push(`backgroundColor:${textStyle.backgroundColor}`);
+        if (textStyle.fontFamily) tokens.push(`fontFamily:${textStyle.fontFamily}`);
+        if (textStyle.fontSizePt !== undefined) {
+          tokens.push(`fontSize:${canonicalizeFontSizePt(textStyle.fontSizePt)}`);
+        }
+        return tokens.length > 0 ? `${m.type},${tokens.join(",")}` : "";
+      }
+      if (m.type === "highlight" && m.attrs) {
+        const color = normalizeColor((m.attrs as Record<string, unknown>).color) ?? "default";
+        return `highlight,color:${color}`;
       }
       return m.type;
     })
+    .filter((part) => part.length > 0)
     .sort()
     .join("|");
+  return parts.length > 0 ? parts : "base";
+}
+
+function findChildByLocalName(parent: Element, localName: string): Element | null {
+  return Array.from(parent.children).find((child) => child.localName === localName) ?? null;
+}
+
+function findChildByLocalNames(parent: Element, localNames: string[]): Element | null {
+  const set = new Set(localNames);
+  return Array.from(parent.children).find((child) => set.has(child.localName)) ?? null;
+}
+
+function findOrCreateRefList(headerDoc: Document): Element {
+  const existing = Array.from(headerDoc.getElementsByTagName("*")).find((el) => el.localName === "refList");
+  if (existing) {
+    return existing;
+  }
+  const root = headerDoc.documentElement;
+  const ns = root.namespaceURI || "http://www.hancom.co.kr/hwpml/2011/head";
+  const prefix = root.prefix || "hh";
+  const created = headerDoc.createElementNS(ns, `${prefix}:refList`);
+  root.appendChild(created);
+  return created;
+}
+
+function findOrCreateFontfaces(headerDoc: Document): Element {
+  const refList = findOrCreateRefList(headerDoc);
+  const existing = findChildByLocalName(refList, "fontfaces");
+  if (existing) {
+    return existing;
+  }
+  const ns = refList.namespaceURI || "http://www.hancom.co.kr/hwpml/2011/head";
+  const prefix = refList.prefix || "hh";
+  const created = headerDoc.createElementNS(ns, `${prefix}:fontfaces`);
+  created.setAttribute("itemCnt", "0");
+  refList.appendChild(created);
+  return created;
+}
+
+function findOrCreateFontfaceByLang(
+  headerDoc: Document,
+  fontfacesEl: Element,
+  lang: string,
+): Element {
+  const existing = Array.from(fontfacesEl.children).find(
+    (child) => child.localName === "fontface" && (child.getAttribute("lang") ?? "").toUpperCase() === lang,
+  );
+  if (existing) {
+    return existing;
+  }
+  const ns = fontfacesEl.namespaceURI || "http://www.hancom.co.kr/hwpml/2011/head";
+  const prefix = fontfacesEl.prefix || "hh";
+  const created = headerDoc.createElementNS(ns, `${prefix}:fontface`);
+  created.setAttribute("lang", lang);
+  created.setAttribute("fontCnt", "0");
+  fontfacesEl.appendChild(created);
+  return created;
+}
+
+function ensureFontIdInFontface(
+  headerDoc: Document,
+  fontfaceEl: Element,
+  fontFamily: string,
+): string {
+  const existing = Array.from(fontfaceEl.children).find((child) => {
+    if (child.localName !== "font") {
+      return false;
+    }
+    return (child.getAttribute("face") ?? "").trim().toLowerCase() === fontFamily.trim().toLowerCase();
+  });
+  if (existing?.getAttribute("id")) {
+    return existing.getAttribute("id")!;
+  }
+
+  const fonts = Array.from(fontfaceEl.children).filter((child) => child.localName === "font");
+  const maxId = fonts.reduce((acc, font) => {
+    const id = Number.parseInt(font.getAttribute("id") ?? "-1", 10);
+    return Number.isFinite(id) ? Math.max(acc, id) : acc;
+  }, -1);
+  const newId = String(maxId + 1);
+
+  const ns = fontfaceEl.namespaceURI || "http://www.hancom.co.kr/hwpml/2011/head";
+  const prefix = fontfaceEl.prefix || "hh";
+  const fontEl = headerDoc.createElementNS(ns, `${prefix}:font`);
+  fontEl.setAttribute("id", newId);
+  fontEl.setAttribute("face", fontFamily);
+  fontEl.setAttribute("type", "TTF");
+  fontEl.setAttribute("isEmbedded", "0");
+  fontfaceEl.appendChild(fontEl);
+  fontfaceEl.setAttribute("fontCnt", String(fonts.length + 1));
+  return newId;
+}
+
+function ensureFontRefElement(cloned: Element, headerDoc: Document): Element {
+  const existing = findChildByLocalName(cloned, "fontRef");
+  if (existing) {
+    return existing;
+  }
+  const ns = cloned.namespaceURI || "http://www.hancom.co.kr/hwpml/2011/head";
+  const prefix = cloned.prefix || "hh";
+  const created = headerDoc.createElementNS(ns, `${prefix}:fontRef`);
+  for (const key of FONT_REF_KEYS) {
+    created.setAttribute(key, "0");
+  }
+  cloned.insertBefore(created, cloned.firstChild ?? null);
+  return created;
+}
+
+function applyTextStyleToCharPr(cloned: Element, marks: JSONContent["marks"], headerDoc: Document): void {
+  const textStyle = readTextStyleAttrs(marks);
+  const shadeColor = readShadeColor(marks);
+  if (textStyle.color) {
+    cloned.setAttribute("textColor", textStyle.color);
+  } else if (hasTextStyleMark(marks)) {
+    // textStyle mark가 존재하는데 color가 없으면 기본 검정으로 명시해 색상 해제를 반영한다.
+    cloned.setAttribute("textColor", "#000000");
+  }
+  cloned.setAttribute("shadeColor", shadeColor ?? "none");
+  if (textStyle.fontSizePt !== undefined) {
+    cloned.setAttribute("height", String(Math.round(textStyle.fontSizePt * 100)));
+  }
+  if (textStyle.fontFamily) {
+    const fontfacesEl = findOrCreateFontfaces(headerDoc);
+    const ids = {} as Record<FontRefKey, string>;
+    for (const key of FONT_REF_KEYS) {
+      const lang = FONTFACE_LANG_BY_KEY[key];
+      const fontface = findOrCreateFontfaceByLang(headerDoc, fontfacesEl, lang);
+      ids[key] = ensureFontIdInFontface(headerDoc, fontface, textStyle.fontFamily);
+    }
+    const fontfaceCount = Array.from(fontfacesEl.children).filter((child) => child.localName === "fontface").length;
+    fontfacesEl.setAttribute("itemCnt", String(fontfaceCount));
+
+    const fontRef = ensureFontRefElement(cloned, headerDoc);
+    for (const key of FONT_REF_KEYS) {
+      fontRef.setAttribute(key, ids[key]);
+    }
+  }
+}
+
+function normalizeCharPrForCompare(el: Element): string {
+  const cloned = el.cloneNode(true) as Element;
+  cloned.removeAttribute("id");
+  const shade = (cloned.getAttribute("shadeColor") ?? "").trim().toUpperCase();
+  if (shade === "NONE" || shade === "#FFFFFF" || shade === "#FFFFFFFF") {
+    cloned.removeAttribute("shadeColor");
+  }
+  return new XMLSerializer().serializeToString(cloned);
 }
 
 /**
@@ -57,30 +284,36 @@ export function applyMarksToCharPrElement(
   }
 
   // Underline: <hh:underline type="SINGLE|NONE" .../>
-  const underlineEl = Array.from(cloned.children).find((c) => c.localName === "underline");
-  if (underlineEl) {
-    if (markTypes.has("underline")) {
-      underlineEl.setAttribute("type", "SINGLE");
-      underlineEl.setAttribute("shape", "SOLID");
-    } else {
-      underlineEl.setAttribute("type", "NONE");
-    }
+  let underlineEl = Array.from(cloned.children).find((c) => c.localName === "underline");
+  if (markTypes.has("underline") && !underlineEl) {
+    underlineEl = headerDoc.createElementNS(ns, `${prefix}:underline`);
+    underlineEl.setAttribute("color", "#000000");
+    cloned.appendChild(underlineEl);
   }
-  // underline 자식이 없는 charPr에 대해서는 추가하지 않음
+  if (underlineEl) {
+    underlineEl.setAttribute("type", markTypes.has("underline") ? "SINGLE" : "NONE");
+    underlineEl.setAttribute("shape", "SOLID");
+  }
 
   // Strike: <hh:strikeout shape="SOLID|NONE" .../>
-  const strikeoutEl = Array.from(cloned.children).find((c) => c.localName === "strikeout");
+  let strikeoutEl = Array.from(cloned.children).find((c) => c.localName === "strikeout");
+  if (markTypes.has("strike") && !strikeoutEl) {
+    strikeoutEl = headerDoc.createElementNS(ns, `${prefix}:strikeout`);
+    strikeoutEl.setAttribute("color", "#000000");
+    cloned.appendChild(strikeoutEl);
+  }
   if (strikeoutEl) {
     strikeoutEl.setAttribute("shape", markTypes.has("strike") ? "SOLID" : "NONE");
   }
-  // strikeout 자식이 없는 charPr에 대해서는 추가하지 않음
 
-  // Superscript: <hh:superscript/> 자식 요소 존재 여부
-  const hasSuperscript = Array.from(cloned.children).some((c) => c.localName === "superscript");
+  // Superscript: HWPX uses <hh:supscript/> in real files, but support both spellings.
+  const hasSuperscript = Array.from(cloned.children).some(
+    (c) => c.localName === "supscript" || c.localName === "superscript",
+  );
   if (markTypes.has("superscript") && !hasSuperscript) {
-    cloned.appendChild(headerDoc.createElementNS(ns, `${prefix}:superscript`));
+    cloned.appendChild(headerDoc.createElementNS(ns, `${prefix}:supscript`));
   } else if (!markTypes.has("superscript") && hasSuperscript) {
-    const el = Array.from(cloned.children).find((c) => c.localName === "superscript");
+    const el = findChildByLocalNames(cloned, ["supscript", "superscript"]);
     if (el) cloned.removeChild(el);
   }
 
@@ -129,16 +362,17 @@ export function ensureCharPrForMarks(params: {
   if (!sourceCharPr) return baseCharPrId; // 소스 없으면 기본값 유지
 
   const cloned = sourceCharPr.cloneNode(true) as Element;
+  applyMarksToCharPrElement(cloned, marks, headerDoc);
+  applyTextStyleToCharPr(cloned, marks, headerDoc);
+
+  // marks 적용 결과가 source와 동일하면 새 charPr를 만들지 않고 base를 재사용한다.
+  if (normalizeCharPrForCompare(cloned) === normalizeCharPrForCompare(sourceCharPr)) {
+    charPrCache.set(cacheKey, baseCharPrId);
+    return baseCharPrId;
+  }
+
   const newId = String(nextCharPrId.value++);
   cloned.setAttribute("id", newId);
-  applyMarksToCharPrElement(cloned, marks, headerDoc);
-
-  // Apply textColor from textStyle mark
-  const textStyleMark = (marks ?? []).find((m) => m.type === "textStyle");
-  const textColor = (textStyleMark?.attrs as Record<string, unknown> | undefined)?.color as string | undefined;
-  if (textColor) {
-    cloned.setAttribute("textColor", textColor);
-  }
 
   charPropertiesEl.appendChild(cloned);
   charPrById.set(newId, cloned);
