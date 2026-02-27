@@ -1,129 +1,83 @@
-/* HWP-like toolbar: dense, flat, desktop-app feel */
 .toolbar {
   display: flex;
-  flex-wrap: wrap;
-  align-items: center;
-  gap: 2px;
-  padding: 3px 6px;
-  background: #f0f0f0;
-  border-bottom: 1px solid #c0c0c0;
-  border-top: 1px solid #c0c0c0;
-  min-height: 36px;
-  user-select: none;
+  flex-direction: column;
+  padding: 8px 16px;
+  background: rgba(255, 255, 255, 0.75);
+  backdrop-filter: blur(15px);
+  -webkit-backdrop-filter: blur(15px);
+  border-bottom: 1px solid rgba(229, 231, 235, 0.5);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  gap: 8px;
 }
 
-/* Visual separator between groups */
-.sep {
-  width: 1px;
-  height: 22px;
-  background: #b8b8b8;
-  margin: 0 4px;
-  flex-shrink: 0;
+.toolbarRow {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: nowrap;
 }
 
 .group {
   display: flex;
   align-items: center;
-  gap: 1px;
+  gap: 4px;
+  background: rgba(243, 244, 246, 0.5);
+  padding: 3px;
+  border-radius: 8px;
 }
 
-/* Toolbar button */
+.sep {
+  width: 1px;
+  height: 20px;
+  background: rgba(209, 213, 219, 0.5);
+}
+
 .btn {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 26px;
-  height: 26px;
-  padding: 0 5px;
-  border: 1px solid transparent;
-  border-radius: 3px;
+  border: none;
   background: transparent;
-  font-size: 12px;
-  font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+  padding: 5px 10px;
+  font-size: 13px;
+  font-weight: 500;
+  color: #4b5563;
+  border-radius: 6px;
   cursor: pointer;
+  transition: all 0.2s;
   white-space: nowrap;
-  color: #1a1a1a;
-  transition: background 0.08s, border-color 0.08s;
 }
 
 .btn:hover:not(:disabled) {
-  background: #d8e8f8;
-  border-color: #90b4d4;
-}
-
-.btn:active:not(:disabled) {
-  background: #c0d8f0;
-  border-color: #6090c0;
-}
-
-.btn:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
+  background: rgba(255, 255, 255, 0.8);
+  color: #2563eb;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
 }
 
 .btnActive {
-  background: #d0e4f8 !important;
-  border-color: #5590c8 !important;
+  background: #fff !important;
+  color: #2563eb !important;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
 }
 
-/* Font family dropdown */
-.fontSelect {
-  height: 24px;
-  width: 120px;
-  font-size: 12px;
-  font-family: '맑은 고딕', 'Malgun Gothic', sans-serif;
-  border: 1px solid #b4b4b4;
-  border-radius: 2px;
-  background: #fff;
-  padding: 0 2px;
+.fontSelect, .sizeSelect, .recentSelect {
+  border: none;
+  background: transparent;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: #374151;
+  outline: none;
   cursor: pointer;
 }
 
-.fontSelect:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-/* Font size dropdown */
-.sizeSelect {
-  height: 24px;
-  width: 52px;
-  font-size: 12px;
-  font-family: '맑은 고딕', 'Malgun Gothic', sans-serif;
-  border: 1px solid #b4b4b4;
-  border-radius: 2px;
-  background: #fff;
-  padding: 0 2px;
-  cursor: pointer;
-}
-
-.sizeSelect:disabled {
-  opacity: 0.45;
-  cursor: not-allowed;
-}
-
-/* Download link next to export button */
-.downloadLink {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  min-width: 22px;
-  height: 26px;
-  font-size: 14px;
-  color: #0369a1;
-  text-decoration: none;
-  font-weight: 700;
-}
-
-.downloadLink:hover {
-  color: #0284c7;
-  text-decoration: underline;
-}
-
-/* Panel toggle buttons pushed to the right */
 .panelToggles {
-  display: flex;
-  align-items: center;
-  gap: 1px;
   margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.downloadLink {
+  font-size: 16px;
+  color: #2563eb;
+  padding: 0 8px;
+  font-weight: bold;
 }

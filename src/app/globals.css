@@ -500,6 +500,43 @@ button {
   50% { opacity: 0.4; }
 }
 
+.chat-thinking {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  font-size: 12px;
+  color: #6b7280;
+  animation: fadeInMsg 0.35s ease;
+}
+
+.chat-thinking-dots {
+  display: inline-block;
+  width: 16px;
+  letter-spacing: 1px;
+  color: #9ca3af;
+}
+
+@keyframes fadeInMsg {
+  from { opacity: 0; transform: translateY(2px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+.streaming-cursor {
+  display: inline-block;
+  width: 2px;
+  height: 0.9em;
+  background-color: currentColor;
+  margin-left: 1px;
+  vertical-align: text-bottom;
+  opacity: 0.7;
+  animation: blink-cursor 1s step-end infinite;
+}
+
+@keyframes blink-cursor {
+  0%, 100% { opacity: 0.7; }
+  50%       { opacity: 0; }
+}
+
 .chat-tool-calls {
   display: flex;
   flex-wrap: wrap;
@@ -682,4 +719,51 @@ button {
 
 .chat-clear-btn:hover:not(:disabled) {
   color: #6b7280;
+}
+
+/* ── Form Mode Highlights ── */
+.form-mode-active .ProseMirror [data-field-type] {
+  background-color: rgba(59, 130, 246, 0.08); /* Light blue bg */
+  border: 1px dashed #3b82f6;
+  border-radius: 4px;
+  padding: 4px 8px;
+  position: relative;
+  transition: all 0.2s ease-in-out;
+}
+
+.form-mode-active .ProseMirror [data-field-type]:hover {
+  background-color: rgba(59, 130, 246, 0.15);
+  border-style: solid;
+}
+
+.form-mode-active .ProseMirror [data-field-type]::before {
+  content: attr(data-field-type);
+  position: absolute;
+  top: -18px;
+  left: 0;
+  font-size: 10px;
+  font-weight: bold;
+  color: #2563eb;
+  background: #eff6ff;
+  padding: 0 4px;
+  border: 1px solid #3b82f6;
+  border-radius: 2px;
+  line-height: 1.2;
+  text-transform: uppercase;
+  pointer-events: none;
+}
+
+/* Dim non-field content in form mode to focus on inputs */
+.form-mode-active .ProseMirror p:not([data-field-type]),
+.form-mode-active .ProseMirror h1:not([data-field-type]),
+.form-mode-active .ProseMirror h2:not([data-field-type]),
+.form-mode-active .ProseMirror h3:not([data-field-type]) {
+  opacity: 0.4;
+  filter: grayscale(0.5);
+  pointer-events: none; /* 이 부분이 핵심: 필드가 아니면 클릭/수정 불가 */
+}
+
+.form-mode-active .ProseMirror [data-field-type] {
+  pointer-events: auto !important; /* 필드는 편집 가능 */
+  cursor: text;
 }

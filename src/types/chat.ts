@@ -58,9 +58,18 @@ export type ContentBlock =
   | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
   | { type: "tool_result"; tool_use_id: string; content: string };
 
+export type TableContext = {
+  tableIndex: number;
+  tableId: string;
+  headers: string[];
+  rowCount: number;
+  colCount: number;
+};
+
 export type DocumentContext = {
   segments: DocumentContextSegment[];
   fileName: string;
+  tables?: TableContext[];
 };
 
 export type DocumentContextSegment = {

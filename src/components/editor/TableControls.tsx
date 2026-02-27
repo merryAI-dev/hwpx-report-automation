@@ -4,16 +4,18 @@ import type { Editor } from "@tiptap/core";
 
 type TableControlsProps = {
   editor: Editor | null;
+  groupClassName: string;
+  buttonClassName: string;
 };
 
-export function TableControls({ editor }: TableControlsProps) {
+export function TableControls({ editor, groupClassName, buttonClassName }: TableControlsProps) {
   const disabled = !editor;
 
   return (
-    <div className="toolbar-group">
+    <div className={groupClassName}>
       <button
         type="button"
-        className="toolbar-btn"
+        className={buttonClassName}
         disabled={disabled}
         onClick={() => editor?.chain().focus().insertTable({ rows: 3, cols: 4, withHeaderRow: false }).run()}
       >
@@ -21,7 +23,7 @@ export function TableControls({ editor }: TableControlsProps) {
       </button>
       <button
         type="button"
-        className="toolbar-btn"
+        className={buttonClassName}
         disabled={disabled || !editor?.can().addRowAfter()}
         onClick={() => editor?.chain().focus().addRowAfter().run()}
       >
@@ -29,7 +31,7 @@ export function TableControls({ editor }: TableControlsProps) {
       </button>
       <button
         type="button"
-        className="toolbar-btn"
+        className={buttonClassName}
         disabled={disabled || !editor?.can().addColumnAfter()}
         onClick={() => editor?.chain().focus().addColumnAfter().run()}
       >
@@ -37,7 +39,7 @@ export function TableControls({ editor }: TableControlsProps) {
       </button>
       <button
         type="button"
-        className="toolbar-btn"
+        className={buttonClassName}
         disabled={disabled || !editor?.can().deleteTable()}
         onClick={() => editor?.chain().focus().deleteTable().run()}
       >
@@ -46,4 +48,3 @@ export function TableControls({ editor }: TableControlsProps) {
     </div>
   );
 }
-

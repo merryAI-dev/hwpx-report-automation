@@ -39,6 +39,7 @@ export async function parsePptxToProseMirror(
       segments: [],
       extraSegmentsMap: {},
       integrityIssues: warnings,
+      hwpxDocumentModel: null,
     };
   }
 
@@ -281,5 +282,6 @@ function slidesToDocument(
     segments,
     extraSegmentsMap: {},
     integrityIssues: warnings,
+    hwpxDocumentModel: null,
   };
 }

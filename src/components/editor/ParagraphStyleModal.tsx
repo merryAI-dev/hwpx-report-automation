@@ -19,29 +19,43 @@ type ParagraphStyleState = {
   spaceAfter: number;   // pt
 };
 
+/** 1 HWPUNIT = 25.4/7200 mm */
+const HWPUNIT_PER_MM = 7200 / 25.4;
+/** 1 pt = 100 HWPUNIT */
+const HWPUNIT_PER_PT = 100;
+
 /** Read current paragraph attrs from editor selection */
 function readCurrentParaStyle(editor: Editor): ParagraphStyleState {
   const attrs = editor.getAttributes("paragraph") as {
-    textAlign?: string;
-    style?: string;
+    hwpxAlign?: string | null;
+    hwpxLineSpacing?: number | null;
+    hwpxLeftIndent?: number | null;
+    hwpxRightIndent?: number | null;
+    hwpxFirstLineIndent?: number | null;
+    hwpxSpaceBefore?: number | null;
+    hwpxSpaceAfter?: number | null;
+    textAlign?: string | null;
   };
-  const align = (attrs.textAlign ?? "left") as ParagraphStyleState["align"];
 
-  // Parse inline style for spacing hints (best-effort)
-  const style = attrs.style ?? "";
-  const parse = (prop: string, defaultVal: number) => {
-    const m = style.match(new RegExp(`${prop}:\\s*([\\d.]+)`));
-    return m ? Number.parseFloat(m[1]) : defaultVal;
-  };
+  // Convert HWPUNIT → display units, round to 1 decimal
+  const toMm = (v: number | null | undefined) =>
+    v ? Math.round((v / HWPUNIT_PER_MM) * 10) / 10 : 0;
+  const toPt = (v: number | null | undefined) =>
+    v ? Math.round((v / HWPUNIT_PER_PT) * 10) / 10 : 0;
+
+  const rawAlign = attrs.hwpxAlign?.toLowerCase() ?? attrs.textAlign ?? "left";
+  const align = (["left", "center", "right", "justify"].includes(rawAlign)
+    ? rawAlign
+    : "left") as ParagraphStyleState["align"];
 
   return {
     align,
-    leftIndent: 0,
-    rightIndent: 0,
-    firstLine: 0,
-    lineHeight: parse("line-height", 1.6) * 100,
-    spaceBefore: 0,
-    spaceAfter: parse("margin-bottom", 0) * 0.75, // rough px→pt
+    leftIndent: toMm(attrs.hwpxLeftIndent),
+    rightIndent: toMm(attrs.hwpxRightIndent),
+    firstLine: toMm(attrs.hwpxFirstLineIndent),
+    lineHeight: attrs.hwpxLineSpacing ?? 160,
+    spaceBefore: toPt(attrs.hwpxSpaceBefore),
+    spaceAfter: toPt(attrs.hwpxSpaceAfter),
   };
 }
 
@@ -53,38 +67,26 @@ export function ParagraphStyleModal({ editor, onClose }: ParagraphStyleModalProp
   };
 
   const onApply = () => {
+    // Convert display units → HWPUNIT
+    const mmToHwpunit = (mm: number) => Math.round(mm * HWPUNIT_PER_MM);
+    const ptToHwpunit = (pt: number) => Math.round(pt * HWPUNIT_PER_PT);
+
     const chain = editor.chain().focus();
 
-    // Text alignment
+    // Text alignment (TipTap textAlign for visual rendering)
     chain.setTextAlign(state.align);
 
-    // Build inline style
-    const styleTokens: string[] = [];
-    if (state.lineHeight !== 160) {
-      styleTokens.push(`line-height: ${(state.lineHeight / 100).toFixed(2)}`);
-    }
-    if (state.leftIndent) {
-      styleTokens.push(`margin-left: ${state.leftIndent}mm`);
-    }
-    if (state.rightIndent) {
-      styleTokens.push(`margin-right: ${state.rightIndent}mm`);
-    }
-    if (state.firstLine > 0) {
-      styleTokens.push(`text-indent: ${state.firstLine}mm`);
-    } else if (state.firstLine < 0) {
-      styleTokens.push(`margin-left: ${Math.abs(state.firstLine)}mm`);
-      styleTokens.push(`text-indent: ${state.firstLine}mm`);
-    }
-    if (state.spaceBefore) {
-      styleTokens.push(`margin-top: ${(state.spaceBefore / 0.75).toFixed(1)}px`);
-    }
-    if (state.spaceAfter) {
-      styleTokens.push(`margin-bottom: ${(state.spaceAfter / 0.75).toFixed(1)}px`);
-    }
+    // HWPX paraPr attrs for roundtrip export
+    chain.updateAttributes("paragraph", {
+      hwpxAlign: state.align.toUpperCase(),
+      hwpxLineSpacing: state.lineHeight,
+      hwpxLeftIndent: mmToHwpunit(state.leftIndent),
+      hwpxRightIndent: mmToHwpunit(state.rightIndent),
+      hwpxFirstLineIndent: mmToHwpunit(state.firstLine),
+      hwpxSpaceBefore: ptToHwpunit(state.spaceBefore),
+      hwpxSpaceAfter: ptToHwpunit(state.spaceAfter),
+    });
 
-    if (styleTokens.length) {
-      chain.updateAttributes("paragraph", { style: styleTokens.join("; ") });
-    }
     chain.run();
     onClose();
   };
