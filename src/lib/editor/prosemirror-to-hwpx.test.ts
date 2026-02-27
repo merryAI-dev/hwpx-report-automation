@@ -341,7 +341,7 @@ describe("collectDocumentEdits", () => {
     const result = collectDocumentEdits(doc, sourceSegments);
     expect(
       result.warnings.some((warning) => warning.includes("객체 노드(image)")),
-    ).toBe(true);
+    ).toBe(false);
     expect(
       result.warnings.some((warning) => warning.includes("표식(link)")),
     ).toBe(true);
@@ -365,7 +365,7 @@ describe("collectExportCompatibilityWarnings", () => {
       ],
     };
     const warnings = collectExportCompatibilityWarnings(doc);
-    expect(warnings.some((warning) => warning.includes("객체 노드(image)"))).toBe(true);
+    expect(warnings.some((warning) => warning.includes("객체 노드(image)"))).toBe(false);
     expect(warnings.some((warning) => warning.includes("객체 노드(blockquote)"))).toBe(true);
     expect(warnings.some((warning) => warning.includes("표식(code)"))).toBe(true);
     expect(warnings.some((warning) => warning.includes("표식(link)"))).toBe(true);
@@ -604,6 +604,56 @@ async function makeHeadingStyleFixtureHwpx(): Promise<ArrayBuffer> {
   </hp:p>
 </hp:sec>`,
   );
+  return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
+}
+
+async function makeImageFixtureHwpx(): Promise<ArrayBuffer> {
+  const zip = new JSZip();
+  zip.file("mimetype", "application/hwp+zip", { compression: "STORE" });
+  zip.file("version.xml", `<?xml version="1.0" encoding="UTF-8"?><version app="test"/>`);
+  zip.file(
+    "Contents/content.hpf",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<opf:package xmlns:opf="http://www.idpf.org/2007/opf">
+  <opf:manifest>
+    <opf:item id="header" href="Contents/header.xml" media-type="application/xml"/>
+    <opf:item id="section0" href="Contents/section0.xml" media-type="application/xml"/>
+    <opf:item id="settings" href="settings.xml" media-type="application/xml"/>
+  </opf:manifest>
+  <opf:spine>
+    <opf:itemref idref="header" linear="yes"/>
+    <opf:itemref idref="section0" linear="yes"/>
+  </opf:spine>
+</opf:package>`,
+  );
+  zip.file(
+    "Contents/header.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head">
+  <hh:refList>
+    <hh:charProperties itemCnt="1">
+      <hh:charPr id="1" height="1000" textColor="#000000"/>
+    </hh:charProperties>
+    <hh:paraProperties itemCnt="1">
+      <hh:paraPr id="0"/>
+    </hh:paraProperties>
+    <hh:styles>
+      <hh:style id="0" name="바탕글" engName="Normal" type="para" paraPrIDRef="0" charPrIDRef="1"/>
+    </hh:styles>
+  </hh:refList>
+</hh:head>`,
+  );
+  zip.file(
+    "Contents/section0.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hp:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">
+  <hp:p id="1" paraPrIDRef="0" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">
+    <hp:run charPrIDRef="1"><hp:t>원문</hp:t></hp:run>
+    <hp:linesegarray/>
+  </hp:p>
+</hp:sec>`,
+  );
+  zip.file("settings.xml", `<?xml version="1.0" encoding="UTF-8"?><settings/>`);
   return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
 }
 
@@ -1051,5 +1101,77 @@ describe("applyProseMirrorDocToHwpx heading style sync", () => {
       /<hp:p\b[^>]*styleIDRef="1"[^>]*>[\s\S]*?<hp:t>새 개요 단락<\/hp:t>/,
     );
     expect(orphanHeadingMatch).toBeTruthy();
+  });
+});
+
+describe("applyProseMirrorDocToHwpx image patch", () => {
+  it("embeds base64 image into BinData and section pic xml", async () => {
+    const input = await makeImageFixtureHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+    const doc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+    const imageDataUrl =
+      "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO7Y5bQAAAAASUVORK5CYII=";
+
+    doc.content = [
+      ...(doc.content ?? []),
+      {
+        type: "paragraph",
+        content: [
+          { type: "text", text: "이미지:" },
+          {
+            type: "image",
+            attrs: {
+              src: imageDataUrl,
+              width: 24,
+              height: 24,
+              fileName: "dot.png",
+              mimeType: "image/png",
+            },
+          },
+          { type: "text", text: "끝" },
+        ],
+      },
+    ];
+
+    const result = await applyProseMirrorDocToHwpx(
+      input,
+      doc,
+      parsed.segments,
+      parsed.extraSegmentsMap,
+      parsed.hwpxDocumentModel,
+    );
+    expect(result.integrityIssues).toEqual([]);
+    expect(result.warnings.some((warning) => warning.includes("객체 노드(image)"))).toBe(false);
+
+    const outBuffer = await result.blob.arrayBuffer();
+    const outZip = await JSZip.loadAsync(outBuffer);
+    const contentHpf = await outZip.file("Contents/content.hpf")!.async("string");
+    const sectionXml = await outZip.file("Contents/section0.xml")!.async("string");
+    const contentDoc = new DOMParser().parseFromString(contentHpf, "application/xml");
+    const imageItem = Array.from(contentDoc.getElementsByTagName("*")).find((node) => {
+      if (node.localName !== "item") {
+        return false;
+      }
+      const href = node.getAttribute("href") ?? "";
+      return href.startsWith("BinData/image") && (node.getAttribute("media-type") ?? "") === "image/png";
+    });
+    expect(imageItem).toBeTruthy();
+    if (!imageItem) {
+      return;
+    }
+    const imageId = imageItem.getAttribute("id");
+    const imageHref = imageItem.getAttribute("href");
+    expect(imageId).toBeTruthy();
+    expect(imageHref).toBeTruthy();
+    if (!imageId || !imageHref) {
+      return;
+    }
+
+    expect(outZip.file(imageHref)).toBeTruthy();
+    expect(sectionXml).toContain("<hp:pic");
+    expect(sectionXml).toContain('xmlns:hc="http://www.hancom.co.kr/hwpml/2011/core"');
+    expect(sectionXml).toContain(`binaryItemIDRef="${imageId}"`);
+    expect(sectionXml).toContain("<hp:t>이미지:</hp:t>");
+    expect(sectionXml).toContain("<hp:t>끝</hp:t>");
   });
 });
