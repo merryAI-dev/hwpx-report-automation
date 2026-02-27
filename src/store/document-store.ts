@@ -21,6 +21,8 @@ export type EditHistoryItem = {
   timestamp: number;
   summary: string;
   editCount: number;
+  actor: "system" | "ai" | "user";
+  snapshotDoc: JSONContent | null;
 };
 
 export type BatchSuggestionItem = {
@@ -132,7 +134,14 @@ type DocumentState = {
   setAiBusy: (aiBusy: boolean) => void;
   setDownload: (download: DownloadState) => void;
   setRenderResult: (html: string, elementMap: Record<string, RenderElementInfo>) => void;
-  pushHistory: (summary: string, editCount: number) => void;
+  pushHistory: (
+    summary: string,
+    editCount: number,
+    options?: {
+      actor?: "system" | "ai" | "user";
+      snapshotDoc?: JSONContent | null;
+    },
+  ) => void;
 
   // Phase 2-1
   setBatchDecision: (id: string, decision: "accepted" | "rejected") => void;
@@ -296,7 +305,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   setAiBusy: (aiBusy) => set({ aiBusy }),
   setDownload: (download) => set({ download }),
   setRenderResult: (renderHtml, renderElementMap) => set({ renderHtml, renderElementMap }),
-  pushHistory: (summary, editCount) =>
+  pushHistory: (summary, editCount, options) =>
     set((state) => ({
       history: [
         {
@@ -304,6 +313,13 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
           timestamp: Date.now(),
           summary,
           editCount,
+          actor: options?.actor ?? "system",
+          snapshotDoc:
+            options?.snapshotDoc !== undefined
+              ? options.snapshotDoc
+              : state.editorDoc
+                ? JSON.parse(JSON.stringify(state.editorDoc))
+                : null,
         },
         ...state.history,
       ].slice(0, 100),

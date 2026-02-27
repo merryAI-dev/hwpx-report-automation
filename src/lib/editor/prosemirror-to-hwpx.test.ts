@@ -1,7 +1,11 @@
 import JSZip from "jszip";
 import { describe, expect, it } from "vitest";
 import type { JSONContent } from "@tiptap/core";
-import { applyProseMirrorDocToHwpx, collectDocumentEdits } from "./prosemirror-to-hwpx";
+import {
+  applyProseMirrorDocToHwpx,
+  collectDocumentEdits,
+  collectExportCompatibilityWarnings,
+} from "./prosemirror-to-hwpx";
 import type { EditorSegment } from "./hwpx-to-prosemirror";
 import { parseHwpxToProseMirror } from "./hwpx-to-prosemirror";
 
@@ -295,6 +299,76 @@ describe("collectDocumentEdits", () => {
     const result = collectDocumentEdits(doc, sourceSegments);
     expect(result.edits).toEqual([]);
     expect(result.warnings).toEqual([]);
+  });
+
+  it("includes compatibility warnings for unsupported nodes/marks", () => {
+    const sourceSegments: EditorSegment[] = [
+      {
+        segmentId: "seg-1",
+        fileName: "Contents/section0.xml",
+        textIndex: 1,
+        text: "원문 A",
+        originalText: "원문 A",
+        tag: "hp:t",
+        styleHints: {},
+      },
+    ];
+    const doc: JSONContent = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          attrs: {
+            segmentId: "seg-1",
+            fileName: "Contents/section0.xml",
+            textIndex: 1,
+            originalText: "원문 A",
+          },
+          content: [
+            {
+              type: "text",
+              text: "원문 A",
+              marks: [{ type: "link", attrs: { href: "https://example.com" } }],
+            },
+          ],
+        },
+        {
+          type: "image",
+          attrs: { src: "https://example.com/test.png" },
+        },
+      ],
+    };
+    const result = collectDocumentEdits(doc, sourceSegments);
+    expect(
+      result.warnings.some((warning) => warning.includes("객체 노드(image)")),
+    ).toBe(true);
+    expect(
+      result.warnings.some((warning) => warning.includes("표식(link)")),
+    ).toBe(true);
+  });
+});
+
+describe("collectExportCompatibilityWarnings", () => {
+  it("detects unsupported object nodes and marks", () => {
+    const doc: JSONContent = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          content: [
+            { type: "text", text: "A", marks: [{ type: "code" }] },
+            { type: "text", text: "B", marks: [{ type: "link", attrs: { href: "#" } }] },
+          ],
+        },
+        { type: "image", attrs: { src: "x" } },
+        { type: "blockquote", content: [{ type: "paragraph", content: [{ type: "text", text: "q" }] }] },
+      ],
+    };
+    const warnings = collectExportCompatibilityWarnings(doc);
+    expect(warnings.some((warning) => warning.includes("객체 노드(image)"))).toBe(true);
+    expect(warnings.some((warning) => warning.includes("객체 노드(blockquote)"))).toBe(true);
+    expect(warnings.some((warning) => warning.includes("표식(code)"))).toBe(true);
+    expect(warnings.some((warning) => warning.includes("표식(link)"))).toBe(true);
   });
 });
 

@@ -23,7 +23,11 @@ import { buildDirtySummary, buildOutlineFromDoc } from "@/lib/editor/document-st
 import { parseHwpxToProseMirror } from "@/lib/editor/hwpx-to-prosemirror";
 import { parseDocxToProseMirror } from "@/lib/editor/docx-to-prosemirror";
 import { parsePptxToProseMirror } from "@/lib/editor/pptx-to-prosemirror";
-import { applyProseMirrorDocToHwpx, collectDocumentEdits } from "@/lib/editor/prosemirror-to-hwpx";
+import {
+  applyProseMirrorDocToHwpx,
+  collectDocumentEdits,
+  collectExportCompatibilityWarnings,
+} from "@/lib/editor/prosemirror-to-hwpx";
 import { buildHwpxModelFromDoc } from "@/lib/editor/hwpx-template-synthesizer";
 import { exportToPdf } from "@/lib/editor/export-pdf";
 import { exportToDocx } from "@/lib/editor/export-docx";
@@ -344,6 +348,8 @@ export default function Home() {
   const autoSaveInFlightRef = useRef(false);
   const docRevisionRef = useRef(0);
   const lastAutoSavedRevisionRef = useRef(-1);
+  const derivedStateTimerRef = useRef<number | null>(null);
+  const pendingDerivedDocRef = useRef<JSONContent | null>(null);
 
   const {
     fileName,
@@ -531,6 +537,32 @@ export default function Home() {
   }, [download.blob]);
 
   const dirtySummary = useMemo(() => buildDirtySummary(editsPreview), [editsPreview]);
+  const compatibilityWarnings = useMemo(
+    () => (editorDoc ? collectExportCompatibilityWarnings(editorDoc) : []),
+    [editorDoc],
+  );
+  const collaborationStats = useMemo(
+    () => ({
+      historyCount: history.length,
+      aiActionCount: history.filter((item) => item.actor === "ai").length,
+    }),
+    [history],
+  );
+  const performanceStats = useMemo(
+    () => ({
+      segmentCount: sourceSegments.length,
+      complexity: sourceSegments.length > 2500 ? "high" : sourceSegments.length > 800 ? "medium" : "low",
+    }),
+    [sourceSegments.length],
+  );
+  const qaStats = useMemo(
+    () => ({
+      integrityIssueCount: integrityIssues.length,
+      exportWarningCount: exportWarnings.length,
+      compatibilityWarningCount: compatibilityWarnings.length,
+    }),
+    [integrityIssues.length, exportWarnings.length, compatibilityWarnings.length],
+  );
   const batchItems = useMemo(
     () => collectSectionBatchItems(editorDoc, batchMode === "document" ? null : selection.selectedSegmentId),
     [editorDoc, selection.selectedSegmentId, batchMode],
@@ -720,12 +752,46 @@ export default function Home() {
     }
   };
 
+  const flushDerivedState = useCallback(
+    (doc: JSONContent) => {
+      setOutline(buildOutlineFromDoc(doc));
+      const next = collectDocumentEdits(doc, sourceSegments, extraSegmentsMap);
+      setEditsPreview(next.edits);
+    },
+    [setOutline, sourceSegments, extraSegmentsMap, setEditsPreview],
+  );
+
+  const scheduleDerivedStateUpdate = useCallback(
+    (doc: JSONContent) => {
+      pendingDerivedDocRef.current = doc;
+      if (derivedStateTimerRef.current !== null) {
+        window.clearTimeout(derivedStateTimerRef.current);
+      }
+      const segmentCount = sourceSegments.length;
+      const waitMs = segmentCount > 2500 ? 180 : segmentCount > 800 ? 90 : 40;
+      derivedStateTimerRef.current = window.setTimeout(() => {
+        derivedStateTimerRef.current = null;
+        const queued = pendingDerivedDocRef.current;
+        pendingDerivedDocRef.current = null;
+        if (!queued) return;
+        flushDerivedState(queued);
+      }, waitMs);
+    },
+    [sourceSegments.length, flushDerivedState],
+  );
+
+  useEffect(() => {
+    return () => {
+      if (derivedStateTimerRef.current !== null) {
+        window.clearTimeout(derivedStateTimerRef.current);
+      }
+    };
+  }, []);
+
   const onEditorUpdateDoc = (doc: Parameters<typeof setEditorDoc>[0]) => {
     docRevisionRef.current += 1;
     setEditorDoc(doc);
-    setOutline(buildOutlineFromDoc(doc));
-    const next = collectDocumentEdits(doc, sourceSegments, extraSegmentsMap);
-    setEditsPreview(next.edits);
+    scheduleDerivedStateUpdate(doc);
     // exportWarnings는 내보내기 시에만 갱신 (편집 중 배너 노출 방지)
   };
 
@@ -875,7 +941,7 @@ export default function Home() {
         markClean: true,
         overrideFileName: customFileName,
       });
-      pushHistory(`저장 완료 (${result.edits}건)`, result.edits);
+      pushHistory(`저장 완료 (${result.edits}건)`, result.edits, { actor: "system" });
       setStatus(`저장 완료: ${result.fileName}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "저장 실패";
@@ -1019,7 +1085,7 @@ export default function Home() {
     }
     setBatchSuggestions([]);
     clearBatchDecisions();
-    pushHistory(`AI 섹션 일괄 적용 (${appliedCount}건)`, appliedCount);
+    pushHistory(`AI 섹션 일괄 적용 (${appliedCount}건)`, appliedCount, { actor: "ai" });
     setStatus(`AI 섹션 일괄 적용 완료: ${appliedCount}건`);
   };
 
@@ -1053,7 +1119,7 @@ export default function Home() {
     }
     setBatchSuggestions([]);
     clearBatchDecisions();
-    pushHistory(`AI 선택 적용 (${appliedCount}건)`, appliedCount);
+    pushHistory(`AI 선택 적용 (${appliedCount}건)`, appliedCount, { actor: "ai" });
     setStatus(`AI 선택 적용 완료: ${appliedCount}건`);
   };
 
@@ -1124,7 +1190,7 @@ export default function Home() {
     });
     if (tr.docChanged) {
       editor.view.dispatch(tr.scrollIntoView());
-      pushHistory(`용어 일괄 치환 (${totalReplaced}건)`, totalReplaced);
+      pushHistory(`용어 일괄 치환 (${totalReplaced}건)`, totalReplaced, { actor: "user" });
       setStatus(`용어 일괄 치환 완료: ${totalReplaced}건`);
     } else {
       setStatus("치환할 용어가 문서에 없습니다.");
@@ -1509,7 +1575,7 @@ export default function Home() {
         edits.map((e) => ({ segmentId: e.segmentId, text: e.newText })),
       );
       resultMsg = `${count}개 문단 수정 완료`;
-      pushHistory(`AI 채팅 일괄 수정 (${count}건)`, count);
+      pushHistory(`AI 채팅 일괄 수정 (${count}건)`, count, { actor: "ai" });
     } else if (toolCall.name === "search_replace") {
       const search = toolCall.input.search as string;
       const replace = toolCall.input.replace as string;
@@ -1556,7 +1622,7 @@ export default function Home() {
         editor.view.dispatch(tr.scrollIntoView());
       }
       resultMsg = `${totalReplacedSegments}개 세그먼트 치환 완료 (${totalMatched}회 일치)`;
-      pushHistory(`AI 채팅 찾아바꾸기 (${totalReplacedSegments}건)`, totalReplacedSegments);
+      pushHistory(`AI 채팅 찾아바꾸기 (${totalReplacedSegments}건)`, totalReplacedSegments, { actor: "ai" });
     } else if (toolCall.name === "fill_table_rows") {
       const ftInput = toolCall.input as {
         tableIndex: number;
@@ -1573,7 +1639,7 @@ export default function Home() {
         ftInput.rows,
         headers,
       );
-      pushHistory(`AI 표 채우기 (${ftInput.rows.length}행)`, ftInput.rows.length);
+      pushHistory(`AI 표 채우기 (${ftInput.rows.length}행)`, ftInput.rows.length, { actor: "ai" });
     }
 
     setPendingToolCall(null);
@@ -1708,6 +1774,28 @@ export default function Home() {
     buildDocumentContext,
     buildEditPreview,
   ]);
+
+  const onRestoreHistoryItem = useCallback(
+    (historyId: string) => {
+      if (!editor) {
+        setStatus("에디터가 아직 준비되지 않았습니다.");
+        return;
+      }
+      const target = history.find((item) => item.id === historyId);
+      if (!target?.snapshotDoc) {
+        setStatus("복원 가능한 스냅샷이 없습니다.");
+        return;
+      }
+      const snapshot = JSON.parse(JSON.stringify(target.snapshotDoc)) as JSONContent;
+      editor.commands.setContent(snapshot);
+      setStatus(`이력 복원 완료: ${target.summary}`);
+      pushHistory(`이력 복원: ${target.summary}`, 0, {
+        actor: "user",
+        snapshotDoc: snapshot,
+      });
+    },
+    [editor, history, setStatus, pushHistory],
+  );
 
   return (
     <div className={styles.page}>
@@ -1910,9 +1998,19 @@ export default function Home() {
               onRemoveEntry={removeTerminologyEntry}
               onApplyTerminology={onApplyTerminology}
               isBusy={isBusy}
+              compatibilityWarnings={compatibilityWarnings}
+              collaborationStats={collaborationStats}
+              performanceStats={performanceStats}
+              qaStats={qaStats}
             />
           }
-          history={<EditHistoryPanel history={history} />}
+          history={
+            <EditHistoryPanel
+              history={history}
+              onRestoreItem={onRestoreHistoryItem}
+              disabled={isBusy}
+            />
+          }
         />
       </main>
 
