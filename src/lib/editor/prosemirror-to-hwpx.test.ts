@@ -493,6 +493,46 @@ async function makeColoredFontStyleFixtureHwpx(): Promise<ArrayBuffer> {
   return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
 }
 
+async function makeHeadingStyleFixtureHwpx(): Promise<ArrayBuffer> {
+  const zip = new JSZip();
+  zip.file("mimetype", "application/hwp+zip", { compression: "STORE" });
+  zip.file("version.xml", `<?xml version="1.0" encoding="UTF-8"?><version app="test"/>`);
+  zip.file(
+    "Contents/content.hpf",
+    `<?xml version="1.0" encoding="UTF-8"?><opf:package xmlns:opf="http://www.idpf.org/2007/opf"></opf:package>`,
+  );
+  zip.file(
+    "Contents/header.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hh:head xmlns:hh="http://www.hancom.co.kr/hwpml/2011/head">
+  <hh:refList>
+    <hh:charProperties itemCnt="1">
+      <hh:charPr id="0" height="1000" textColor="#000000" shadeColor="none"/>
+    </hh:charProperties>
+    <hh:paraProperties itemCnt="1">
+      <hh:paraPr id="6"/>
+    </hh:paraProperties>
+    <hh:styles>
+      <hh:style id="0" name="바탕글" engName="Normal" type="para" paraPrIDRef="6" charPrIDRef="0"/>
+      <hh:style id="1" name="개요 1" engName="Outline 1" type="para" paraPrIDRef="6" charPrIDRef="0"/>
+      <hh:style id="2" name="개요 2" engName="Outline 2" type="para" paraPrIDRef="6" charPrIDRef="0"/>
+    </hh:styles>
+  </hh:refList>
+</hh:head>`,
+  );
+  zip.file(
+    "Contents/section0.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hp:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">
+  <hp:p id="1" paraPrIDRef="6" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">
+    <hp:run charPrIDRef="0"><hp:t>본문 문단</hp:t></hp:run>
+    <hp:linesegarray/>
+  </hp:p>
+</hp:sec>`,
+  );
+  return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
+}
+
 describe("applyProseMirrorDocToHwpx table patch", () => {
   it("applies row/col/merge changes by patching table XML fragment", async () => {
     const input = await makeTableFixtureHwpx();
@@ -801,5 +841,141 @@ describe("applyProseMirrorDocToHwpx font style patch", () => {
     const newCharPrId = black?.getAttribute("id");
     expect(newCharPrId).toBeTruthy();
     expect(sectionXml).toContain(`charPrIDRef="${newCharPrId}"`);
+  });
+
+  it("preserves hardBreak even when paragraph has marks", async () => {
+    const input = await makeFontStyleFixtureHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+    const doc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+    const paragraph = (doc.content || []).find((node) => node.type === "paragraph");
+    if (!paragraph) {
+      throw new Error("paragraph not found");
+    }
+    paragraph.content = [
+      { type: "text", text: "첫줄", marks: [{ type: "bold" }] },
+      { type: "hardBreak" },
+      { type: "text", text: "둘째줄", marks: [{ type: "bold" }] },
+    ];
+
+    const result = await applyProseMirrorDocToHwpx(
+      input,
+      doc,
+      parsed.segments,
+      parsed.extraSegmentsMap,
+      parsed.hwpxDocumentModel,
+    );
+    expect(result.integrityIssues).toEqual([]);
+
+    const outBuffer = await result.blob.arrayBuffer();
+    const outZip = await JSZip.loadAsync(outBuffer);
+    const sectionXml = await outZip.file("Contents/section0.xml")!.async("string");
+    const hasHardBreakInText =
+      /<hp:t>[^<]*\n[^<]*<\/hp:t>/.test(sectionXml) || /<hp:t>\n<\/hp:t>/.test(sectionXml);
+    expect(hasHardBreakInText).toBe(true);
+  });
+});
+
+describe("applyProseMirrorDocToHwpx heading style sync", () => {
+  it("maps paragraph -> heading level to outline styleIDRef", async () => {
+    const input = await makeHeadingStyleFixtureHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+    const doc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+    const paragraph = doc.content?.find((node) => node.type === "paragraph");
+    if (!paragraph) {
+      throw new Error("paragraph not found");
+    }
+    paragraph.type = "heading";
+    paragraph.attrs = { ...(paragraph.attrs || {}), level: 2 };
+
+    const result = await applyProseMirrorDocToHwpx(
+      input,
+      doc,
+      parsed.segments,
+      parsed.extraSegmentsMap,
+      parsed.hwpxDocumentModel,
+    );
+    expect(result.integrityIssues).toEqual([]);
+
+    const outBuffer = await result.blob.arrayBuffer();
+    const outZip = await JSZip.loadAsync(outBuffer);
+    const sectionXml = await outZip.file("Contents/section0.xml")!.async("string");
+    expect(sectionXml).toContain(`styleIDRef="2"`);
+  });
+
+  it("maps heading -> paragraph back to default paragraph styleIDRef", async () => {
+    const input = await makeHeadingStyleFixtureHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+    const doc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+    const paragraph = doc.content?.find((node) => node.type === "paragraph");
+    if (!paragraph) {
+      throw new Error("paragraph not found");
+    }
+    paragraph.type = "heading";
+    paragraph.attrs = { ...(paragraph.attrs || {}), level: 1 };
+
+    const firstSave = await applyProseMirrorDocToHwpx(
+      input,
+      doc,
+      parsed.segments,
+      parsed.extraSegmentsMap,
+      parsed.hwpxDocumentModel,
+    );
+    expect(firstSave.integrityIssues).toEqual([]);
+
+    const firstBuffer = await firstSave.blob.arrayBuffer();
+    const reparsed = await parseHwpxToProseMirror(firstBuffer);
+    const secondDoc = JSON.parse(JSON.stringify(reparsed.doc)) as JSONContent;
+    const heading = secondDoc.content?.find((node) => node.type === "heading");
+    if (!heading) {
+      throw new Error("heading not found");
+    }
+    heading.type = "paragraph";
+    heading.attrs = { ...(heading.attrs || {}) };
+    delete (heading.attrs as { level?: number }).level;
+
+    const secondSave = await applyProseMirrorDocToHwpx(
+      firstBuffer,
+      secondDoc,
+      reparsed.segments,
+      reparsed.extraSegmentsMap,
+      reparsed.hwpxDocumentModel,
+    );
+    expect(secondSave.integrityIssues).toEqual([]);
+
+    const outBuffer = await secondSave.blob.arrayBuffer();
+    const outZip = await JSZip.loadAsync(outBuffer);
+    const sectionXml = await outZip.file("Contents/section0.xml")!.async("string");
+    expect(sectionXml).toContain(`styleIDRef="0"`);
+  });
+
+  it("assigns heading styleIDRef to new orphan heading paragraphs", async () => {
+    const input = await makeHeadingStyleFixtureHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+    const doc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+    doc.content = [
+      ...(doc.content ?? []),
+      {
+        type: "heading",
+        attrs: { level: 1 },
+        content: [{ type: "text", text: "새 개요 단락" }],
+      },
+    ];
+
+    const result = await applyProseMirrorDocToHwpx(
+      input,
+      doc,
+      parsed.segments,
+      parsed.extraSegmentsMap,
+      parsed.hwpxDocumentModel,
+    );
+    expect(result.integrityIssues).toEqual([]);
+
+    const outBuffer = await result.blob.arrayBuffer();
+    const outZip = await JSZip.loadAsync(outBuffer);
+    const sectionXml = await outZip.file("Contents/section0.xml")!.async("string");
+    const orphanHeadingMatch = sectionXml.match(
+      /<hp:p\b[^>]*styleIDRef="1"[^>]*>[\s\S]*?<hp:t>새 개요 단락<\/hp:t>/,
+    );
+    expect(orphanHeadingMatch).toBeTruthy();
   });
 });

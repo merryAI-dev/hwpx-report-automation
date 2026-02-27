@@ -86,7 +86,124 @@ type CollectLetterSpacingResult = {
   warnings: string[];
 };
 
+type HeadingStyleContext = {
+  headingLevelByStyleId: Map<string, number>;
+  styleIdByHeadingLevel: Map<number, string>;
+  defaultParagraphStyleId: string;
+};
+
 const HEADER_FILE = "Contents/header.xml";
+
+function clampHeadingLevel(raw: number): 1 | 2 | 3 | 4 | 5 {
+  const n = Math.max(1, Math.min(5, raw));
+  return n as 1 | 2 | 3 | 4 | 5;
+}
+
+function parseHeadingLevelFromStyleNames(name: string, engName: string): number | null {
+  const normalizedName = name.trim();
+  const normalizedEngName = engName.trim();
+  const patterns = [
+    normalizedName.match(/개요\s*([1-9]\d*)/),
+    normalizedEngName.match(/outline\s*([1-9]\d*)/i),
+    normalizedName.match(/제목\s*([1-9]\d*)/),
+    normalizedEngName.match(/heading\s*([1-9]\d*)/i),
+  ];
+  for (const match of patterns) {
+    if (!match) {
+      continue;
+    }
+    const parsed = Number.parseInt(match[1], 10);
+    if (Number.isFinite(parsed) && parsed > 0) {
+      return clampHeadingLevel(parsed);
+    }
+  }
+  if (/(^|\s)(제목|표제)(\s|$)/.test(normalizedName) || /(^|\s)heading(\s|$)/i.test(normalizedEngName)) {
+    return 1;
+  }
+  return null;
+}
+
+function extractHeadingStyleContext(headerDoc: Document | null): HeadingStyleContext {
+  const defaultContext: HeadingStyleContext = {
+    headingLevelByStyleId: new Map(),
+    styleIdByHeadingLevel: new Map(),
+    defaultParagraphStyleId: "0",
+  };
+  if (!headerDoc) {
+    return defaultContext;
+  }
+
+  const headingLevelByStyleId = new Map<string, number>();
+  const styleIdByHeadingLevel = new Map<number, string>();
+  let defaultParagraphStyleId = "0";
+  let firstParaStyleId: string | null = null;
+
+  for (const el of Array.from(headerDoc.getElementsByTagName("*"))) {
+    if (el.localName !== "style") {
+      continue;
+    }
+    const id = el.getAttribute("id");
+    if (!id) {
+      continue;
+    }
+    const type = (el.getAttribute("type") ?? "").toUpperCase();
+    if (type && type !== "PARA") {
+      continue;
+    }
+    if (firstParaStyleId === null) {
+      firstParaStyleId = id;
+    }
+    const name = el.getAttribute("name") ?? "";
+    const engName = el.getAttribute("engName") ?? "";
+    if (name === "바탕글" || /^normal$/i.test(engName)) {
+      defaultParagraphStyleId = id;
+    } else if (defaultParagraphStyleId === "0" && id === "0") {
+      defaultParagraphStyleId = id;
+    }
+    const level = parseHeadingLevelFromStyleNames(name, engName);
+    if (level !== null) {
+      headingLevelByStyleId.set(id, level);
+      if (!styleIdByHeadingLevel.has(level)) {
+        styleIdByHeadingLevel.set(level, id);
+      }
+    }
+  }
+
+  if (defaultParagraphStyleId === "0" && firstParaStyleId) {
+    defaultParagraphStyleId = firstParaStyleId;
+  }
+
+  return {
+    headingLevelByStyleId,
+    styleIdByHeadingLevel,
+    defaultParagraphStyleId,
+  };
+}
+
+function resolveStyleIDRefForNode(
+  node: JSONContent,
+  currentStyleIDRef: string | null,
+  styleContext: HeadingStyleContext,
+): string {
+  if (node.type === "heading") {
+    const rawLevel = asInt((node.attrs as { level?: unknown } | undefined)?.level) ?? 1;
+    const level = clampHeadingLevel(rawLevel);
+    return (
+      styleContext.styleIdByHeadingLevel.get(level) ??
+      currentStyleIDRef ??
+      styleContext.defaultParagraphStyleId
+    );
+  }
+
+  if (node.type === "paragraph") {
+    if (currentStyleIDRef && !styleContext.headingLevelByStyleId.has(currentStyleIDRef)) {
+      return currentStyleIDRef;
+    }
+    return styleContext.defaultParagraphStyleId;
+  }
+
+  return currentStyleIDRef ?? styleContext.defaultParagraphStyleId;
+}
 
 function extractNodeText(node: JSONContent): string {
   if (node.type === "text") {
@@ -938,6 +1055,30 @@ function patchParaPrIDRef(paraXml: string, newParaPrIDRef: string): string {
   return paraXml.replace(/\bparaPrIDRef="[^"]*"/, `paraPrIDRef="${newParaPrIDRef}"`);
 }
 
+/** Patch styleIDRef attribute in a paraXml string. */
+function patchStyleIDRef(paraXml: string, newStyleIDRef: string): string {
+  return paraXml.replace(/\bstyleIDRef="[^"]*"/, `styleIDRef="${newStyleIDRef}"`);
+}
+
+function readParaStyleIDRef(paraXml: string): string | null {
+  const match = paraXml.match(/\bstyleIDRef="([^"]+)"/);
+  return match?.[1] ?? null;
+}
+
+function patchParaRefs(
+  paraXml: string,
+  refs: { paraPrIDRef?: string; styleIDRef?: string },
+): string {
+  let next = paraXml;
+  if (refs.paraPrIDRef) {
+    next = patchParaPrIDRef(next, refs.paraPrIDRef);
+  }
+  if (refs.styleIDRef) {
+    next = patchStyleIDRef(next, refs.styleIDRef);
+  }
+  return next;
+}
+
 function readParaXmlId(paraXml: string): string | null {
   const match = paraXml.match(/<\s*(?:[A-Za-z0-9]+:)?p\b[^>]*\sid="([^"]+)"/);
   return match?.[1] ?? null;
@@ -1201,6 +1342,7 @@ function buildOrphanParaXml(
   node: JSONContent,
   paraXmlId: string,
   defaultParaPrIDRef: string,
+  styleIDRef: string,
   defaultCharPrIDRef: string,
   charPropertiesEl: Element | null,
   charPrById: Map<string, Element>,
@@ -1232,7 +1374,7 @@ function buildOrphanParaXml(
         });
 
   return (
-    `<hp:p id="${paraXmlId}" paraPrIDRef="${paraPrIDRef}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">` +
+    `<hp:p id="${paraXmlId}" paraPrIDRef="${paraPrIDRef}" styleIDRef="${styleIDRef}" pageBreak="0" columnBreak="0" merged="0">` +
     runXmls.join("") +
     `<hp:linesegarray/>` +
     `</hp:p>`
@@ -1251,8 +1393,14 @@ type RunChunk = {
 function groupContentByMarks(content: JSONContent[]): RunChunk[] {
   const chunks: RunChunk[] = [];
   for (const node of content) {
-    if (node.type !== "text") continue;
-    const text = node.text ?? "";
+    let text = "";
+    if (node.type === "text") {
+      text = node.text ?? "";
+    } else if (node.type === "hardBreak") {
+      text = "\n";
+    } else {
+      continue;
+    }
     if (!text) continue;
     const fp = markFingerprint(node.marks);
     const last = chunks[chunks.length - 1];
@@ -1309,6 +1457,7 @@ function rebuildParaXmlWithMarks(
   nextCharPrId: { value: number },
   headerDoc: Document,
   newParaPrIDRef?: string,
+  newStyleIDRef?: string,
 ): string {
   // 기준 charPrId: 볼드/이탤릭이 없는 run의 charPrId를 우선 사용.
   // runs[0]이 bold인 경우, 마크가 없는 텍스트 청크에 bold charPr가 잘못 적용되는 것을 방지.
@@ -1329,7 +1478,7 @@ function rebuildParaXmlWithMarks(
   const paraDoc = new DOMParser().parseFromString(para.paraXml, "text/xml");
   const paraEl = paraDoc.documentElement;
   const paraPrIDRef = newParaPrIDRef ?? paraEl.getAttribute("paraPrIDRef") ?? "0";
-  const styleIDRef = paraEl.getAttribute("styleIDRef") ?? "0";
+  const styleIDRef = newStyleIDRef ?? paraEl.getAttribute("styleIDRef") ?? "0";
   const pageBreak = paraEl.getAttribute("pageBreak") ?? "0";
   const columnBreak = paraEl.getAttribute("columnBreak") ?? "0";
   const merged = paraEl.getAttribute("merged") ?? "0";
@@ -1572,6 +1721,11 @@ export async function applyProseMirrorDocToHwpx(
     const charPrCache: Map<string, string> = new Map();
     let nextCharPrId = { value: 41 }; // base.hwpx 기준 maxId(40) + 1
     let headerDoc: Document | null = null;
+    let headingStyleContext: HeadingStyleContext = {
+      headingLevelByStyleId: new Map(),
+      styleIdByHeadingLevel: new Map(),
+      defaultParagraphStyleId: "0",
+    };
     // paraPr 동적 관리
     let paraPrContainer: Element | null = null;
     const paraPrById: Map<string, Element> = new Map();
@@ -1583,6 +1737,7 @@ export async function applyProseMirrorDocToHwpx(
       const parsed = new DOMParser().parseFromString(rawHeaderXml, "application/xml");
       if (!parsed.querySelector("parsererror")) {
         headerDoc = parsed;
+        headingStyleContext = extractHeadingStyleContext(headerDoc);
         charPropertiesEl =
           Array.from(headerDoc.getElementsByTagName("*")).find(
             (n) => n.localName === "charProperties",
@@ -1686,8 +1841,9 @@ export async function applyProseMirrorDocToHwpx(
           for (let j = lastDocIdx + 1; j < currDocIdx; j++) {
             const { paraId: oId, node: oNode } = orderedDocNodes[j];
             if (oId !== null) continue;
+            const orphanStyleIDRef = resolveStyleIDRefForNode(oNode, null, headingStyleContext);
             sectionXml += buildOrphanParaXml(
-              oNode, allocateParaXmlId(), "0", defaultOrphanCharPrIDRef,
+              oNode, allocateParaXmlId(), "0", orphanStyleIDRef, defaultOrphanCharPrIDRef,
               charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc,
             );
           }
@@ -1733,6 +1889,13 @@ export async function applyProseMirrorDocToHwpx(
             });
           }
         }
+        const currentStyleIDRef = readParaStyleIDRef(para.paraXml);
+        const newStyleIDRef = resolveStyleIDRefForNode(
+          currentNode,
+          currentStyleIDRef,
+          headingStyleContext,
+        );
+        const styleChanged = newStyleIDRef !== (currentStyleIDRef ?? "0");
 
         // marks가 있으면 멀티런 재생성, 없으면 기존 텍스트 패치 경로
         const hasMarks = (currentNode.content ?? []).some(
@@ -1749,6 +1912,7 @@ export async function applyProseMirrorDocToHwpx(
             nextCharPrId,
             headerDoc,
             newParaPrIDRef,
+            newStyleIDRef,
           );
           if (para.isSynthesized || !readParaXmlId(rebuilt)) {
             rebuilt = patchParaXmlId(rebuilt, allocateParaXmlId());
@@ -1757,23 +1921,32 @@ export async function applyProseMirrorDocToHwpx(
         } else {
           const currentText = extractNodeText(currentNode);
           const originalText = para.runs.map((r) => r.text).join("");
-          if (currentText === originalText && !para.isSynthesized && !newParaPrIDRef) {
+          if (currentText === originalText && !para.isSynthesized && !newParaPrIDRef && !styleChanged) {
             sectionXml += para.paraXml;
-          } else if (newParaPrIDRef && currentText === originalText && !para.isSynthesized) {
-            sectionXml += patchParaPrIDRef(para.paraXml, newParaPrIDRef);
+          } else if (currentText === originalText && !para.isSynthesized) {
+            sectionXml += patchParaRefs(para.paraXml, {
+              paraPrIDRef: newParaPrIDRef,
+              styleIDRef: styleChanged ? newStyleIDRef : undefined,
+            });
           } else if (para.isSynthesized) {
             // 합성 문단은 <hp:t></hp:t> (빈 텍스트)를 가져 scanXmlTextSegments가 0을 반환하므로
             // applyLocalTextPatch가 무효화됨 → buildOrphanParaXml로 직접 XML 재생성
             const paraPrIDRef = para.paraXml.match(/paraPrIDRef="([^"]+)"/)?.[1] ?? "0";
             const charPrIDRef = para.runs[0]?.charPrIDRef ?? "0";
             const built = buildOrphanParaXml(
-              currentNode, allocateParaXmlId(), paraPrIDRef, charPrIDRef,
+              currentNode, allocateParaXmlId(), paraPrIDRef, newStyleIDRef, charPrIDRef,
               charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc,
             );
-            sectionXml += newParaPrIDRef ? patchParaPrIDRef(built, newParaPrIDRef) : built;
+            sectionXml += patchParaRefs(built, {
+              paraPrIDRef: newParaPrIDRef,
+              styleIDRef: styleChanged ? newStyleIDRef : undefined,
+            });
           } else {
             const patched = applyLocalTextPatch(para.paraXml, para.runs, currentText);
-            sectionXml += newParaPrIDRef ? patchParaPrIDRef(patched, newParaPrIDRef) : patched;
+            sectionXml += patchParaRefs(patched, {
+              paraPrIDRef: newParaPrIDRef,
+              styleIDRef: styleChanged ? newStyleIDRef : undefined,
+            });
           }
         }
       }
@@ -1782,8 +1955,9 @@ export async function applyProseMirrorDocToHwpx(
       for (let j = lastDocIdx + 1; j < orderedDocNodes.length; j++) {
         const { paraId: oId, node: oNode } = orderedDocNodes[j];
         if (oId !== null) continue;
+        const orphanStyleIDRef = resolveStyleIDRefForNode(oNode, null, headingStyleContext);
         sectionXml += buildOrphanParaXml(
-          oNode, allocateParaXmlId(), "0", defaultOrphanCharPrIDRef,
+          oNode, allocateParaXmlId(), "0", orphanStyleIDRef, defaultOrphanCharPrIDRef,
           charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc,
         );
       }
