@@ -93,6 +93,50 @@ type HeadingStyleContext = {
 };
 
 const HEADER_FILE = "Contents/header.xml";
+const CONTENT_HPF_FILE = "Contents/content.hpf";
+
+type NodeLikeAttrs = Record<string, unknown>;
+
+type ImageManifestItem = {
+  id: string;
+  href: string;
+  mediaType: string;
+};
+
+type ImageResourceRef = {
+  id: string;
+  href: string;
+  mediaType: string;
+};
+
+type ImageExportContext = {
+  zip: JSZip;
+  warnings: string[];
+  manifestDoc: Document | null;
+  manifestElement: Element | null;
+  manifestPrefix: string;
+  manifestNamespaceUri: string;
+  manifestDirty: boolean;
+  manifestItemsByHref: Map<string, ImageManifestItem>;
+  existingManifestIds: Set<string>;
+  imageBySource: Map<string, ImageResourceRef>;
+  nextImageNumber: number;
+  nextPicId: number;
+  nextInstId: number;
+};
+
+type CorePrefix = "hc" | "hp";
+
+type RunContentPiece =
+  | {
+      kind: "text";
+      text: string;
+      marks: JSONContent["marks"];
+    }
+  | {
+      kind: "image";
+      attrs: NodeLikeAttrs;
+    };
 
 function clampHeadingLevel(raw: number): 1 | 2 | 3 | 4 | 5 {
   const n = Math.max(1, Math.min(5, raw));
@@ -260,6 +304,378 @@ function asInt(input: unknown): number | null {
   return Number.isFinite(parsed) ? parsed : null;
 }
 
+function asNonEmptyString(input: unknown): string | null {
+  if (typeof input !== "string") {
+    return null;
+  }
+  const trimmed = input.trim();
+  return trimmed ? trimmed : null;
+}
+
+const IMAGE_EXTENSION_BY_MIME: Record<string, string> = {
+  "image/png": "png",
+  "image/jpeg": "jpg",
+  "image/jpg": "jpg",
+  "image/gif": "gif",
+  "image/webp": "webp",
+  "image/bmp": "bmp",
+  "image/svg+xml": "svg",
+};
+
+function normalizeImageMimeType(input: unknown): string {
+  const raw = asNonEmptyString(input);
+  if (!raw) {
+    return "image/png";
+  }
+  return raw.toLowerCase();
+}
+
+function extensionFromFileName(fileName: string | null): string | null {
+  if (!fileName) {
+    return null;
+  }
+  const match = fileName.trim().match(/\.([a-zA-Z0-9]+)$/);
+  if (!match) {
+    return null;
+  }
+  return match[1].toLowerCase();
+}
+
+function resolveImageExtension(mediaType: string, fileName: string | null): string {
+  return (
+    IMAGE_EXTENSION_BY_MIME[mediaType] ??
+    extensionFromFileName(fileName) ??
+    "bin"
+  );
+}
+
+function parseBase64DataUrl(src: string): { mediaType: string; base64: string } | null {
+  if (!src.startsWith("data:")) {
+    return null;
+  }
+  const comma = src.indexOf(",");
+  if (comma <= 5) {
+    return null;
+  }
+  const header = src.slice(5, comma);
+  const body = src.slice(comma + 1);
+  const parts = header.split(";").map((part) => part.trim().toLowerCase()).filter(Boolean);
+  const mediaType = parts.find((part) => part.includes("/")) ?? "image/png";
+  const isBase64 = parts.includes("base64");
+  if (!isBase64) {
+    return null;
+  }
+  return { mediaType, base64: body.replace(/\s+/g, "") };
+}
+
+function normalizeBase64ForDecode(base64: string): string {
+  const cleaned = base64.replace(/\s+/g, "").replace(/-/g, "+").replace(/_/g, "/");
+  const mod = cleaned.length % 4;
+  if (mod === 0) {
+    return cleaned;
+  }
+  return cleaned + "=".repeat(4 - mod);
+}
+
+function decodeBase64ToBytes(base64: string): Uint8Array {
+  const normalized = normalizeBase64ForDecode(base64);
+  if (typeof globalThis.atob === "function") {
+    try {
+      const binary = globalThis.atob(normalized);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) {
+        bytes[i] = binary.charCodeAt(i);
+      }
+      return bytes;
+    } catch {
+      // Fallback below.
+    }
+  }
+  if (typeof Buffer !== "undefined") {
+    return new Uint8Array(Buffer.from(normalized, "base64"));
+  }
+  throw new Error("atob/Buffer is not available in this runtime");
+}
+
+function pixelToHwpUnit(raw: unknown, fallbackPx: number): number {
+  const px = asPositiveInt(raw) ?? fallbackPx;
+  // 1px @ 96DPI ~= 0.75pt, and 1pt = 100 HWPUNIT.
+  const value = Math.round(px * 75);
+  return Math.max(1, value);
+}
+
+function ensureCoreNamespaceOnSectionPrefix(sectionPrefixXml: string): {
+  sectionPrefixXml: string;
+  corePrefix: CorePrefix;
+} {
+  if (/\sxmlns:hc\s*=/.test(sectionPrefixXml)) {
+    return { sectionPrefixXml, corePrefix: "hc" };
+  }
+  const updated = sectionPrefixXml.replace(
+    /<([A-Za-z0-9]+):sec\b/,
+    `<$1:sec xmlns:hc="http://www.hancom.co.kr/hwpml/2011/core"`,
+  );
+  return { sectionPrefixXml: updated, corePrefix: "hc" };
+}
+
+function collectGraphicObjectMaxValues(sectionXml: string): { maxObjectId: number; maxInstId: number } {
+  let maxObjectId = 0;
+  let maxInstId = 0;
+  const objectMatches = sectionXml.matchAll(
+    /<[^>]*:(?:pic|tbl|ole|container|line|rect|ellipse|arc|polygon|curve|connectLine)\b[^>]*>/g,
+  );
+  for (const match of objectMatches) {
+    const tag = match[0];
+    const objectId = tag.match(/\bid="(\d+)"/)?.[1];
+    const instId = tag.match(/\binstid="(\d+)"/)?.[1];
+    const parsedPic = asInt(objectId);
+    const parsedInst = asInt(instId);
+    if (parsedPic !== null) {
+      maxObjectId = Math.max(maxObjectId, parsedPic);
+    }
+    if (parsedInst !== null) {
+      maxInstId = Math.max(maxInstId, parsedInst);
+    }
+  }
+  return { maxObjectId, maxInstId };
+}
+
+async function createImageExportContext(zip: JSZip, warnings: string[]): Promise<ImageExportContext> {
+  const contentFile = zip.files[CONTENT_HPF_FILE];
+  let manifestDoc: Document | null = null;
+  let manifestElement: Element | null = null;
+  let manifestPrefix = "opf";
+  let manifestNamespaceUri = "http://www.idpf.org/2007/opf";
+  const manifestItemsByHref = new Map<string, ImageManifestItem>();
+  const existingManifestIds = new Set<string>();
+
+  if (!contentFile || contentFile.dir) {
+    warnings.push("Contents/content.hpf가 없어 이미지 리소스 등록을 건너뜁니다.");
+  } else {
+    const contentXml = await contentFile.async("string");
+    const parsed = new DOMParser().parseFromString(contentXml, "application/xml");
+    if (parsed.querySelector("parsererror")) {
+      warnings.push("content.hpf 파싱 실패로 이미지 리소스 등록을 건너뜁니다.");
+    } else {
+      manifestDoc = parsed;
+      const packageEl = parsed.documentElement;
+      if (packageEl.prefix) {
+        manifestPrefix = packageEl.prefix;
+      }
+      if (packageEl.namespaceURI) {
+        manifestNamespaceUri = packageEl.namespaceURI;
+      }
+      manifestElement =
+        Array.from(parsed.getElementsByTagName("*")).find((node) => node.localName === "manifest") ?? null;
+      if (!manifestElement) {
+        warnings.push("content.hpf에 manifest가 없어 이미지 리소스 등록을 건너뜁니다.");
+      } else {
+        for (const item of Array.from(manifestElement.children).filter((node) => node.localName === "item")) {
+          const id = item.getAttribute("id");
+          const href = item.getAttribute("href");
+          const mediaType = item.getAttribute("media-type");
+          if (id) {
+            existingManifestIds.add(id);
+          }
+          if (id && href && mediaType) {
+            manifestItemsByHref.set(href, { id, href, mediaType });
+          }
+        }
+      }
+    }
+  }
+
+  let nextImageNumber = 1;
+  for (const id of existingManifestIds) {
+    const match = id.match(/^image(\d+)$/i);
+    if (!match) {
+      continue;
+    }
+    const parsed = Number.parseInt(match[1], 10);
+    if (Number.isFinite(parsed) && parsed >= nextImageNumber) {
+      nextImageNumber = parsed + 1;
+    }
+  }
+  for (const fileName of Object.keys(zip.files)) {
+    const match = fileName.match(/^BinData\/image(\d+)\.[a-zA-Z0-9]+$/);
+    if (!match) {
+      continue;
+    }
+    const parsed = Number.parseInt(match[1], 10);
+    if (Number.isFinite(parsed) && parsed >= nextImageNumber) {
+      nextImageNumber = parsed + 1;
+    }
+  }
+
+  let maxObjectId = 0;
+  let maxInstId = 0;
+  const sectionNames = Object.keys(zip.files).filter((name) => /^Contents\/section\d+\.xml$/.test(name));
+  for (const sectionName of sectionNames) {
+    const file = zip.files[sectionName];
+    if (!file || file.dir) {
+      continue;
+    }
+    const xml = await file.async("string");
+    const sectionMax = collectGraphicObjectMaxValues(xml);
+    maxObjectId = Math.max(maxObjectId, sectionMax.maxObjectId);
+    maxInstId = Math.max(maxInstId, sectionMax.maxInstId);
+  }
+
+  return {
+    zip,
+    warnings,
+    manifestDoc,
+    manifestElement,
+    manifestPrefix,
+    manifestNamespaceUri,
+    manifestDirty: false,
+    manifestItemsByHref,
+    existingManifestIds,
+    imageBySource: new Map(),
+    nextImageNumber,
+    nextPicId: Math.max(maxObjectId + 1, 1),
+    nextInstId: Math.max(maxInstId + 1, 1),
+  };
+}
+
+function createManifestItemElement(context: ImageExportContext, item: ImageManifestItem): Element {
+  const qualifiedName = context.manifestPrefix ? `${context.manifestPrefix}:item` : "item";
+  const el = context.manifestDoc!.createElementNS(context.manifestNamespaceUri, qualifiedName);
+  el.setAttribute("id", item.id);
+  el.setAttribute("href", item.href);
+  el.setAttribute("media-type", item.mediaType);
+  el.setAttribute("isEmbeded", "1");
+  return el;
+}
+
+function ensureManifestItem(context: ImageExportContext, item: ImageManifestItem): void {
+  if (!context.manifestDoc || !context.manifestElement) {
+    return;
+  }
+  if (context.manifestItemsByHref.has(item.href)) {
+    return;
+  }
+  context.manifestElement.appendChild(createManifestItemElement(context, item));
+  context.manifestItemsByHref.set(item.href, item);
+  context.existingManifestIds.add(item.id);
+  context.manifestDirty = true;
+}
+
+function nextAvailableImageId(context: ImageExportContext): string {
+  while (context.existingManifestIds.has(`image${context.nextImageNumber}`)) {
+    context.nextImageNumber += 1;
+  }
+  const id = `image${context.nextImageNumber}`;
+  context.nextImageNumber += 1;
+  return id;
+}
+
+function ensureImageResourceForAttrs(
+  attrs: NodeLikeAttrs,
+  context: ImageExportContext,
+): ImageResourceRef | null {
+  const src = asNonEmptyString(attrs.src);
+  if (!src) {
+    context.warnings.push("이미지 src가 없어 HWPX 반영을 건너뜁니다.");
+    return null;
+  }
+  const cached = context.imageBySource.get(src);
+  if (cached) {
+    return cached;
+  }
+
+  const parsedData = parseBase64DataUrl(src);
+  if (!parsedData) {
+    context.warnings.push("data URL(base64) 형식이 아닌 이미지는 HWPX 내보내기에서 건너뜁니다.");
+    return null;
+  }
+
+  const mediaType = normalizeImageMimeType(attrs.mimeType ?? parsedData.mediaType);
+  const fileName = asNonEmptyString(attrs.fileName);
+  const extension = resolveImageExtension(mediaType, fileName);
+  const id = nextAvailableImageId(context);
+  const href = `BinData/${id}.${extension}`;
+
+  let bytes: Uint8Array;
+  try {
+    bytes = decodeBase64ToBytes(parsedData.base64);
+  } catch (error) {
+    context.warnings.push(`이미지 base64 디코딩 실패로 반영을 건너뜁니다: ${String(error)}`);
+    return null;
+  }
+
+  context.zip.file(href, bytes);
+  const resource: ImageResourceRef = {
+    id,
+    href,
+    mediaType,
+  };
+  context.imageBySource.set(src, resource);
+  ensureManifestItem(context, { id, href, mediaType });
+  return resource;
+}
+
+function buildPicXml(
+  attrs: NodeLikeAttrs,
+  context: ImageExportContext,
+  corePrefix: CorePrefix,
+): string | null {
+  const resource = ensureImageResourceForAttrs(attrs, context);
+  if (!resource) {
+    return null;
+  }
+
+  const width = pixelToHwpUnit(attrs.width, 320);
+  const height = pixelToHwpUnit(attrs.height, 180);
+  const centerX = Math.max(1, Math.floor(width / 2));
+  const centerY = Math.max(1, Math.floor(height / 2));
+  const picId = context.nextPicId++;
+  const instId = context.nextInstId++;
+  const commentRaw =
+    asNonEmptyString(attrs.fileName) ??
+    asNonEmptyString(attrs.alt) ??
+    asNonEmptyString(attrs.title);
+  const shapeComment = commentRaw ? `<hp:shapeComment>${escapeXml(commentRaw)}</hp:shapeComment>` : "";
+
+  return (
+    `<hp:pic id="${picId}" zOrder="0" numberingType="PICTURE" textWrap="SQUARE" textFlow="BOTH_SIDES" lock="0" ` +
+    `dropcapstyle="None" href="" groupLevel="0" instid="${instId}" reverse="0">` +
+    `<hp:offset x="0" y="0"/>` +
+    `<hp:orgSz width="${width}" height="${height}"/>` +
+    `<hp:curSz width="${width}" height="${height}"/>` +
+    `<hp:flip horizontal="0" vertical="0"/>` +
+    `<hp:rotationInfo angle="0" centerX="${centerX}" centerY="${centerY}" rotateimage="1"/>` +
+    `<hp:renderingInfo>` +
+    `<${corePrefix}:transMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/>` +
+    `<${corePrefix}:scaMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/>` +
+    `<${corePrefix}:rotMatrix e1="1" e2="0" e3="0" e4="0" e5="1" e6="0"/>` +
+    `</hp:renderingInfo>` +
+    `<hp:imgRect>` +
+    `<${corePrefix}:pt0 x="0" y="0"/>` +
+    `<${corePrefix}:pt1 x="${width}" y="0"/>` +
+    `<${corePrefix}:pt2 x="${width}" y="${height}"/>` +
+    `<${corePrefix}:pt3 x="0" y="${height}"/>` +
+    `</hp:imgRect>` +
+    `<hp:imgClip left="0" right="${width}" top="0" bottom="${height}"/>` +
+    `<hp:effects/>` +
+    `<hp:inMargin left="0" right="0" top="0" bottom="0"/>` +
+    `<hp:imgDim dimwidth="${width}" dimheight="${height}"/>` +
+    `<${corePrefix}:img binaryItemIDRef="${resource.id}" bright="0" contrast="0" effect="REAL_PIC" alpha="0"/>` +
+    `<hp:sz width="${width}" widthRelTo="ABSOLUTE" height="${height}" heightRelTo="ABSOLUTE" protect="0"/>` +
+    `<hp:pos treatAsChar="1" affectLSpacing="0" flowWithText="1" allowOverlap="0" holdAnchorAndSO="0" vertRelTo="PARA" horzRelTo="PARA" vertAlign="TOP" horzAlign="LEFT" vertOffset="0" horzOffset="0"/>` +
+    `<hp:outMargin left="0" right="0" top="0" bottom="0"/>` +
+    shapeComment +
+    `</hp:pic>`
+  );
+}
+
+function saveImageManifest(context: ImageExportContext): void {
+  if (!context.manifestDirty || !context.manifestDoc) {
+    return;
+  }
+  context.zip.file(CONTENT_HPF_FILE, new XMLSerializer().serializeToString(context.manifestDoc));
+}
+
 function uniqueWarnings(items: string[]): string[] {
   return Array.from(new Set(items));
 }
@@ -270,6 +686,7 @@ const SUPPORTED_EXPORT_NODE_TYPES = new Set([
   "heading",
   "text",
   "hardBreak",
+  "image",
   "table",
   "tableRow",
   "tableCell",
@@ -1404,29 +1821,23 @@ function buildOrphanParaXml(
   charPrCache: Map<string, string>,
   nextCharPrId: { value: number },
   headerDoc: Document | null,
+  imageContext: ImageExportContext | null,
+  corePrefix: CorePrefix,
 ): string {
   const nodeAttrs = (node.attrs ?? {}) as ParaPrAttrs;
   const paraPrIDRef = nodeAttrs.hwpxParaPrId ?? defaultParaPrIDRef;
-  const chunks = groupContentByMarks(node.content ?? []);
-
-  const runXmls =
-    chunks.length === 0
-      ? [`<hp:run charPrIDRef="${defaultCharPrIDRef}"><hp:t></hp:t></hp:run>`]
-      : chunks.map((chunk) => {
-          let charPrId = defaultCharPrIDRef;
-          if (charPropertiesEl && headerDoc && chunk.marks?.length) {
-            charPrId = ensureCharPrForMarks({
-              charPropertiesEl,
-              charPrById,
-              charPrCache,
-              nextCharPrId,
-              baseCharPrId: defaultCharPrIDRef,
-              marks: chunk.marks,
-              headerDoc,
-            });
-          }
-          return `<hp:run charPrIDRef="${charPrId}"><hp:t>${escapeXml(chunk.text)}</hp:t></hp:run>`;
-        });
+  const pieces = splitRunContentPieces(node.content ?? []);
+  const runXmls = buildRunXmlsFromContentPieces({
+    pieces,
+    baseCharPrId: defaultCharPrIDRef,
+    charPropertiesEl,
+    charPrById,
+    charPrCache,
+    nextCharPrId,
+    headerDoc,
+    imageContext,
+    corePrefix,
+  });
 
   return (
     `<hp:p id="${paraXmlId}" paraPrIDRef="${paraPrIDRef}" styleIDRef="${styleIDRef}" pageBreak="0" columnBreak="0" merged="0">` +
@@ -1436,18 +1847,34 @@ function buildOrphanParaXml(
   );
 }
 
-type RunChunk = {
-  text: string;
-  marks: JSONContent["marks"];
-};
+function splitRunContentPieces(content: JSONContent[]): RunContentPiece[] {
+  const pieces: RunContentPiece[] = [];
+  let currentText: { text: string; marks: JSONContent["marks"] } | null = null;
+  let currentFingerprint: string | null = null;
 
-/**
- * ProseMirror 노드의 content 배열을 연속된 동일 mark 조합 청크로 묶는다.
- * hardBreak·비text 노드는 현재 청크에 포함하지 않는다.
- */
-function groupContentByMarks(content: JSONContent[]): RunChunk[] {
-  const chunks: RunChunk[] = [];
+  const flushText = () => {
+    if (!currentText || !currentText.text) {
+      return;
+    }
+    pieces.push({
+      kind: "text",
+      text: currentText.text,
+      marks: currentText.marks,
+    });
+    currentText = null;
+    currentFingerprint = null;
+  };
+
   for (const node of content) {
+    if (node.type === "image") {
+      flushText();
+      pieces.push({
+        kind: "image",
+        attrs: (node.attrs ?? {}) as NodeLikeAttrs,
+      });
+      continue;
+    }
+
     let text = "";
     if (node.type === "text") {
       text = node.text ?? "";
@@ -1456,16 +1883,80 @@ function groupContentByMarks(content: JSONContent[]): RunChunk[] {
     } else {
       continue;
     }
-    if (!text) continue;
-    const fp = markFingerprint(node.marks);
-    const last = chunks[chunks.length - 1];
-    if (last && markFingerprint(last.marks) === fp) {
-      last.text += text;
-    } else {
-      chunks.push({ text, marks: node.marks });
+    if (!text) {
+      continue;
     }
+
+    const fp = markFingerprint(node.marks);
+    if (currentText && currentFingerprint === fp) {
+      currentText.text += text;
+      continue;
+    }
+    flushText();
+    currentText = { text, marks: node.marks };
+    currentFingerprint = fp;
   }
-  return chunks;
+
+  flushText();
+  return pieces;
+}
+
+function buildRunXmlsFromContentPieces(params: {
+  pieces: RunContentPiece[];
+  baseCharPrId: string;
+  charPropertiesEl: Element | null;
+  charPrById: Map<string, Element>;
+  charPrCache: Map<string, string>;
+  nextCharPrId: { value: number };
+  headerDoc: Document | null;
+  imageContext: ImageExportContext | null;
+  corePrefix: CorePrefix;
+}): string[] {
+  const {
+    pieces,
+    baseCharPrId,
+    charPropertiesEl,
+    charPrById,
+    charPrCache,
+    nextCharPrId,
+    headerDoc,
+    imageContext,
+    corePrefix,
+  } = params;
+
+  const runXmls: string[] = [];
+  for (const piece of pieces) {
+    if (piece.kind === "image") {
+      if (!imageContext) {
+        continue;
+      }
+      const picXml = buildPicXml(piece.attrs, imageContext, corePrefix);
+      if (!picXml) {
+        continue;
+      }
+      runXmls.push(`<hp:run charPrIDRef="${baseCharPrId}">${picXml}</hp:run>`);
+      continue;
+    }
+
+    let charPrId = baseCharPrId;
+    if (charPropertiesEl && headerDoc && piece.marks?.length) {
+      charPrId = ensureCharPrForMarks({
+        charPropertiesEl,
+        charPrById,
+        charPrCache,
+        nextCharPrId,
+        baseCharPrId,
+        marks: piece.marks,
+        headerDoc,
+      });
+    }
+    runXmls.push(`<hp:run charPrIDRef="${charPrId}"><hp:t>${escapeXml(piece.text)}</hp:t></hp:run>`);
+  }
+
+  if (!runXmls.length) {
+    runXmls.push(`<hp:run charPrIDRef="${baseCharPrId}"><hp:t></hp:t></hp:run>`);
+  }
+  return runXmls;
 }
 
 function escapeXml(text: string): string {
@@ -1506,11 +1997,13 @@ function extractLinesegXmlFromRaw(paraXml: string): string {
 function rebuildParaXmlWithMarks(
   para: { paraXml: string; runs: HwpxRun[] },
   node: JSONContent,
-  charPropertiesEl: Element,
+  charPropertiesEl: Element | null,
   charPrById: Map<string, Element>,
   charPrCache: Map<string, string>,
   nextCharPrId: { value: number },
-  headerDoc: Document,
+  headerDoc: Document | null,
+  imageContext: ImageExportContext | null,
+  corePrefix: CorePrefix,
   newParaPrIDRef?: string,
   newStyleIDRef?: string,
 ): string {
@@ -1527,7 +2020,7 @@ function rebuildParaXmlWithMarks(
     }
     return para.runs[0]?.charPrIDRef ?? "0";
   })();
-  const chunks = groupContentByMarks(node.content ?? []);
+  const pieces = splitRunContentPieces(node.content ?? []);
 
   // 기존 paraXml에서 구조 속성 추출 (DOMParser)
   const paraDoc = new DOMParser().parseFromString(para.paraXml, "text/xml");
@@ -1542,22 +2035,17 @@ function rebuildParaXmlWithMarks(
   // (XMLSerializer가 hp: prefix를 ns1: 등으로 바꿔 XML이 깨지는 문제 방지)
   const linesegXml = extractLinesegXmlFromRaw(para.paraXml);
 
-  // mark 조합별 run 생성
-  const runXmls =
-    chunks.length === 0
-      ? [`<hp:run charPrIDRef="${baseCharPrId}"><hp:t></hp:t></hp:run>`]
-      : chunks.map((chunk) => {
-          const charPrId = ensureCharPrForMarks({
-            charPropertiesEl,
-            charPrById,
-            charPrCache,
-            nextCharPrId,
-            baseCharPrId,
-            marks: chunk.marks,
-            headerDoc,
-          });
-          return `<hp:run charPrIDRef="${charPrId}"><hp:t>${escapeXml(chunk.text)}</hp:t></hp:run>`;
-        });
+  const runXmls = buildRunXmlsFromContentPieces({
+    pieces,
+    baseCharPrId,
+    charPropertiesEl,
+    charPrById,
+    charPrCache,
+    nextCharPrId,
+    headerDoc,
+    imageContext,
+    corePrefix,
+  });
 
   // id 속성: 원본에서 보존, 합성 문단(없는 경우)은 생략
   const originalId = paraEl.getAttribute("id");
@@ -1768,6 +2256,7 @@ export async function applyProseMirrorDocToHwpx(
 
     // baseBuffer: HWPX 원본 또는 템플릿 ZIP (DOCX/PPTX 변환 시 base.hwpx)
     const zip = await JSZip.loadAsync(hwpxDocumentModel.baseBuffer);
+    const imageContext = await createImageExportContext(zip, warnings);
 
     // ── marks 지원을 위한 header.xml charPr 동적 관리 준비 ──
     const headerFile = zip.files[HEADER_FILE];
@@ -1857,7 +2346,9 @@ export async function applyProseMirrorDocToHwpx(
     }
 
     for (const section of hwpxDocumentModel.sections) {
-      let sectionXml = section.xmlPrefix;
+      const sectionNs = ensureCoreNamespaceOnSectionPrefix(section.xmlPrefix);
+      const sectionCorePrefix = sectionNs.corePrefix;
+      let sectionXml = sectionNs.sectionPrefixXml;
       let lastDocIdx = -1; // 마지막으로 처리된 doc 노드 인덱스
       const usedParaXmlIds = new Set<number>();
       for (const block of section.blocks) {
@@ -1899,7 +2390,7 @@ export async function applyProseMirrorDocToHwpx(
             const orphanStyleIDRef = resolveStyleIDRefForNode(oNode, null, headingStyleContext);
             sectionXml += buildOrphanParaXml(
               oNode, allocateParaXmlId(), "0", orphanStyleIDRef, defaultOrphanCharPrIDRef,
-              charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc,
+              charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc, imageContext, sectionCorePrefix,
             );
           }
           lastDocIdx = currDocIdx;
@@ -1956,8 +2447,9 @@ export async function applyProseMirrorDocToHwpx(
         const hasMarks = (currentNode.content ?? []).some(
           (n) => n.marks && n.marks.length > 0,
         );
+        const hasImage = (currentNode.content ?? []).some((n) => n.type === "image");
 
-        if (hasMarks && charPropertiesEl && headerDoc) {
+        if ((hasMarks && charPropertiesEl && headerDoc) || hasImage) {
           let rebuilt = rebuildParaXmlWithMarks(
             para,
             currentNode,
@@ -1966,6 +2458,8 @@ export async function applyProseMirrorDocToHwpx(
             charPrCache,
             nextCharPrId,
             headerDoc,
+            imageContext,
+            sectionCorePrefix,
             newParaPrIDRef,
             newStyleIDRef,
           );
@@ -1990,7 +2484,7 @@ export async function applyProseMirrorDocToHwpx(
             const charPrIDRef = para.runs[0]?.charPrIDRef ?? "0";
             const built = buildOrphanParaXml(
               currentNode, allocateParaXmlId(), paraPrIDRef, newStyleIDRef, charPrIDRef,
-              charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc,
+              charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc, imageContext, sectionCorePrefix,
             );
             sectionXml += patchParaRefs(built, {
               paraPrIDRef: newParaPrIDRef,
@@ -2013,7 +2507,7 @@ export async function applyProseMirrorDocToHwpx(
         const orphanStyleIDRef = resolveStyleIDRefForNode(oNode, null, headingStyleContext);
         sectionXml += buildOrphanParaXml(
           oNode, allocateParaXmlId(), "0", orphanStyleIDRef, defaultOrphanCharPrIDRef,
-          charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc,
+          charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc, imageContext, sectionCorePrefix,
         );
       }
 
@@ -2040,6 +2534,7 @@ export async function applyProseMirrorDocToHwpx(
       }
       zip.file(HEADER_FILE, new XMLSerializer().serializeToString(headerDoc));
     }
+    saveImageManifest(imageContext);
 
     let workingBuffer = await zip.generateAsync({ type: "arraybuffer" });
 
