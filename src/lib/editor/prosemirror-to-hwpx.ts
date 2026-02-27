@@ -264,6 +264,61 @@ function uniqueWarnings(items: string[]): string[] {
   return Array.from(new Set(items));
 }
 
+const SUPPORTED_EXPORT_NODE_TYPES = new Set([
+  "doc",
+  "paragraph",
+  "heading",
+  "text",
+  "hardBreak",
+  "table",
+  "tableRow",
+  "tableCell",
+  "tableHeader",
+]);
+
+const SUPPORTED_EXPORT_MARK_TYPES = new Set([
+  "bold",
+  "italic",
+  "underline",
+  "strike",
+  "highlight",
+  "textStyle",
+  "superscript",
+  "subscript",
+]);
+
+export function collectExportCompatibilityWarnings(doc: JSONContent): string[] {
+  const unsupportedNodeCounts = new Map<string, number>();
+  const unsupportedMarkCounts = new Map<string, number>();
+
+  walk(doc, (node) => {
+    if (!SUPPORTED_EXPORT_NODE_TYPES.has(node.type)) {
+      unsupportedNodeCounts.set(node.type, (unsupportedNodeCounts.get(node.type) ?? 0) + 1);
+    }
+    if (node.marks?.length) {
+      for (const mark of node.marks) {
+        const markType = mark.type || "unknown";
+        if (!SUPPORTED_EXPORT_MARK_TYPES.has(markType)) {
+          unsupportedMarkCounts.set(markType, (unsupportedMarkCounts.get(markType) ?? 0) + 1);
+        }
+      }
+    }
+  });
+
+  const warnings: string[] = [];
+  for (const [nodeType, count] of unsupportedNodeCounts.entries()) {
+    warnings.push(
+      `지원되지 않는 객체 노드(${nodeType}) ${count}개는 HWPX 내보내기에서 보존되지 않을 수 있습니다.`,
+    );
+  }
+  for (const [markType, count] of unsupportedMarkCounts.entries()) {
+    warnings.push(
+      `지원되지 않는 글자 표식(${markType}) ${count}개는 HWPX 서식으로 변환되지 않을 수 있습니다.`,
+    );
+  }
+  return uniqueWarnings(warnings);
+}
+
 function readSegmentCharPrIDRef(segment: EditorSegment): string | null {
   const direct = segment.styleHints.charPrIDRef;
   if (direct && String(direct).trim()) {
@@ -1636,7 +1691,7 @@ export function collectDocumentEdits(
 ): CollectEditsResult {
   const bySegmentId = new Map(sourceSegments.map((segment) => [segment.segmentId, segment]));
   const edits: TextEdit[] = [];
-  const warnings: string[] = [];
+  const warnings: string[] = collectExportCompatibilityWarnings(doc);
 
   walk(doc, (node) => {
     if (!isTextBlockNode(node)) {
@@ -1709,7 +1764,7 @@ export async function applyProseMirrorDocToHwpx(
   if (hwpxDocumentModel) {
     const paraNodeIndex = buildParaIdNodeMap(doc);
     const deletedParaIds = buildDeletedParaIds(doc, hwpxDocumentModel);
-    const warnings: string[] = [];
+    const warnings: string[] = collectExportCompatibilityWarnings(doc);
 
     // baseBuffer: HWPX 원본 또는 템플릿 ZIP (DOCX/PPTX 변환 시 base.hwpx)
     const zip = await JSZip.loadAsync(hwpxDocumentModel.baseBuffer);
