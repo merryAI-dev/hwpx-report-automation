@@ -1169,6 +1169,67 @@ function buildParaIdNodeMap(doc: JSONContent): Map<string, JSONContent> {
   return result;
 }
 
+/**
+ * ProseMirror doc의 모든 텍스트 블록을 문서 순서대로 반환.
+ * paraId가 없는 (사용자가 새로 추가한) 블록은 paraId: null로 반환.
+ */
+function buildOrderedDocNodes(
+  doc: JSONContent,
+): Array<{ paraId: string | null; node: JSONContent }> {
+  const result: Array<{ paraId: string | null; node: JSONContent }> = [];
+  walk(doc, (node) => {
+    if (!isTextBlockNode(node)) return;
+    const paraId = ((node.attrs || {}) as { paraId?: string }).paraId ?? null;
+    result.push({ paraId, node });
+  });
+  return result;
+}
+
+/**
+ * paraId가 없는 (새로 추가된) 단락에서 최소한의 <hp:p> XML을 생성.
+ * marks가 있으면 ensureCharPrForMarks로 charPr 동적 생성.
+ */
+function buildOrphanParaXml(
+  node: JSONContent,
+  defaultParaPrIDRef: string,
+  defaultCharPrIDRef: string,
+  charPropertiesEl: Element | null,
+  charPrById: Map<string, Element>,
+  charPrCache: Map<string, string>,
+  nextCharPrId: { value: number },
+  headerDoc: Document | null,
+): string {
+  const nodeAttrs = (node.attrs ?? {}) as ParaPrAttrs;
+  const paraPrIDRef = nodeAttrs.hwpxParaPrId ?? defaultParaPrIDRef;
+  const chunks = groupContentByMarks(node.content ?? []);
+
+  const runXmls =
+    chunks.length === 0
+      ? [`<hp:run charPrIDRef="${defaultCharPrIDRef}"><hp:t></hp:t></hp:run>`]
+      : chunks.map((chunk) => {
+          let charPrId = defaultCharPrIDRef;
+          if (charPropertiesEl && headerDoc && chunk.marks?.length) {
+            charPrId = ensureCharPrForMarks({
+              charPropertiesEl,
+              charPrById,
+              charPrCache,
+              nextCharPrId,
+              baseCharPrId: defaultCharPrIDRef,
+              marks: chunk.marks,
+              headerDoc,
+            });
+          }
+          return `<hp:run charPrIDRef="${charPrId}"><hp:t>${escapeXml(chunk.text)}</hp:t></hp:run>`;
+        });
+
+  return (
+    `<hp:p paraPrIDRef="${paraPrIDRef}" styleIDRef="0" pageBreak="0" columnBreak="0" merged="0">` +
+    runXmls.join("") +
+    `<hp:linesegarray/>` +
+    `</hp:p>`
+  );
+}
+
 type RunChunk = {
   text: string;
   marks: JSONContent["marks"];
@@ -1204,6 +1265,27 @@ function escapeXml(text: string): string {
 }
 
 /**
+ * raw paraXml 문자열에서 linesegarray 요소를 그대로 추출.
+ * XMLSerializer 경유 시 namespace prefix가 변환되는 문제를 방지.
+ */
+function extractLinesegXmlFromRaw(paraXml: string): string {
+  const openIdx = paraXml.search(/<[a-zA-Z0-9]*:?linesegarray[\s>\/]/);
+  if (openIdx === -1) return "<hp:linesegarray/>";
+  const tagNameMatch = paraXml.slice(openIdx + 1).match(/^([a-zA-Z0-9]*:?linesegarray)/);
+  if (!tagNameMatch) return "<hp:linesegarray/>";
+  const tagName = tagNameMatch[1];
+  // self-closing?
+  const afterOpen = paraXml.indexOf(">", openIdx);
+  if (afterOpen !== -1 && paraXml[afterOpen - 1] === "/") {
+    return paraXml.slice(openIdx, afterOpen + 1);
+  }
+  const closeTag = `</${tagName}>`;
+  const closeIdx = paraXml.indexOf(closeTag, openIdx);
+  if (closeIdx === -1) return "<hp:linesegarray/>";
+  return paraXml.slice(openIdx, closeIdx + closeTag.length);
+}
+
+/**
  * para.paraXml 구조를 보존하며 멀티런 <hp:p>를 재생성.
  *   - paraPrIDRef, styleIDRef, linesegarray 등 구조 요소 원본 보존
  *   - ProseMirror content의 mark 조합별로 <hp:run> 분리
@@ -1219,7 +1301,19 @@ function rebuildParaXmlWithMarks(
   headerDoc: Document,
   newParaPrIDRef?: string,
 ): string {
-  const baseCharPrId = para.runs[0]?.charPrIDRef ?? "0";
+  // 기준 charPrId: 볼드/이탤릭이 없는 run의 charPrId를 우선 사용.
+  // runs[0]이 bold인 경우, 마크가 없는 텍스트 청크에 bold charPr가 잘못 적용되는 것을 방지.
+  const baseCharPrId = (() => {
+    for (const run of para.runs) {
+      const el = charPrById.get(run.charPrIDRef);
+      if (el) {
+        const hasBold = Array.from(el.children).some((c) => c.localName === "bold");
+        const hasItalic = Array.from(el.children).some((c) => c.localName === "italic");
+        if (!hasBold && !hasItalic) return run.charPrIDRef;
+      }
+    }
+    return para.runs[0]?.charPrIDRef ?? "0";
+  })();
   const chunks = groupContentByMarks(node.content ?? []);
 
   // 기존 paraXml에서 구조 속성 추출 (DOMParser)
@@ -1231,11 +1325,9 @@ function rebuildParaXmlWithMarks(
   const columnBreak = paraEl.getAttribute("columnBreak") ?? "0";
   const merged = paraEl.getAttribute("merged") ?? "0";
 
-  // linesegarray 원본 그대로 보존
-  const linesegEl = Array.from(paraEl.children).find((c) => c.localName === "linesegarray");
-  const linesegXml = linesegEl
-    ? new XMLSerializer().serializeToString(linesegEl)
-    : "<hp:linesegarray/>";
+  // linesegarray: DOM 왕복 없이 raw 문자열에서 직접 추출
+  // (XMLSerializer가 hp: prefix를 ns1: 등으로 바꿔 XML이 깨지는 문제 방지)
+  const linesegXml = extractLinesegXmlFromRaw(para.paraXml);
 
   // mark 조합별 run 생성
   const runXmls =
@@ -1518,8 +1610,22 @@ export async function applyProseMirrorDocToHwpx(
       }
     }
 
+    // 새로 추가된 (orphan) 단락 주입을 위한 준비
+    // orphan = paraId가 없는 ProseMirror 노드 (사용자가 직접 입력한 새 문단)
+    const defaultOrphanCharPrIDRef =
+      charPrById.size > 0
+        ? [...charPrById.keys()].sort((a, b) => (parseInt(a) || 0) - (parseInt(b) || 0))[0]
+        : "0";
+    const orderedDocNodes = buildOrderedDocNodes(doc);
+    const paraIdToDocIdx = new Map<string, number>();
+    for (let i = 0; i < orderedDocNodes.length; i++) {
+      const { paraId } = orderedDocNodes[i];
+      if (paraId !== null) paraIdToDocIdx.set(paraId, i);
+    }
+
     for (const section of hwpxDocumentModel.sections) {
       let sectionXml = section.xmlPrefix;
+      let lastDocIdx = -1; // 마지막으로 처리된 doc 노드 인덱스
 
       for (const block of section.blocks) {
         sectionXml += block.leadingWhitespace;
@@ -1527,6 +1633,21 @@ export async function applyProseMirrorDocToHwpx(
         if (block.type === "raw") {
           sectionXml += block.xml;
           continue;
+        }
+
+        const currDocIdx = paraIdToDocIdx.get(block.paraId) ?? -1;
+
+        // 이 block 이전에 위치하는 orphan 단락들 주입 (사용자가 새로 추가한 문단)
+        if (currDocIdx > lastDocIdx) {
+          for (let j = lastDocIdx + 1; j < currDocIdx; j++) {
+            const { paraId: oId, node: oNode } = orderedDocNodes[j];
+            if (oId !== null) continue;
+            sectionXml += buildOrphanParaXml(
+              oNode, "0", defaultOrphanCharPrIDRef,
+              charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc,
+            );
+          }
+          lastDocIdx = currDocIdx;
         }
 
         const para = hwpxDocumentModel.paraStore.get(block.paraId);
@@ -1592,11 +1713,31 @@ export async function applyProseMirrorDocToHwpx(
             sectionXml += para.paraXml;
           } else if (newParaPrIDRef && currentText === originalText && !para.isSynthesized) {
             sectionXml += patchParaPrIDRef(para.paraXml, newParaPrIDRef);
+          } else if (para.isSynthesized) {
+            // 합성 문단은 <hp:t></hp:t> (빈 텍스트)를 가져 scanXmlTextSegments가 0을 반환하므로
+            // applyLocalTextPatch가 무효화됨 → buildOrphanParaXml로 직접 XML 재생성
+            const paraPrIDRef = para.paraXml.match(/paraPrIDRef="([^"]+)"/)?.[1] ?? "0";
+            const charPrIDRef = para.runs[0]?.charPrIDRef ?? "0";
+            const built = buildOrphanParaXml(
+              currentNode, paraPrIDRef, charPrIDRef,
+              charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc,
+            );
+            sectionXml += newParaPrIDRef ? patchParaPrIDRef(built, newParaPrIDRef) : built;
           } else {
             const patched = applyLocalTextPatch(para.paraXml, para.runs, currentText);
             sectionXml += newParaPrIDRef ? patchParaPrIDRef(patched, newParaPrIDRef) : patched;
           }
         }
+      }
+
+      // 마지막 block 이후에 위치하는 orphan 단락들 주입 (문서 끝에 추가된 문단)
+      for (let j = lastDocIdx + 1; j < orderedDocNodes.length; j++) {
+        const { paraId: oId, node: oNode } = orderedDocNodes[j];
+        if (oId !== null) continue;
+        sectionXml += buildOrphanParaXml(
+          oNode, "0", defaultOrphanCharPrIDRef,
+          charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc,
+        );
       }
 
       sectionXml += section.xmlSuffix;

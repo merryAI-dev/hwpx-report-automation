@@ -15,8 +15,16 @@
 .toolbarRow {
   display: flex;
   align-items: center;
-  gap: 12px;
+  gap: 6px;
   flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+
+.toolbarRow::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
 }
 
 .group {
@@ -37,8 +45,8 @@
 .btn {
   border: none;
   background: transparent;
-  padding: 5px 10px;
-  font-size: 13px;
+  padding: 3px 7px;
+  font-size: 12px;
   font-weight: 500;
   color: #4b5563;
   border-radius: 6px;
@@ -59,14 +67,37 @@
   box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1) !important;
 }
 
-.fontSelect, .sizeSelect, .recentSelect {
+.fontSelect {
   border: none;
   background: transparent;
-  padding: 4px 8px;
-  font-size: 13px;
+  padding: 3px 4px;
+  font-size: 12px;
   color: #374151;
   outline: none;
   cursor: pointer;
+  max-width: 90px;
+}
+
+.sizeSelect {
+  border: none;
+  background: transparent;
+  padding: 3px 4px;
+  font-size: 12px;
+  color: #374151;
+  outline: none;
+  cursor: pointer;
+  max-width: 50px;
+}
+
+.recentSelect {
+  border: none;
+  background: transparent;
+  padding: 3px 6px;
+  font-size: 12px;
+  color: #374151;
+  outline: none;
+  cursor: pointer;
+  max-width: 220px;
 }
 
 .panelToggles {

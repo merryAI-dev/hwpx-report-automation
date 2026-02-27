@@ -49,26 +49,30 @@ function createHwpxParaAutoAssignPlugin(
       const model = getHwpxDocumentModel();
       if (!model) return null;
 
+      // 문서 순서대로 순회하며 paraId가 없거나 중복인 노드에 새 paraId 할당
+      // (Enter 키로 단락 분할 시 attrs가 상속되어 두 단락이 동일 paraId를 가짐)
+      // lastValidParaId = 직전에 처리된 유효한(고유) 단락의 paraId = 정확한 sibling
+      const seenParaIds = new Set<string>();
+      let lastValidParaId: string | null = null;
+      let lastValidFileName = model.sections[0]?.fileName ?? "Contents/section0.xml";
       let tr: Transaction | null = null;
 
       newState.doc.descendants((node, pos) => {
         if (node.type.name !== "paragraph" && node.type.name !== "heading") return true;
-        if (node.attrs.paraId) return true; // 이미 할당됨
 
-        // 가장 가까운 형제에서 fileName, paraId 탐색
-        let siblingParaId: string | null = null;
-        let sectionFileName = model.sections[0]?.fileName ?? "Contents/section0.xml";
+        const existingParaId = node.attrs.paraId as string | undefined;
+        if (existingParaId && !seenParaIds.has(existingParaId)) {
+          // 최초 등장 paraId → 유효, sibling 후보로 업데이트
+          seenParaIds.add(existingParaId);
+          lastValidParaId = existingParaId;
+          lastValidFileName = (node.attrs.fileName as string) || lastValidFileName;
+          return true;
+        }
 
-        // 이전/다음 형제 중 paraId가 있는 첫 번째 노드 선택
-        newState.doc.descendants((sibling, _siblingPos) => {
-          if (sibling === node) return false;
-          if (sibling.type.name !== "paragraph" && sibling.type.name !== "heading") return true;
-          if (!sibling.attrs.paraId) return true;
-          siblingParaId = sibling.attrs.paraId as string;
-          sectionFileName = (sibling.attrs.fileName as string) || sectionFileName;
-          return false; // 첫 번째 발견 후 중단
-        });
-
+        // paraId 없음 또는 중복 → 새 paraId 할당 필요
+        // lastValidParaId = 문서 순서상 직전 유효 단락 (= 정확한 sibling)
+        const siblingParaId = lastValidParaId;
+        const sectionFileName = lastValidFileName;
         const siblingPara = siblingParaId ? model.paraStore.get(siblingParaId) : null;
         const newParaId = crypto.randomUUID();
 
@@ -99,6 +103,10 @@ function createHwpxParaAutoAssignPlugin(
           fileName: sectionFileName,
         });
 
+        // 새로 할당된 paraId도 sibling 후보로 등록
+        seenParaIds.add(newParaId);
+        lastValidParaId = newParaId;
+        lastValidFileName = sectionFileName;
         onNewParaCreated(newParaId, sectionFileName);
         return true;
       });

@@ -184,7 +184,7 @@ export function EditorToolbar({
             e.target.value = "";
           }}
         />
-        {/* ── 1행: 열기~저장 ── */}
+        {/* ── 1행: 열기~저장 + 패널 토글 ── */}
         <div className={styles.toolbarRow}>
           <div className={styles.group}>
             <button
@@ -271,6 +271,45 @@ export function EditorToolbar({
               active={false}
               disabled={globalDisabled || !hasDocument}
               onClick={onSave}
+            />
+          </div>
+
+          {/* ── 우측 패널 토글 (flex push) ── */}
+          <div className={styles.panelToggles}>
+            <Btn
+              label="개요"
+              title="문서 개요"
+              active={isTabActive("outline")}
+              disabled={false}
+              onClick={() => onSetSidebarTab("outline")}
+            />
+            <Btn
+              label="AI"
+              title="AI 제안"
+              active={isTabActive("ai")}
+              disabled={false}
+              onClick={() => onSetSidebarTab("ai")}
+            />
+            <Btn
+              label="채팅"
+              title="AI 채팅"
+              active={isTabActive("chat")}
+              disabled={false}
+              onClick={() => onSetSidebarTab("chat")}
+            />
+            <Btn
+              label="분석"
+              title="문서 분석"
+              active={isTabActive("analysis")}
+              disabled={false}
+              onClick={() => onSetSidebarTab("analysis")}
+            />
+            <Btn
+              label="이력"
+              title="수정 이력"
+              active={isTabActive("history")}
+              disabled={false}
+              onClick={() => onSetSidebarTab("history")}
             />
           </div>
         </div>
@@ -452,28 +491,28 @@ export function EditorToolbar({
 
           <div className={styles.group}>
             <Btn
-              label="제목(H1)"
+              label="H1"
               title="제목 필드 지정 (H1)"
               active={editor?.isActive("heading", { level: 1 }) ?? false}
               disabled={editorDisabled}
               onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).updateAttributes("heading", { fieldType: "title" }).run()}
             />
             <Btn
-              label="받는사람(H2)"
+              label="H2"
               title="받는 사람 필드 지정 (H2)"
               active={editor?.isActive("heading", { level: 2 }) ?? false}
               disabled={editorDisabled}
               onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).updateAttributes("heading", { fieldType: "recipient" }).run()}
             />
             <Btn
-              label="보내는사람(H3)"
+              label="H3"
               title="보내는 사람 필드 지정 (H3)"
               active={editor?.isActive("heading", { level: 3 }) ?? false}
               disabled={editorDisabled}
               onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).updateAttributes("heading", { fieldType: "sender" }).run()}
             />
             <Btn
-              label="본문(H4)"
+              label="H4"
               title="본문 필드 지정 (H4)"
               active={editor?.isActive("heading", { level: 4 }) ?? false}
               disabled={editorDisabled}
@@ -504,44 +543,6 @@ export function EditorToolbar({
             </button>
           </div>
 
-          {/* ── 우측 패널 토글 (flex push) ── */}
-          <div className={styles.panelToggles}>
-            <Btn
-              label="개요"
-              title="문서 개요"
-              active={isTabActive("outline")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("outline")}
-            />
-            <Btn
-              label="AI"
-              title="AI 제안"
-              active={isTabActive("ai")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("ai")}
-            />
-            <Btn
-              label="채팅"
-              title="AI 채팅"
-              active={isTabActive("chat")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("chat")}
-            />
-            <Btn
-              label="분석"
-              title="문서 분석"
-              active={isTabActive("analysis")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("analysis")}
-            />
-            <Btn
-              label="이력"
-              title="수정 이력"
-              active={isTabActive("history")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("history")}
-            />
-          </div>
         </div>
       </div>
 
