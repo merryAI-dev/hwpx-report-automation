@@ -118,43 +118,30 @@ function extractPicNodesFromParagraph(
   const pics = findPics(paragraph);
 
   for (const pic of pics) {
-    // Find <hc:img> or <hp:img> with binaryItemIDRef
-    const imgEls = Array.from(pic.getElementsByTagName("*"))
-      .filter((el) => el.localName === "img" && el.hasAttribute("binaryItemIDRef"));
-    if (!imgEls.length) continue;
-
-    const binRef = imgEls[0].getAttribute("binaryItemIDRef");
+    // Single-pass: img, orgSz/curSz, shapeComment를 한 번의 순회로 수집
+    let binRef: string | null = null;
+    let hwpunitW = 0;
+    let hwpunitH = 0;
+    let alt = "";
+    for (const el of Array.from(pic.getElementsByTagName("*"))) {
+      const ln = el.localName;
+      if (!binRef && ln === "img" && el.hasAttribute("binaryItemIDRef")) {
+        binRef = el.getAttribute("binaryItemIDRef");
+      } else if (hwpunitW === 0 && (ln === "orgSz" || ln === "curSz")) {
+        const w = Number.parseInt(el.getAttribute("width") ?? "0", 10);
+        const h = Number.parseInt(el.getAttribute("height") ?? "0", 10);
+        if (w > 0 && h > 0) { hwpunitW = w; hwpunitH = h; }
+      } else if (!alt && ln === "shapeComment" && el.textContent) {
+        alt = el.textContent.trim();
+      }
+    }
     if (!binRef) continue;
 
     const resource = imageMap.get(binRef);
     if (!resource) continue;
 
-    // Extract dimensions from <hp:orgSz> or <hp:curSz>
-    let hwpunitW = 0;
-    let hwpunitH = 0;
-    for (const child of Array.from(pic.getElementsByTagName("*"))) {
-      if (child.localName === "orgSz" || child.localName === "curSz") {
-        const w = Number.parseInt(child.getAttribute("width") ?? "0", 10);
-        const h = Number.parseInt(child.getAttribute("height") ?? "0", 10);
-        if (w > 0 && h > 0) {
-          hwpunitW = w;
-          hwpunitH = h;
-          break;
-        }
-      }
-    }
-
     const pxWidth = hwpunitW > 0 ? Math.round(hwpunitW * HWPUNIT_TO_PX) : 320;
     const pxHeight = hwpunitH > 0 ? Math.round(hwpunitH * HWPUNIT_TO_PX) : 180;
-
-    // Extract shapeComment as alt text
-    let alt = "";
-    const commentEl = Array.from(pic.getElementsByTagName("*")).find(
-      (el) => el.localName === "shapeComment",
-    );
-    if (commentEl?.textContent) {
-      alt = commentEl.textContent.trim();
-    }
 
     imageNodes.push({
       type: "image",

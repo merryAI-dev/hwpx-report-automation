@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import type { SidebarTab } from "@/store/document-store";
 import type { RecentFileSnapshotMeta } from "@/lib/recent-files";
@@ -126,7 +126,7 @@ function readImageSize(src: string): Promise<{ width: number; height: number }> 
   });
 }
 
-export function EditorToolbar({
+export const EditorToolbar = memo(function EditorToolbar({
   editor,
   sidebarCollapsed,
   activeSidebarTab,
@@ -643,7 +643,7 @@ export function EditorToolbar({
       )}
     </>
   );
-}
+});
 
 /* ── Small helpers ── */
 

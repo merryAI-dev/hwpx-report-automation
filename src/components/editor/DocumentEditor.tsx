@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { JSONContent } from "@tiptap/core";
 import type { Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
@@ -66,15 +66,17 @@ export function DocumentEditor({
     return () => onEditorReady(null);
   }, [editor, onEditorReady]);
 
+  // content 참조가 바뀔 때만 setContent — JSON.stringify 2회 비교 제거
+  const prevContentRef = useRef<JSONContent | null>(null);
   useEffect(() => {
     if (!editor || !content) {
       return;
     }
-    const next = JSON.stringify(content);
-    const current = JSON.stringify(editor.getJSON());
-    if (next === current) {
+    // 참조 동일성 체크: store에서 같은 객체이면 skip (O(1) vs O(doc_size))
+    if (prevContentRef.current === content) {
       return;
     }
+    prevContentRef.current = content;
     editor.commands.setContent(content, { emitUpdate: false });
   }, [content, editor]);
 

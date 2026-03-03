@@ -4,7 +4,7 @@ import { applyTextEdits, applyEditsToXmlText, scanXmlTextSegments, validateHwpxA
 import type { TextEdit } from "../hwpx";
 import type { EditorSegment } from "./hwpx-to-prosemirror";
 import type { HwpxDocumentModel, HwpxRun } from "../../types/hwpx-model";
-import { markFingerprint, ensureCharPrForMarks } from "./marks-to-charpr";
+import { markFingerprint, ensureCharPrForMarks, clearCharPrCaches } from "./marks-to-charpr";
 
 type MetadataAttrs = {
   segmentId?: string;
@@ -2238,6 +2238,7 @@ function rebuildParaXmlWithMarks(
   corePrefix: CorePrefix,
   newParaPrIDRef?: string,
   newStyleIDRef?: string,
+  hangulFontIdToFace?: Map<string, string>,
 ): string {
   // 기준 charPrId: 볼드/이탤릭이 없는 run의 charPrId를 우선 사용.
   // runs[0]이 bold인 경우, 마크가 없는 텍스트 청크에 bold charPr가 잘못 적용되는 것을 방지.
@@ -2265,22 +2266,10 @@ function rebuildParaXmlWithMarks(
     // baseCharPr의 fontRef → hangul font face 이름 조회
     const baseFontRef = Array.from(baseEl.children).find((c) => c.localName === "fontRef");
     let baseFontFamily: string | undefined;
-    if (baseFontRef && headerDoc) {
+    if (baseFontRef) {
       const hangulId = baseFontRef.getAttribute("hangul");
-      if (hangulId) {
-        // headerDoc에서 HANGUL fontface의 font 요소를 찾아 face 이름 추출
-        const allFontfaces = Array.from(headerDoc.getElementsByTagName("*")).filter(
-          (el) => el.localName === "fontface" && (el.getAttribute("lang") ?? "").toUpperCase() === "HANGUL",
-        );
-        for (const ff of allFontfaces) {
-          const fontEl = Array.from(ff.children).find(
-            (c) => c.localName === "font" && c.getAttribute("id") === hangulId,
-          );
-          if (fontEl) {
-            baseFontFamily = fontEl.getAttribute("face") ?? undefined;
-            break;
-          }
-        }
+      if (hangulId && hangulFontIdToFace) {
+        baseFontFamily = hangulFontIdToFace.get(hangulId);
       }
     }
 
@@ -2303,14 +2292,12 @@ function rebuildParaXmlWithMarks(
     }
   }
 
-  // 기존 paraXml에서 구조 속성 추출 (DOMParser)
-  const paraDoc = new DOMParser().parseFromString(para.paraXml, "text/xml");
-  const paraEl = paraDoc.documentElement;
-  const paraPrIDRef = newParaPrIDRef ?? paraEl.getAttribute("paraPrIDRef") ?? "0";
-  const styleIDRef = newStyleIDRef ?? paraEl.getAttribute("styleIDRef") ?? "0";
-  const pageBreak = paraEl.getAttribute("pageBreak") ?? "0";
-  const columnBreak = paraEl.getAttribute("columnBreak") ?? "0";
-  const merged = paraEl.getAttribute("merged") ?? "0";
+  // 기존 paraXml에서 구조 속성 추출 — regex로 직접 추출 (DOM 파싱 제거)
+  const paraPrIDRef = newParaPrIDRef ?? (para.paraXml.match(/paraPrIDRef="([^"]*)"/)?.[1] ?? "0");
+  const styleIDRef = newStyleIDRef ?? (para.paraXml.match(/styleIDRef="([^"]*)"/)?.[1] ?? "0");
+  const pageBreak = para.paraXml.match(/pageBreak="([^"]*)"/)?.[1] ?? "0";
+  const columnBreak = para.paraXml.match(/columnBreak="([^"]*)"/)?.[1] ?? "0";
+  const merged = para.paraXml.match(/merged="([^"]*)"/)?.[1] ?? "0";
 
   // linesegarray: DOM 왕복 없이 raw 문자열에서 직접 추출
   // (XMLSerializer가 hp: prefix를 ns1: 등으로 바꿔 XML이 깨지는 문제 방지)
@@ -2328,8 +2315,8 @@ function rebuildParaXmlWithMarks(
     corePrefix,
   });
 
-  // id 속성: 원본에서 보존, 합성 문단(없는 경우)은 생략
-  const originalId = paraEl.getAttribute("id");
+  // id 속성: 원본에서 보존, 합성 문단(없는 경우)은 생략 — regex 추출
+  const originalId = para.paraXml.match(/<[^>]*?\sid="([^"]*)"/)?.[1] ?? null;
   const idAttr = originalId ? ` id="${originalId}"` : "";
 
   return (
@@ -2556,6 +2543,9 @@ export async function applyProseMirrorDocToHwpx(
   extraSegmentsMap?: Record<string, string[]>,
   hwpxDocumentModel?: HwpxDocumentModel | null,
 ): Promise<{ blob: Blob; edits: TextEdit[]; warnings: string[]; integrityIssues: string[] }> {
+  // export 사이클마다 charPr 캐시 초기화 (이전 문서 상태 오염 방지)
+  clearCharPrCaches();
+
   // ── 새 para-snapshot 조립 경로 (hwpxDocumentModel 있을 때) ────────────────
   if (hwpxDocumentModel) {
     const paraNodeIndex = buildParaIdNodeMap(doc);
@@ -2624,6 +2614,22 @@ export async function applyProseMirrorDocToHwpx(
             if (parsed3 !== null) maxParaPrId = Math.max(maxParaPrId, parsed3);
           }
           nextParaPrId = { value: maxParaPrId + 1 };
+        }
+      }
+    }
+
+    // HANGUL fontface font id → face name 인덱스 (1회 빌드, O(1) 조회)
+    const hangulFontIdToFace = new Map<string, string>();
+    if (headerDoc) {
+      for (const el of Array.from(headerDoc.getElementsByTagName("*"))) {
+        if (el.localName === "fontface" && (el.getAttribute("lang") ?? "").toUpperCase() === "HANGUL") {
+          for (const child of Array.from(el.children)) {
+            if (child.localName === "font") {
+              const id = child.getAttribute("id");
+              const face = child.getAttribute("face");
+              if (id && face) hangulFontIdToFace.set(id, face);
+            }
+          }
         }
       }
     }
@@ -2774,6 +2780,7 @@ export async function applyProseMirrorDocToHwpx(
             sectionCorePrefix,
             newParaPrIDRef,
             newStyleIDRef,
+            hangulFontIdToFace,
           );
           if (para.isSynthesized || !readParaXmlId(rebuilt)) {
             rebuilt = patchParaXmlId(rebuilt, allocateParaXmlId());

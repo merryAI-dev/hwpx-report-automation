@@ -150,14 +150,26 @@ function findOrCreateFontfaces(headerDoc: Document): Element {
   return created;
 }
 
+// fontface lang → Element 인덱스: O(n) 선형 탐색 → O(1) 조회
+const fontfaceLangIndex = new WeakMap<Element, Map<string, Element>>();
+
 function findOrCreateFontfaceByLang(
   headerDoc: Document,
   fontfacesEl: Element,
   lang: string,
 ): Element {
-  const existing = Array.from(fontfacesEl.children).find(
-    (child) => child.localName === "fontface" && (child.getAttribute("lang") ?? "").toUpperCase() === lang,
-  );
+  let langMap = fontfaceLangIndex.get(fontfacesEl);
+  if (!langMap) {
+    langMap = new Map();
+    for (const child of Array.from(fontfacesEl.children)) {
+      if (child.localName === "fontface") {
+        const l = (child.getAttribute("lang") ?? "").toUpperCase();
+        if (l) langMap.set(l, child);
+      }
+    }
+    fontfaceLangIndex.set(fontfacesEl, langMap);
+  }
+  const existing = langMap.get(lang);
   if (existing) {
     return existing;
   }
@@ -167,29 +179,40 @@ function findOrCreateFontfaceByLang(
   created.setAttribute("lang", lang);
   created.setAttribute("fontCnt", "0");
   fontfacesEl.appendChild(created);
+  langMap.set(lang, created); // 인덱스에도 추가
   return created;
 }
+
+// fontface → (face lowercase → {id, element}) 인덱스
+const fontIdIndex = new WeakMap<Element, Map<string, string>>();
 
 function ensureFontIdInFontface(
   headerDoc: Document,
   fontfaceEl: Element,
   fontFamily: string,
 ): string {
-  const existing = Array.from(fontfaceEl.children).find((child) => {
-    if (child.localName !== "font") {
-      return false;
+  let faceMap = fontIdIndex.get(fontfaceEl);
+  if (!faceMap) {
+    faceMap = new Map();
+    for (const child of Array.from(fontfaceEl.children)) {
+      if (child.localName === "font") {
+        const face = (child.getAttribute("face") ?? "").trim().toLowerCase();
+        const id = child.getAttribute("id");
+        if (face && id) faceMap.set(face, id);
+      }
     }
-    return (child.getAttribute("face") ?? "").trim().toLowerCase() === fontFamily.trim().toLowerCase();
-  });
-  if (existing?.getAttribute("id")) {
-    return existing.getAttribute("id")!;
+    fontIdIndex.set(fontfaceEl, faceMap);
   }
+  const key = fontFamily.trim().toLowerCase();
+  const existingId = faceMap.get(key);
+  if (existingId) return existingId;
 
-  const fonts = Array.from(fontfaceEl.children).filter((child) => child.localName === "font");
-  const maxId = fonts.reduce((acc, font) => {
-    const id = Number.parseInt(font.getAttribute("id") ?? "-1", 10);
-    return Number.isFinite(id) ? Math.max(acc, id) : acc;
-  }, -1);
+  // 새 font ID: 현재 인덱스에서 최대 ID + 1
+  let maxId = -1;
+  for (const id of faceMap.values()) {
+    const n = Number.parseInt(id, 10);
+    if (Number.isFinite(n) && n > maxId) maxId = n;
+  }
   const newId = String(maxId + 1);
 
   const ns = fontfaceEl.namespaceURI || "http://www.hancom.co.kr/hwpml/2011/head";
@@ -200,7 +223,8 @@ function ensureFontIdInFontface(
   fontEl.setAttribute("type", "TTF");
   fontEl.setAttribute("isEmbedded", "0");
   fontfaceEl.appendChild(fontEl);
-  fontfaceEl.setAttribute("fontCnt", String(fonts.length + 1));
+  faceMap.set(key, newId); // 인덱스에 새 font 추가
+  fontfaceEl.setAttribute("fontCnt", String(faceMap.size));
   return newId;
 }
 
@@ -380,6 +404,9 @@ export function applyMarksToCharPrElement(
  * @param marks             TipTap mark 배열
  * @param headerDoc         DOMParser로 파싱된 header.xml Document
  */
+// source charPr의 normalized 문자열 캐시 — 같은 baseCharPrId에 대해 1회만 직렬화
+const sourceNormalizedCache = new Map<string, string>();
+
 export function ensureCharPrForMarks(params: {
   charPropertiesEl: Element;
   charPrById: Map<string, Element>;
@@ -407,7 +434,13 @@ export function ensureCharPrForMarks(params: {
   applyTextStyleToCharPr(cloned, marks, headerDoc);
 
   // marks 적용 결과가 source와 동일하면 새 charPr를 만들지 않고 base를 재사용한다.
-  if (normalizeCharPrForCompare(cloned) === normalizeCharPrForCompare(sourceCharPr)) {
+  // sourceCharPr normalized 문자열은 캐시하여 반복 직렬화 제거
+  let sourceNormalized = sourceNormalizedCache.get(baseCharPrId);
+  if (sourceNormalized === undefined) {
+    sourceNormalized = normalizeCharPrForCompare(sourceCharPr);
+    sourceNormalizedCache.set(baseCharPrId, sourceNormalized);
+  }
+  if (normalizeCharPrForCompare(cloned) === sourceNormalized) {
     charPrCache.set(cacheKey, baseCharPrId);
     return baseCharPrId;
   }
@@ -419,4 +452,9 @@ export function ensureCharPrForMarks(params: {
   charPrById.set(newId, cloned);
   charPrCache.set(cacheKey, newId);
   return newId;
+}
+
+/** export/import 사이클 사이에 sourceNormalized 캐시를 리셋 */
+export function clearCharPrCaches(): void {
+  sourceNormalizedCache.clear();
 }

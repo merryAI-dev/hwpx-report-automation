@@ -25,6 +25,7 @@ import type { DocumentTemplate } from "@/lib/editor/document-templates";
 import type { RecentFileSnapshotMeta } from "@/lib/recent-files";
 import { useDocumentStore } from "@/store/document-store";
 import type { SidebarTab } from "@/store/document-store";
+import { useShallow } from "zustand/react/shallow";
 import { focusSegment, toFileStem } from "@/lib/editor/editor-operations";
 import { useFileOperations } from "@/hooks/useFileOperations";
 import { useAiSuggestions } from "@/hooks/useAiSuggestions";
@@ -39,62 +40,72 @@ export default function Home() {
   const [recentSnapshots, setRecentSnapshots] = useState<RecentFileSnapshotMeta[]>([]);
   const [selectedRecentSnapshotId, setSelectedRecentSnapshotId] = useState("");
 
-  // ── Zustand store ──
+  // ── Zustand store — useShallow로 기능별 구독 분리 (불필요한 re-render 방지) ──
   const {
-    fileName,
-    editorDoc,
-    sourceSegments,
-    integrityIssues,
-    exportWarnings,
-    outline,
-    editsPreview,
-    history,
-    status,
-    isBusy,
-    isDirty,
-    sidebarCollapsed,
-    activeSidebarTab,
-    instruction,
-    aiSuggestion,
-    batchSuggestions,
-    aiBusy,
-    selection,
-    download,
-    renderHtml,
-    renderElementMap,
-    batchDecisions,
-    selectedPreset,
-    documentAnalysis,
-    analysisLoading,
-    terminologyDict,
-    verificationResult,
-    verificationLoading,
-    batchMode,
-    formMode,
-    chatMessages,
-    chatBusy,
-    pendingToolCall,
-    lastToolCallSnapshot,
-    setStatus,
-    setBusy,
-    toggleSidebar,
-    setActiveSidebarTab,
-    setInstruction,
-    setSelection,
-    setDownload,
-    setBatchDecision,
-    setBatchMode,
-    setFormMode,
-    updateTerminologyEntry,
-    removeTerminologyEntry,
-    clearChat,
-    pushHistory,
-    undoLastToolCall,
-    setEditorDoc,
-    setSelectedPreset,
-    setLoadedDocument,
-    setOutline,
-  } = useDocumentStore();
+    fileName, editorDoc, sourceSegments, integrityIssues, exportWarnings,
+    outline, editsPreview, history, status, isBusy, isDirty,
+    selection, download, renderHtml, renderElementMap,
+  } = useDocumentStore(useShallow((s) => ({
+    fileName: s.fileName, editorDoc: s.editorDoc, sourceSegments: s.sourceSegments,
+    integrityIssues: s.integrityIssues, exportWarnings: s.exportWarnings,
+    outline: s.outline, editsPreview: s.editsPreview, history: s.history,
+    status: s.status, isBusy: s.isBusy, isDirty: s.isDirty,
+    selection: s.selection, download: s.download, renderHtml: s.renderHtml,
+    renderElementMap: s.renderElementMap,
+  })));
+
+  const {
+    sidebarCollapsed, activeSidebarTab, batchMode, formMode,
+  } = useDocumentStore(useShallow((s) => ({
+    sidebarCollapsed: s.sidebarCollapsed, activeSidebarTab: s.activeSidebarTab,
+    batchMode: s.batchMode, formMode: s.formMode,
+  })));
+
+  const {
+    instruction, aiSuggestion, batchSuggestions, aiBusy,
+    batchDecisions, selectedPreset,
+  } = useDocumentStore(useShallow((s) => ({
+    instruction: s.instruction, aiSuggestion: s.aiSuggestion,
+    batchSuggestions: s.batchSuggestions, aiBusy: s.aiBusy,
+    batchDecisions: s.batchDecisions, selectedPreset: s.selectedPreset,
+  })));
+
+  const {
+    documentAnalysis, analysisLoading, terminologyDict,
+    verificationResult, verificationLoading,
+  } = useDocumentStore(useShallow((s) => ({
+    documentAnalysis: s.documentAnalysis, analysisLoading: s.analysisLoading,
+    terminologyDict: s.terminologyDict, verificationResult: s.verificationResult,
+    verificationLoading: s.verificationLoading,
+  })));
+
+  const {
+    chatMessages, chatBusy, pendingToolCall, lastToolCallSnapshot,
+  } = useDocumentStore(useShallow((s) => ({
+    chatMessages: s.chatMessages, chatBusy: s.chatBusy,
+    pendingToolCall: s.pendingToolCall, lastToolCallSnapshot: s.lastToolCallSnapshot,
+  })));
+
+  // Actions — 안정 참조이므로 re-render 유발하지 않음
+  const setStatus = useDocumentStore((s) => s.setStatus);
+  const setBusy = useDocumentStore((s) => s.setBusy);
+  const toggleSidebar = useDocumentStore((s) => s.toggleSidebar);
+  const setActiveSidebarTab = useDocumentStore((s) => s.setActiveSidebarTab);
+  const setInstruction = useDocumentStore((s) => s.setInstruction);
+  const setSelection = useDocumentStore((s) => s.setSelection);
+  const setDownload = useDocumentStore((s) => s.setDownload);
+  const setBatchDecision = useDocumentStore((s) => s.setBatchDecision);
+  const setBatchMode = useDocumentStore((s) => s.setBatchMode);
+  const setFormMode = useDocumentStore((s) => s.setFormMode);
+  const updateTerminologyEntry = useDocumentStore((s) => s.updateTerminologyEntry);
+  const removeTerminologyEntry = useDocumentStore((s) => s.removeTerminologyEntry);
+  const clearChat = useDocumentStore((s) => s.clearChat);
+  const pushHistory = useDocumentStore((s) => s.pushHistory);
+  const undoLastToolCall = useDocumentStore((s) => s.undoLastToolCall);
+  const setEditorDoc = useDocumentStore((s) => s.setEditorDoc);
+  const setSelectedPreset = useDocumentStore((s) => s.setSelectedPreset);
+  const setLoadedDocument = useDocumentStore((s) => s.setLoadedDocument);
+  const setOutline = useDocumentStore((s) => s.setOutline);
 
   // ── Custom hooks ──
   const fileOps = useFileOperations(editor);
