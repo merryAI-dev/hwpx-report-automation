@@ -115,10 +115,41 @@ function walk(node: JSONContent, visitor: (node: JSONContent, ancestors: string[
   }
 }
 
+// ── Outline caching ──
+// Only recalculate when heading content actually changes.
+let cachedOutlineKey = "";
+let cachedOutlineResult: OutlineItem[] = [];
+
+function computeOutlineKey(doc: JSONContent): string {
+  // Build a lightweight fingerprint from headings + heading-like paragraphs
+  const parts: string[] = [];
+  walk(doc, (node, ancestors) => {
+    if (ancestors.includes("table")) return;
+    if (node.type === "heading") {
+      const attrs = (node.attrs || {}) as MetadataAttrs;
+      parts.push(`h:${attrs.level ?? 2}:${attrs.segmentId ?? ""}:${extractNodeText(node).trim()}`);
+    } else if (node.type === "paragraph") {
+      const text = extractNodeText(node).trim();
+      if (text && inferOutlineLevelForParagraph(node, text) !== null) {
+        const attrs = (node.attrs || {}) as MetadataAttrs;
+        parts.push(`p:${attrs.segmentId ?? ""}:${text}`);
+      }
+    }
+  });
+  return parts.join("|");
+}
+
 export function buildOutlineFromDoc(doc: JSONContent | null): OutlineItem[] {
   if (!doc) {
     return [];
   }
+
+  // Check cache
+  const key = computeOutlineKey(doc);
+  if (key === cachedOutlineKey && cachedOutlineResult.length > 0) {
+    return cachedOutlineResult;
+  }
+
   const rows: OutlineItem[] = [];
   walk(doc, (node, ancestors) => {
     if (ancestors.includes("table") || ancestors.includes("tableRow") || ancestors.includes("tableCell")) {
@@ -152,6 +183,9 @@ export function buildOutlineFromDoc(doc: JSONContent | null): OutlineItem[] {
       segmentId: attrs.segmentId,
     });
   });
+
+  cachedOutlineKey = key;
+  cachedOutlineResult = rows;
   return rows;
 }
 

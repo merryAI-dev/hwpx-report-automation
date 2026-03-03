@@ -25,6 +25,157 @@ export type ParsedProseMirrorDocument = {
 
 const SECTION_FILE_RE = /^Contents\/section\d+\.xml$/;
 const HEADER_FILE = "Contents/header.xml";
+const CONTENT_HPF_FILE = "Contents/content.hpf";
+
+// ── Image import helpers ──
+
+type ImageResource = {
+  binItemId: string;
+  dataUrl: string;
+  mimeType: string;
+  /** File path inside ZIP (e.g. "BinData/image1.png") */
+  href: string;
+};
+
+const HWPUNIT_TO_PX = 1 / 75; // 1 HWPUNIT ≈ 1/75 px (at 96 DPI)
+
+/**
+ * Build a map from binaryItemIDRef → ImageResource by reading content.hpf
+ * and all matching BinData files from the ZIP archive.
+ */
+async function buildImageResourceMap(zip: JSZip): Promise<Map<string, ImageResource>> {
+  const map = new Map<string, ImageResource>();
+
+  // Read content.hpf to find binItem → href mapping
+  const hpfFile = zip.files[CONTENT_HPF_FILE];
+  if (!hpfFile || hpfFile.dir) return map;
+
+  let hpfXml: string;
+  try {
+    hpfXml = await hpfFile.async("string");
+  } catch {
+    return map;
+  }
+
+  const hpfDoc = new DOMParser().parseFromString(hpfXml, "application/xml");
+  if (hpfDoc.querySelector("parsererror")) return map;
+
+  // Collect item entries: <opf:item id="imageN" href="BinData/imageN.ext" media-type="image/png" />
+  const items = Array.from(hpfDoc.getElementsByTagName("*"))
+    .filter((el) => el.localName === "item");
+
+  const hrefById = new Map<string, { href: string; mediaType: string }>();
+  for (const item of items) {
+    const id = item.getAttribute("id");
+    const href = item.getAttribute("href");
+    const mediaType = item.getAttribute("media-type") ?? "";
+    if (id && href && mediaType.startsWith("image/")) {
+      hrefById.set(id, { href, mediaType });
+    }
+  }
+
+  // Read each binary file and convert to data URL
+  for (const [binItemId, { href, mediaType }] of hrefById) {
+    const zipEntry = zip.files[href] ?? zip.files[`BinData/${href}`];
+    if (!zipEntry || zipEntry.dir) continue;
+    try {
+      const binaryData = await zipEntry.async("base64");
+      const dataUrl = `data:${mediaType};base64,${binaryData}`;
+      map.set(binItemId, { binItemId, dataUrl, mimeType: mediaType, href });
+    } catch {
+      // Skip unreadable binary
+    }
+  }
+
+  return map;
+}
+
+/**
+ * Find all <hp:pic> elements within a paragraph element (excluding nested tables).
+ * Returns image node data for each picture found.
+ */
+function extractPicNodesFromParagraph(
+  paragraph: Element,
+  imageMap: Map<string, ImageResource>,
+  fileName: string,
+  picIndex: { value: number },
+): JSONContent[] {
+  const imageNodes: JSONContent[] = [];
+
+  // Find all <hp:pic> descendants, but skip those inside nested <hp:tbl>
+  function findPics(el: Element): Element[] {
+    const result: Element[] = [];
+    for (const child of Array.from(el.children)) {
+      if (child.localName === "pic") {
+        result.push(child);
+      } else if (child.localName !== "tbl") {
+        result.push(...findPics(child));
+      }
+    }
+    return result;
+  }
+
+  const pics = findPics(paragraph);
+
+  for (const pic of pics) {
+    // Find <hc:img> or <hp:img> with binaryItemIDRef
+    const imgEls = Array.from(pic.getElementsByTagName("*"))
+      .filter((el) => el.localName === "img" && el.hasAttribute("binaryItemIDRef"));
+    if (!imgEls.length) continue;
+
+    const binRef = imgEls[0].getAttribute("binaryItemIDRef");
+    if (!binRef) continue;
+
+    const resource = imageMap.get(binRef);
+    if (!resource) continue;
+
+    // Extract dimensions from <hp:orgSz> or <hp:curSz>
+    let hwpunitW = 0;
+    let hwpunitH = 0;
+    for (const child of Array.from(pic.getElementsByTagName("*"))) {
+      if (child.localName === "orgSz" || child.localName === "curSz") {
+        const w = Number.parseInt(child.getAttribute("width") ?? "0", 10);
+        const h = Number.parseInt(child.getAttribute("height") ?? "0", 10);
+        if (w > 0 && h > 0) {
+          hwpunitW = w;
+          hwpunitH = h;
+          break;
+        }
+      }
+    }
+
+    const pxWidth = hwpunitW > 0 ? Math.round(hwpunitW * HWPUNIT_TO_PX) : 320;
+    const pxHeight = hwpunitH > 0 ? Math.round(hwpunitH * HWPUNIT_TO_PX) : 180;
+
+    // Extract shapeComment as alt text
+    let alt = "";
+    const commentEl = Array.from(pic.getElementsByTagName("*")).find(
+      (el) => el.localName === "shapeComment",
+    );
+    if (commentEl?.textContent) {
+      alt = commentEl.textContent.trim();
+    }
+
+    imageNodes.push({
+      type: "image",
+      attrs: {
+        src: resource.dataUrl,
+        alt: alt || null,
+        title: alt || null,
+        width: pxWidth,
+        height: pxHeight,
+        fileName: alt || null,
+        mimeType: resource.mimeType,
+        binItemId: resource.binItemId,
+        hwpunitWidth: hwpunitW || null,
+        hwpunitHeight: hwpunitH || null,
+      },
+    });
+    picIndex.value++;
+  }
+
+  return imageNodes;
+}
 const FONT_REF_KEYS = ["hangul", "latin", "hanja", "japanese", "other", "symbol", "user"] as const;
 type FontRefKey = (typeof FONT_REF_KEYS)[number];
 const FONTFACE_LANG_BY_KEY: Record<FontRefKey, string> = {
@@ -187,37 +338,45 @@ type CharPrMarks = {
   bold: boolean;
   italic: boolean;
   underline: boolean;
+  underlineType?: string;    // SINGLE, DOUBLE, DOTTED, DASH, LONG_DASH, etc.
   strike: boolean;
+  strikeShape?: string;      // SOLID, DOUBLE, etc.
   superscript: boolean;
   subscript: boolean;
   color?: string;
   shadeColor?: string;
   fontFamily?: string;
+  fontFamilyLatin?: string;  // latin 슬롯이 hangul과 다를 때 별도 보존
   fontSizePt?: number;
 };
 
 function readCharPrFontFamily(
   charPr: Element,
   fontFaceMaps: Record<FontRefKey, Map<string, string>>,
-): string | undefined {
+): { fontFamily?: string; fontFamilyLatin?: string } {
   const fontRef = Array.from(charPr.children).find((child) => child.localName === "fontRef");
   if (!fontRef) {
-    return undefined;
+    return {};
   }
-  const faces = new Set<string>();
+  const faceByKey: Partial<Record<FontRefKey, string>> = {};
   for (const key of FONT_REF_KEYS) {
     const id = fontRef.getAttribute(key);
-    if (!id) {
-      continue;
-    }
+    if (!id) continue;
     const face = fontFaceMaps[key].get(id);
-    if (face) {
-      faces.add(face);
-    }
+    if (face) faceByKey[key] = face;
   }
-  // fontRef가 언어별로 서로 다른 face를 가질 수 있으므로,
-  // 단일 family로 안전하게 표현 가능한 경우(모든 슬롯 동일)만 mark로 노출한다.
-  return faces.size === 1 ? Array.from(faces)[0] : undefined;
+
+  // hangul 폰트를 primary fontFamily로 사용 (한국어 문서 기준)
+  // hangul이 없으면 latin, 그 외 첫 번째 폰트 사용
+  const primary = faceByKey.hangul ?? faceByKey.latin ?? Object.values(faceByKey)[0];
+  if (!primary) return {};
+
+  const latinFace = faceByKey.latin;
+  // latin이 primary와 다르면 별도 보존 (라운드트립)
+  const fontFamilyLatin =
+    latinFace && latinFace !== primary ? latinFace : undefined;
+
+  return { fontFamily: primary, fontFamilyLatin };
 }
 
 function readCharPrFontSizePt(charPr: Element): number | undefined {
@@ -266,26 +425,31 @@ function extractCharPrMarksMap(doc: Document): Map<string, CharPrMarks> {
     const hasBold = children.some((c) => c.localName === "bold");
     const hasItalic = children.some((c) => c.localName === "italic");
     const underlineEl = children.find((c) => c.localName === "underline");
-    const hasUnderline = underlineEl ? underlineEl.getAttribute("type") === "SINGLE" : false;
+    const underlineType = underlineEl?.getAttribute("type") ?? undefined;
+    const hasUnderline = !!underlineType && underlineType !== "NONE";
     const strikeoutEl = children.find((c) => c.localName === "strikeout");
-    const hasStrike = strikeoutEl ? strikeoutEl.getAttribute("shape") !== "NONE" : false;
+    const strikeShape = strikeoutEl?.getAttribute("shape") ?? undefined;
+    const hasStrike = !!strikeShape && strikeShape !== "NONE";
     const hasSuperscript = children.some((c) => c.localName === "superscript" || c.localName === "supscript");
     const hasSubscript = children.some((c) => c.localName === "subscript");
     const rawColor = el.getAttribute("textColor");
     const color = rawColor && rawColor.toUpperCase() !== "#000000" ? rawColor : undefined;
     const shadeColor = normalizeShadeColor(el.getAttribute("shadeColor"));
-    const fontFamily = readCharPrFontFamily(el, fontFaceMaps);
+    const { fontFamily, fontFamilyLatin } = readCharPrFontFamily(el, fontFaceMaps);
     const fontSizePt = readCharPrFontSizePt(el);
     map.set(id, {
       bold: hasBold,
       italic: hasItalic,
       underline: hasUnderline,
+      underlineType: hasUnderline ? underlineType : undefined,
       strike: hasStrike,
+      strikeShape: hasStrike ? strikeShape : undefined,
       superscript: hasSuperscript,
       subscript: hasSubscript,
       color,
       shadeColor,
       fontFamily,
+      fontFamilyLatin,
       fontSizePt,
     });
   }
@@ -524,7 +688,9 @@ type ParsedRunChunk = {
   bold: boolean;
   italic: boolean;
   underline: boolean;
+  underlineType?: string;
   strike: boolean;
+  strikeShape?: string;
   superscript: boolean;
   subscript: boolean;
   color?: string;
@@ -591,6 +757,13 @@ function toParagraphNode(
         }
         if (runChunk.fontSizePt !== undefined) {
           textStyleAttrs.fontSize = formatPt(runChunk.fontSizePt);
+        }
+        // 밑줄/취소선 변형 정보 보존 (라운드트립용)
+        if (runChunk.underlineType && runChunk.underlineType !== "SINGLE") {
+          textStyleAttrs.hwpxUnderlineType = runChunk.underlineType;
+        }
+        if (runChunk.strikeShape && runChunk.strikeShape !== "SOLID") {
+          textStyleAttrs.hwpxStrikeShape = runChunk.strikeShape;
         }
         if (Object.keys(textStyleAttrs).length > 0) {
           marks.push({ type: "textStyle", attrs: textStyleAttrs });
@@ -723,12 +896,15 @@ function applyRunStyleHintsToSegment(
     if (marks.bold) segment.styleHints.hwpxBold = "true";
     if (marks.italic) segment.styleHints.hwpxItalic = "true";
     if (marks.underline) segment.styleHints.hwpxUnderline = "true";
+    if (marks.underlineType) segment.styleHints.hwpxUnderlineType = marks.underlineType;
     if (marks.strike) segment.styleHints.hwpxStrike = "true";
+    if (marks.strikeShape) segment.styleHints.hwpxStrikeShape = marks.strikeShape;
     if (marks.superscript) segment.styleHints.hwpxSuperscript = "true";
     if (marks.subscript) segment.styleHints.hwpxSubscript = "true";
     if (marks.color) segment.styleHints.hwpxTextColor = marks.color;
     if (marks.shadeColor) segment.styleHints.hwpxShadeColor = marks.shadeColor;
     if (marks.fontFamily) segment.styleHints.hwpxFontFamily = marks.fontFamily;
+    if (marks.fontFamilyLatin) segment.styleHints.hwpxFontFamilyLatin = marks.fontFamilyLatin;
     if (marks.fontSizePt !== undefined) segment.styleHints.hwpxFontSizePt = String(marks.fontSizePt);
   }
 }
@@ -773,7 +949,9 @@ function consumeAndMergeParagraph(
     bold: seg.styleHints.hwpxBold === "true",
     italic: seg.styleHints.hwpxItalic === "true",
     underline: seg.styleHints.hwpxUnderline === "true",
+    underlineType: seg.styleHints.hwpxUnderlineType,
     strike: seg.styleHints.hwpxStrike === "true",
+    strikeShape: seg.styleHints.hwpxStrikeShape,
     superscript: seg.styleHints.hwpxSuperscript === "true",
     subscript: seg.styleHints.hwpxSubscript === "true",
     color: seg.styleHints.hwpxTextColor,
@@ -887,6 +1065,7 @@ function parseSectionNode(
   paraIdByDomElement: Map<Element, string>,
   paraPrById: Map<string, ParaPrValues>,
   headingLevelByStyleId: Map<string, number>,
+  imageMap: Map<string, ImageResource>,
 ): JSONContent[] {
   const content: JSONContent[] = [];
   const paragraphs = Array.from(sectionElement.children).filter((child) => child.localName === "p");
@@ -1017,8 +1196,34 @@ function parseSectionNode(
       continue;
     }
 
-    // For a non-table <hp:p>, collect only <hp:t> not inside any nested table.
+    // Check for images (<hp:pic>) in this paragraph
+    const picCounter = { value: 0 };
+    const imageNodes = extractPicNodesFromParagraph(paragraph, imageMap, fileName, picCounter);
+
+    // If paragraph contains ONLY images (no text), emit image nodes directly
     const textElements = getTextElementsExcludingNestedTables(paragraph);
+    const hasText = textElements.some((el) => {
+      const seg = elementSegmentMap.get(el);
+      return seg && seg.text.trim().length > 0;
+    });
+
+    if (imageNodes.length > 0 && !hasText) {
+      // Image-only paragraph: emit each image as its own block
+      for (const imgNode of imageNodes) {
+        content.push(imgNode);
+      }
+      // Still consume any empty segments to keep pool in sync
+      for (const el of textElements) {
+        const seg = elementSegmentMap.get(el);
+        if (seg && !usedSet.has(seg)) {
+          usedSet.add(seg);
+          usedSegments.push(seg);
+        }
+      }
+      continue;
+    }
+
+    // For a non-table <hp:p>, collect only <hp:t> not inside any nested table.
     const styleIdRef = paragraph.getAttribute("styleIDRef") ?? "";
     const styleHeadingLevel = headingLevelByStyleId.get(styleIdRef);
     const node = consumeAndMergeParagraph(
@@ -1031,6 +1236,7 @@ function parseSectionNode(
       charPrMarksById,
       styleHeadingLevel,
     );
+
     if (node) {
       // Inject paraId from buildHwpxSectionModel (para-snapshot round-trip key)
       const paraId = paraIdByDomElement.get(paragraph);
@@ -1061,6 +1267,10 @@ function parseSectionNode(
         }
       }
       content.push(node);
+    }
+    // Append image nodes after the text paragraph (or standalone if no text)
+    for (const imgNode of imageNodes) {
+      content.push(imgNode);
     }
   }
 
@@ -1132,6 +1342,9 @@ export async function parseHwpxToProseMirror(fileBuffer: ArrayBuffer): Promise<P
     }
   }
 
+  // Build image resource map from content.hpf + BinData
+  const imageMap = await buildImageResourceMap(zip);
+
   const usedSegments: EditorSegment[] = [];
   const content: JSONContent[] = [];
   const extraSegmentsMap: Record<string, string[]> = {};
@@ -1182,6 +1395,7 @@ export async function parseHwpxToProseMirror(fileBuffer: ArrayBuffer): Promise<P
       paraIdByDomElement,
       paraPrById,
       headingLevelByStyleId,
+      imageMap,
     );
     content.push(...sectionBlocks);
   }

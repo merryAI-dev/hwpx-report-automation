@@ -50,6 +50,31 @@ export const CustomImage = Image.extend({
           return { "data-mime-type": String(attributes.mimeType) };
         },
       },
+      // HWPX roundtrip metadata — preserved from import, used on export
+      binItemId: {
+        default: null,
+        parseHTML: (element: HTMLElement) => element.getAttribute("data-bin-item-id"),
+        renderHTML: (attributes: Record<string, unknown>) => {
+          if (!attributes.binItemId) return {};
+          return { "data-bin-item-id": String(attributes.binItemId) };
+        },
+      },
+      hwpunitWidth: {
+        default: null,
+        parseHTML: (element: HTMLElement) => parsePositiveInt(element.getAttribute("data-hwpunit-width")),
+        renderHTML: (attributes: Record<string, unknown>) => {
+          const v = parsePositiveInt(attributes.hwpunitWidth);
+          return v ? { "data-hwpunit-width": String(v) } : {};
+        },
+      },
+      hwpunitHeight: {
+        default: null,
+        parseHTML: (element: HTMLElement) => parsePositiveInt(element.getAttribute("data-hwpunit-height")),
+        renderHTML: (attributes: Record<string, unknown>) => {
+          const v = parsePositiveInt(attributes.hwpunitHeight);
+          return v ? { "data-hwpunit-height": String(v) } : {};
+        },
+      },
     };
   },
   renderHTML({ HTMLAttributes }) {

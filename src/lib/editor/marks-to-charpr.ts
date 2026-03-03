@@ -17,6 +17,8 @@ type TextStyleAttrs = {
   backgroundColor?: string;
   fontFamily?: string;
   fontSizePt?: number;
+  hwpxUnderlineType?: string;
+  hwpxStrikeShape?: string;
 };
 
 function normalizeColor(raw: unknown): string | undefined {
@@ -48,7 +50,16 @@ function readTextStyleAttrs(marks: JSONContent["marks"]): TextStyleAttrs {
     }
   }
 
-  return { color, backgroundColor, fontFamily, fontSizePt };
+  const hwpxUnderlineType =
+    typeof attrs.hwpxUnderlineType === "string" && attrs.hwpxUnderlineType.trim()
+      ? attrs.hwpxUnderlineType.trim()
+      : undefined;
+  const hwpxStrikeShape =
+    typeof attrs.hwpxStrikeShape === "string" && attrs.hwpxStrikeShape.trim()
+      ? attrs.hwpxStrikeShape.trim()
+      : undefined;
+
+  return { color, backgroundColor, fontFamily, fontSizePt, hwpxUnderlineType, hwpxStrikeShape };
 }
 
 function hasTextStyleMark(marks: JSONContent["marks"]): boolean {
@@ -87,6 +98,8 @@ export function markFingerprint(marks: JSONContent["marks"]): string {
         if (textStyle.fontSizePt !== undefined) {
           tokens.push(`fontSize:${canonicalizeFontSizePt(textStyle.fontSizePt)}`);
         }
+        if (textStyle.hwpxUnderlineType) tokens.push(`ulType:${textStyle.hwpxUnderlineType}`);
+        if (textStyle.hwpxStrikeShape) tokens.push(`stShape:${textStyle.hwpxStrikeShape}`);
         return tokens.length > 0 ? `${m.type},${tokens.join(",")}` : "";
       }
       if (m.type === "highlight" && m.attrs) {
@@ -220,19 +233,39 @@ function applyTextStyleToCharPr(cloned: Element, marks: JSONContent["marks"], he
     cloned.setAttribute("height", String(Math.round(textStyle.fontSizePt * 100)));
   }
   if (textStyle.fontFamily) {
-    const fontfacesEl = findOrCreateFontfaces(headerDoc);
-    const ids = {} as Record<FontRefKey, string>;
-    for (const key of FONT_REF_KEYS) {
-      const lang = FONTFACE_LANG_BY_KEY[key];
-      const fontface = findOrCreateFontfaceByLang(headerDoc, fontfacesEl, lang);
-      ids[key] = ensureFontIdInFontface(headerDoc, fontface, textStyle.fontFamily);
+    // 현재 charPr의 hangul fontRef가 동일한 폰트를 가리키면 fontRef 변경 스킵
+    // (import 시 다국어 폰트 슬롯 구조를 보존)
+    const existingFontRef = findChildByLocalName(cloned, "fontRef");
+    let hangulAlreadyMatches = false;
+    if (existingFontRef) {
+      const hangulId = existingFontRef.getAttribute("hangul");
+      if (hangulId) {
+        const fontfacesEl = findOrCreateFontfaces(headerDoc);
+        const hangulFontface = findOrCreateFontfaceByLang(headerDoc, fontfacesEl, "HANGUL");
+        const existingHangulFont = Array.from(hangulFontface.children).find(
+          (c) => c.localName === "font" && c.getAttribute("id") === hangulId,
+        );
+        if (existingHangulFont?.getAttribute("face")?.trim().toLowerCase() === textStyle.fontFamily.trim().toLowerCase()) {
+          hangulAlreadyMatches = true;
+        }
+      }
     }
-    const fontfaceCount = Array.from(fontfacesEl.children).filter((child) => child.localName === "fontface").length;
-    fontfacesEl.setAttribute("itemCnt", String(fontfaceCount));
 
-    const fontRef = ensureFontRefElement(cloned, headerDoc);
-    for (const key of FONT_REF_KEYS) {
-      fontRef.setAttribute(key, ids[key]);
+    if (!hangulAlreadyMatches) {
+      const fontfacesEl = findOrCreateFontfaces(headerDoc);
+      const ids = {} as Record<FontRefKey, string>;
+      for (const key of FONT_REF_KEYS) {
+        const lang = FONTFACE_LANG_BY_KEY[key];
+        const fontface = findOrCreateFontfaceByLang(headerDoc, fontfacesEl, lang);
+        ids[key] = ensureFontIdInFontface(headerDoc, fontface, textStyle.fontFamily);
+      }
+      const fontfaceCount = Array.from(fontfacesEl.children).filter((child) => child.localName === "fontface").length;
+      fontfacesEl.setAttribute("itemCnt", String(fontfaceCount));
+
+      const fontRef = ensureFontRefElement(cloned, headerDoc);
+      for (const key of FONT_REF_KEYS) {
+        fontRef.setAttribute(key, ids[key]);
+      }
     }
   }
 }
@@ -283,7 +316,9 @@ export function applyMarksToCharPrElement(
     if (italicEl) cloned.removeChild(italicEl);
   }
 
-  // Underline: <hh:underline type="SINGLE|NONE" .../>
+  // Underline: <hh:underline type="SINGLE|DOUBLE|DOTTED|...|NONE" .../>
+  // textStyle.hwpxUnderlineType으로 원본 변형 보존 (없으면 SINGLE)
+  const textStyleForDecoration = readTextStyleAttrs(marks);
   let underlineEl = Array.from(cloned.children).find((c) => c.localName === "underline");
   if (markTypes.has("underline") && !underlineEl) {
     underlineEl = headerDoc.createElementNS(ns, `${prefix}:underline`);
@@ -291,11 +326,14 @@ export function applyMarksToCharPrElement(
     cloned.appendChild(underlineEl);
   }
   if (underlineEl) {
-    underlineEl.setAttribute("type", markTypes.has("underline") ? "SINGLE" : "NONE");
+    const ulType = markTypes.has("underline")
+      ? (textStyleForDecoration.hwpxUnderlineType || "SINGLE")
+      : "NONE";
+    underlineEl.setAttribute("type", ulType);
     underlineEl.setAttribute("shape", "SOLID");
   }
 
-  // Strike: <hh:strikeout shape="SOLID|NONE" .../>
+  // Strike: <hh:strikeout shape="SOLID|DOUBLE|...|NONE" .../>
   let strikeoutEl = Array.from(cloned.children).find((c) => c.localName === "strikeout");
   if (markTypes.has("strike") && !strikeoutEl) {
     strikeoutEl = headerDoc.createElementNS(ns, `${prefix}:strikeout`);
@@ -303,7 +341,10 @@ export function applyMarksToCharPrElement(
     cloned.appendChild(strikeoutEl);
   }
   if (strikeoutEl) {
-    strikeoutEl.setAttribute("shape", markTypes.has("strike") ? "SOLID" : "NONE");
+    const stShape = markTypes.has("strike")
+      ? (textStyleForDecoration.hwpxStrikeShape || "SOLID")
+      : "NONE";
+    strikeoutEl.setAttribute("shape", stShape);
   }
 
   // Superscript: HWPX uses <hh:supscript/> in real files, but support both spellings.

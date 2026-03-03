@@ -99,3 +99,17 @@ export function triggerDiffHighlightUpdate(editor: Editor): void {
   const tr = editor.state.tr.setMeta(DIFF_HIGHLIGHT_META, true);
   editor.view.dispatch(tr);
 }
+
+/** Type-safe setter for diff-highlight suggestions on editor storage. */
+export function setDiffHighlightSuggestions(
+  editor: Editor,
+  suggestions: DiffHighlightSuggestion[],
+): void {
+  const storage = editor.storage as unknown as Record<string, unknown>;
+  const extensionStorage = storage.diffHighlight as
+    | { suggestions: DiffHighlightSuggestion[] }
+    | undefined;
+  if (extensionStorage) {
+    extensionStorage.suggestions = suggestions;
+  }
+}

@@ -52,8 +52,15 @@ type TablePatch = {
   rows: TableRowPatch[];
 };
 
+type NewTablePatch = {
+  rowCount: number;
+  colCount: number;
+  rows: TableRowPatch[];
+};
+
 type TablePatchCollectResult = {
   patches: TablePatch[];
+  newTables: NewTablePatch[];
   warnings: string[];
 };
 
@@ -709,8 +716,9 @@ export function collectExportCompatibilityWarnings(doc: JSONContent): string[] {
   const unsupportedMarkCounts = new Map<string, number>();
 
   walk(doc, (node) => {
-    if (!SUPPORTED_EXPORT_NODE_TYPES.has(node.type)) {
-      unsupportedNodeCounts.set(node.type, (unsupportedNodeCounts.get(node.type) ?? 0) + 1);
+    const nodeType = node.type ?? "unknown";
+    if (!SUPPORTED_EXPORT_NODE_TYPES.has(nodeType)) {
+      unsupportedNodeCounts.set(nodeType, (unsupportedNodeCounts.get(nodeType) ?? 0) + 1);
     }
     if (node.marks?.length) {
       for (const mark of node.marks) {
@@ -725,7 +733,7 @@ export function collectExportCompatibilityWarnings(doc: JSONContent): string[] {
   const warnings: string[] = [];
   for (const [nodeType, count] of unsupportedNodeCounts.entries()) {
     warnings.push(
-      `지원되지 않는 객체 노드(${nodeType}) ${count}개는 HWPX 내보내기에서 보존되지 않을 수 있습니다.`,
+      `지원되지 않는 개체(${nodeType}) ${count}개는 HWPX 내보내기에서 보존되지 않을 수 있습니다.`,
     );
   }
   for (const [markType, count] of unsupportedMarkCounts.entries()) {
@@ -814,6 +822,7 @@ function collectCellLines(cellNode: JSONContent): string[] {
 
 function collectTablePatches(doc: JSONContent): TablePatchCollectResult {
   const patches: TablePatch[] = [];
+  const newTables: NewTablePatch[] = [];
   const warnings: string[] = [];
 
   walk(doc, (node) => {
@@ -824,7 +833,26 @@ function collectTablePatches(doc: JSONContent): TablePatchCollectResult {
     const tableAttrs = (node.attrs || {}) as TableMetadataAttrs;
     const tableId = String(tableAttrs.tableId || "").trim();
     if (!tableId) {
-      warnings.push("새로 추가된 표는 원본 tableId가 없어 HWPX에 구조 반영할 수 없습니다.");
+      // New table created in the editor — collect for insertion
+      const rows = getRowNodes(node);
+      const rowPatches: TableRowPatch[] = [];
+      let colCount = 0;
+      for (const rowNode of rows) {
+        const cells = getCellNodes(rowNode);
+        let logicalColCount = 0;
+        const cellPatches: TableCellPatch[] = [];
+        for (const cellNode of cells) {
+          const cellAttrs = (cellNode.attrs || {}) as TableCellMetadataAttrs;
+          const { colSpan, rowSpan } = getCellSpans(cellAttrs);
+          logicalColCount += colSpan;
+          cellPatches.push({ colSpan, rowSpan, lines: collectCellLines(cellNode) });
+        }
+        colCount = Math.max(colCount, logicalColCount);
+        rowPatches.push({ cells: cellPatches });
+      }
+      if (rowPatches.length) {
+        newTables.push({ rowCount: rows.length, colCount, rows: rowPatches });
+      }
       return;
     }
     const target = parseTableId(tableId);
@@ -886,6 +914,82 @@ function collectTablePatches(doc: JSONContent): TablePatchCollectResult {
     // structureChanged는 경고 목적으로만 유지.
     void structureChanged;
 
+    // ── Sprint 4.1: Table colspan/rowspan validation ──────────────────────
+
+    // 1. Cell count validation – warn if a row's logical column count differs from expected colCount
+    for (const [ri, rp] of rowPatches.entries()) {
+      let logicalCols = 0;
+      for (const cp of rp.cells) {
+        logicalCols += cp.colSpan;
+      }
+      if (logicalCols !== colCount) {
+        warnings.push(
+          `표(${tableId}) ${ri}번째 행의 논리 열 수(${logicalCols})가 표 전체 열 수(${colCount})와 일치하지 않습니다.`,
+        );
+      }
+    }
+
+    // 2 & 3. Overlap detection and missing cell detection via logical grid
+    //   Build a boolean grid [row][col] and mark occupied cells via colspan/rowspan.
+    //   If a cell tries to mark an already-occupied slot → overlap.
+    //   Any slot still unoccupied after processing all cells → gap (missing cell).
+    const grid: boolean[][] = Array.from({ length: rowCount }, () => Array<boolean>(colCount).fill(false));
+    let hasOverlap = false;
+
+    for (const [ri, rp] of rowPatches.entries()) {
+      let col = 0;
+      for (const cp of rp.cells) {
+        // Advance past columns already occupied by earlier rowspan cells
+        while (col < colCount && grid[ri][col]) {
+          col++;
+        }
+        for (let dr = 0; dr < cp.rowSpan; dr++) {
+          for (let dc = 0; dc < cp.colSpan; dc++) {
+            const r = ri + dr;
+            const c = col + dc;
+            if (r >= rowCount || c >= colCount) {
+              // Merged cell exceeds grid boundaries → overlap
+              if (!hasOverlap) {
+                warnings.push(
+                  `표(${tableId})에서 병합된 셀(행 ${ri}, 열 ${col}, colspan=${cp.colSpan}, rowspan=${cp.rowSpan})이 표 경계를 초과합니다.`,
+                );
+                hasOverlap = true;
+              }
+            } else if (grid[r][c]) {
+              // Slot already occupied → overlap
+              if (!hasOverlap) {
+                warnings.push(
+                  `표(${tableId})에서 셀 병합 영역이 겹칩니다(행 ${ri}, 열 ${col}).`,
+                );
+                hasOverlap = true;
+              }
+            } else {
+              grid[r][c] = true;
+            }
+          }
+        }
+        col += cp.colSpan;
+      }
+    }
+
+    // 3. Missing cell warnings – detect gaps in the logical grid
+    const missingSlots: string[] = [];
+    for (let r = 0; r < rowCount; r++) {
+      for (let c = 0; c < colCount; c++) {
+        if (!grid[r][c]) {
+          missingSlots.push(`(${r},${c})`);
+        }
+      }
+    }
+    if (missingSlots.length > 0) {
+      const preview = missingSlots.length <= 5 ? missingSlots.join(", ") : `${missingSlots.slice(0, 5).join(", ")} 외 ${missingSlots.length - 5}개`;
+      warnings.push(
+        `표(${tableId})의 논리 격자에 빈 셀이 있습니다: ${preview}`,
+      );
+    }
+
+    // ── End Sprint 4.1 validation ─────────────────────────────────────────
+
     patches.push({
       tableId,
       fileName: target.fileName,
@@ -898,6 +1002,7 @@ function collectTablePatches(doc: JSONContent): TablePatchCollectResult {
 
   return {
     patches,
+    newTables,
     warnings: uniqueWarnings(warnings),
   };
 }
@@ -1282,6 +1387,131 @@ async function applyTablePatches(
     buffer,
     warnings: uniqueWarnings(warnings),
   };
+}
+
+/**
+ * Generate HWPX `<hp:tbl>` XML string for a new table (no original source).
+ * Uses minimal required structure: tblPr, tblGrid, tr, tc with cellAddr/cellSpan/subList.
+ */
+function buildNewTableXmlString(patch: NewTablePatch): string {
+  const NS = "http://www.hancom.co.kr/hwpml/2011/paragraph";
+  const doc = document.implementation.createDocument(NS, "hp:tbl", null);
+  const tbl = doc.documentElement;
+  tbl.setAttribute("rowCnt", String(patch.rowCount));
+  tbl.setAttribute("colCnt", String(patch.colCount));
+
+  // tblPr — minimal table properties
+  const tblPr = doc.createElementNS(NS, "hp:tblPr");
+  tblPr.setAttribute("borderFillIDRef", "2");
+  tblPr.setAttribute("cellSpacing", "0");
+  const cellMargin = doc.createElementNS(NS, "hp:cellMargin");
+  cellMargin.setAttribute("left", "510");
+  cellMargin.setAttribute("right", "510");
+  cellMargin.setAttribute("top", "0");
+  cellMargin.setAttribute("bottom", "0");
+  tblPr.appendChild(cellMargin);
+  tbl.appendChild(tblPr);
+
+  // tblGrid — equal-width columns, total width 42520 (about A4 body width in HWPX units)
+  const totalWidth = 42520;
+  const colWidth = Math.floor(totalWidth / patch.colCount);
+  for (let c = 0; c < patch.colCount; c++) {
+    const gridCol = doc.createElementNS(NS, "hp:gridCol");
+    gridCol.setAttribute("width", String(c === patch.colCount - 1 ? totalWidth - colWidth * (patch.colCount - 1) : colWidth));
+    tbl.appendChild(gridCol);
+  }
+
+  // rows and cells
+  for (const [rowIndex, rowPatch] of patch.rows.entries()) {
+    const tr = doc.createElementNS(NS, "hp:tr");
+    let colCursor = 0;
+    for (const cellPatch of rowPatch.cells) {
+      const tc = doc.createElementNS(NS, "hp:tc");
+
+      const cellAddr = doc.createElementNS(NS, "hp:cellAddr");
+      cellAddr.setAttribute("colAddr", String(colCursor));
+      cellAddr.setAttribute("rowAddr", String(rowIndex));
+      tc.appendChild(cellAddr);
+
+      const cellSpan = doc.createElementNS(NS, "hp:cellSpan");
+      cellSpan.setAttribute("colSpan", String(cellPatch.colSpan));
+      cellSpan.setAttribute("rowSpan", String(cellPatch.rowSpan));
+      tc.appendChild(cellSpan);
+
+      const cellSz = doc.createElementNS(NS, "hp:cellSz");
+      cellSz.setAttribute("width", String(colWidth * cellPatch.colSpan));
+      cellSz.setAttribute("height", "1000");
+      tc.appendChild(cellSz);
+
+      const subList = doc.createElementNS(NS, "hp:subList");
+      for (const line of cellPatch.lines.length ? cellPatch.lines : [""]) {
+        const p = doc.createElementNS(NS, "hp:p");
+        const run = doc.createElementNS(NS, "hp:run");
+        const t = doc.createElementNS(NS, "hp:t");
+        t.textContent = line;
+        run.appendChild(t);
+        p.appendChild(run);
+        subList.appendChild(p);
+      }
+      tc.appendChild(subList);
+
+      tr.appendChild(tc);
+      colCursor += cellPatch.colSpan;
+    }
+    tbl.appendChild(tr);
+  }
+
+  return new XMLSerializer().serializeToString(tbl);
+}
+
+/**
+ * Insert new tables (created in the editor) into the first section XML of the HWPX archive.
+ * Appends each new table as a sibling after the last paragraph in the section body.
+ */
+async function insertNewTablesIntoArchive(
+  fileBuffer: ArrayBuffer,
+  newTables: NewTablePatch[],
+): Promise<{ buffer: ArrayBuffer; warnings: string[] }> {
+  if (!newTables.length) {
+    return { buffer: fileBuffer, warnings: [] };
+  }
+
+  const zip = await JSZip.loadAsync(fileBuffer);
+  const warnings: string[] = [];
+
+  // Find the first section file
+  const sectionNames = Object.keys(zip.files)
+    .filter((name) => /^Contents\/section\d+\.xml$/.test(name))
+    .sort();
+
+  if (!sectionNames.length) {
+    return { buffer: fileBuffer, warnings: ["HWPX에 section 파일이 없어 새 표를 삽입할 수 없습니다."] };
+  }
+
+  const sectionName = sectionNames[0];
+  let xmlText = await zip.files[sectionName].async("string");
+
+  // Generate XML for each new table and insert before the closing </sec> or </hp:sec> tag
+  const newTableXmls = newTables.map((patch) => buildNewTableXmlString(patch));
+  const closingSecPattern = /<\/([a-z][a-z0-9]*:)?sec\s*>/;
+  const closingMatch = closingSecPattern.exec(xmlText);
+
+  if (closingMatch && closingMatch.index !== undefined) {
+    const insertPoint = closingMatch.index;
+    xmlText = xmlText.slice(0, insertPoint) + newTableXmls.join("\n") + "\n" + xmlText.slice(insertPoint);
+  } else {
+    warnings.push("section XML에서 닫는 태그를 찾지 못해 새 표를 삽입할 수 없습니다.");
+    return { buffer: fileBuffer, warnings };
+  }
+
+  zip.file(sectionName, xmlText);
+  const buffer = await zip.generateAsync({
+    type: "arraybuffer",
+    compression: "DEFLATE",
+    mimeType: "application/zip",
+  });
+
+  return { buffer, warnings };
 }
 
 function readNodeLetterSpacing(attrs: MetadataAttrs): number {
@@ -1792,16 +2022,18 @@ function buildParaIdNodeMap(doc: JSONContent): Map<string, JSONContent> {
 }
 
 /**
- * ProseMirror doc의 모든 텍스트 블록을 문서 순서대로 반환.
+ * ProseMirror doc의 모든 텍스트 블록 및 이미지 노드를 문서 순서대로 반환.
  * paraId가 없는 (사용자가 새로 추가한) 블록은 paraId: null로 반환.
  */
 function buildOrderedDocNodes(
   doc: JSONContent,
 ): Array<{ paraId: string | null; node: JSONContent }> {
   const result: Array<{ paraId: string | null; node: JSONContent }> = [];
-  for (const node of getTopLevelTextBlocks(doc)) {
-    const paraId = ((node.attrs || {}) as { paraId?: string }).paraId ?? null;
-    result.push({ paraId, node });
+  for (const node of doc.content ?? []) {
+    if (isTextBlockNode(node) || node.type === "image") {
+      const paraId = ((node.attrs || {}) as { paraId?: string }).paraId ?? null;
+      result.push({ paraId, node });
+    }
   }
   return result;
 }
@@ -2011,6 +2243,7 @@ function rebuildParaXmlWithMarks(
   // runs[0]이 bold인 경우, 마크가 없는 텍스트 청크에 bold charPr가 잘못 적용되는 것을 방지.
   const baseCharPrId = (() => {
     for (const run of para.runs) {
+      if (!run.charPrIDRef) continue;
       const el = charPrById.get(run.charPrIDRef);
       if (el) {
         const hasBold = Array.from(el.children).some((c) => c.localName === "bold");
@@ -2021,6 +2254,54 @@ function rebuildParaXmlWithMarks(
     return para.runs[0]?.charPrIDRef ?? "0";
   })();
   const pieces = splitRunContentPieces(node.content ?? []);
+
+  // mark가 없는 텍스트 조각에 baseCharPr의 폰트 정보를 textStyle mark로 주입 (폰트 소실 방지).
+  // baseCharPrId가 이미 올바른 charPr를 가리키므로 대부분 ensureCharPrForMarks가
+  // 동일 결과를 반환하지만, 명시적 mark가 있으면 AI 치환/붙여넣기 후에도 보존됨.
+  const baseEl = charPrById.get(baseCharPrId);
+  if (baseEl) {
+    const baseHeight = baseEl.getAttribute("height");
+    const baseFontSizePt = baseHeight ? Number.parseInt(baseHeight, 10) / 100 : undefined;
+    // baseCharPr의 fontRef → hangul font face 이름 조회
+    const baseFontRef = Array.from(baseEl.children).find((c) => c.localName === "fontRef");
+    let baseFontFamily: string | undefined;
+    if (baseFontRef && headerDoc) {
+      const hangulId = baseFontRef.getAttribute("hangul");
+      if (hangulId) {
+        // headerDoc에서 HANGUL fontface의 font 요소를 찾아 face 이름 추출
+        const allFontfaces = Array.from(headerDoc.getElementsByTagName("*")).filter(
+          (el) => el.localName === "fontface" && (el.getAttribute("lang") ?? "").toUpperCase() === "HANGUL",
+        );
+        for (const ff of allFontfaces) {
+          const fontEl = Array.from(ff.children).find(
+            (c) => c.localName === "font" && c.getAttribute("id") === hangulId,
+          );
+          if (fontEl) {
+            baseFontFamily = fontEl.getAttribute("face") ?? undefined;
+            break;
+          }
+        }
+      }
+    }
+
+    const hasStyleInfo = (baseFontSizePt && baseFontSizePt > 0) || baseFontFamily;
+    if (hasStyleInfo) {
+      for (const piece of pieces) {
+        if (piece.kind !== "text") continue;
+        if (piece.marks && piece.marks.length > 0) continue;
+        // mark가 비어있는 텍스트 → baseCharPr의 fontSize/fontFamily를 textStyle mark로 주입
+        const textStyleAttrs: Record<string, string> = {};
+        if (baseFontSizePt && baseFontSizePt > 0) {
+          const fsPt = Number.isInteger(baseFontSizePt) ? baseFontSizePt : Number(baseFontSizePt.toFixed(2));
+          textStyleAttrs.fontSize = `${fsPt}pt`;
+        }
+        if (baseFontFamily) {
+          textStyleAttrs.fontFamily = baseFontFamily;
+        }
+        piece.marks = [{ type: "textStyle", attrs: textStyleAttrs }];
+      }
+    }
+  }
 
   // 기존 paraXml에서 구조 속성 추출 (DOMParser)
   const paraDoc = new DOMParser().parseFromString(para.paraXml, "text/xml");
@@ -2172,11 +2453,35 @@ function applyLocalTextPatch(
 
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ── collectDocumentEdits cache ──
+// Build a lightweight fingerprint of text-block segment texts so we can
+// skip the full walk when nothing changed.
+let cachedEditsFingerprint = "";
+let cachedEditsResult: CollectEditsResult | null = null;
+
+function buildEditsFingerprint(doc: JSONContent, segmentCount: number): string {
+  const parts: string[] = [`n:${segmentCount}`];
+  walk(doc, (node) => {
+    if (!isTextBlockNode(node)) return;
+    const attrs = (node.attrs || {}) as MetadataAttrs;
+    if (attrs.segmentId) {
+      parts.push(`${attrs.segmentId}:${extractNodeText(node)}`);
+    }
+  });
+  return parts.join("\0");
+}
+
 export function collectDocumentEdits(
   doc: JSONContent,
   sourceSegments: EditorSegment[],
   extraSegmentsMap?: Record<string, string[]>,
 ): CollectEditsResult {
+  // Fast-path: skip if doc segments haven't changed since last call
+  const fp = buildEditsFingerprint(doc, sourceSegments.length);
+  if (fp === cachedEditsFingerprint && cachedEditsResult) {
+    return cachedEditsResult;
+  }
+
   const bySegmentId = new Map(sourceSegments.map((segment) => [segment.segmentId, segment]));
   const edits: TextEdit[] = [];
   const warnings: string[] = collectExportCompatibilityWarnings(doc);
@@ -2235,10 +2540,13 @@ export function collectDocumentEdits(
   });
 
   const tableWarnings = collectTablePatches(doc).warnings;
-  return {
+  const result: CollectEditsResult = {
     edits,
     warnings: uniqueWarnings([...warnings, ...tableWarnings]),
   };
+  cachedEditsFingerprint = fp;
+  cachedEditsResult = result;
+  return result;
 }
 
 export async function applyProseMirrorDocToHwpx(
@@ -2382,14 +2690,18 @@ export async function applyProseMirrorDocToHwpx(
 
         const currDocIdx = paraIdToDocIdx.get(block.paraId) ?? -1;
 
-        // 이 block 이전에 위치하는 orphan 단락들 주입 (사용자가 새로 추가한 문단)
+        // 이 block 이전에 위치하는 orphan 단락들 주입 (사용자가 새로 추가한 문단/이미지)
         if (currDocIdx > lastDocIdx) {
           for (let j = lastDocIdx + 1; j < currDocIdx; j++) {
             const { paraId: oId, node: oNode } = orderedDocNodes[j];
             if (oId !== null) continue;
-            const orphanStyleIDRef = resolveStyleIDRefForNode(oNode, null, headingStyleContext);
+            // 최상위 이미지 노드는 가상 paragraph로 감싸서 내보내기
+            const exportNode = oNode.type === "image"
+              ? { type: "paragraph" as const, content: [oNode], attrs: {} }
+              : oNode;
+            const orphanStyleIDRef = resolveStyleIDRefForNode(exportNode, null, headingStyleContext);
             sectionXml += buildOrphanParaXml(
-              oNode, allocateParaXmlId(), "0", orphanStyleIDRef, defaultOrphanCharPrIDRef,
+              exportNode, allocateParaXmlId(), "0", orphanStyleIDRef, defaultOrphanCharPrIDRef,
               charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc, imageContext, sectionCorePrefix,
             );
           }
@@ -2500,13 +2812,16 @@ export async function applyProseMirrorDocToHwpx(
         }
       }
 
-      // 마지막 block 이후에 위치하는 orphan 단락들 주입 (문서 끝에 추가된 문단)
+      // 마지막 block 이후에 위치하는 orphan 단락/이미지 주입 (문서 끝에 추가된 문단)
       for (let j = lastDocIdx + 1; j < orderedDocNodes.length; j++) {
         const { paraId: oId, node: oNode } = orderedDocNodes[j];
         if (oId !== null) continue;
-        const orphanStyleIDRef = resolveStyleIDRefForNode(oNode, null, headingStyleContext);
+        const exportNode = oNode.type === "image"
+          ? { type: "paragraph" as const, content: [oNode], attrs: {} }
+          : oNode;
+        const orphanStyleIDRef = resolveStyleIDRefForNode(exportNode, null, headingStyleContext);
         sectionXml += buildOrphanParaXml(
-          oNode, allocateParaXmlId(), "0", orphanStyleIDRef, defaultOrphanCharPrIDRef,
+          exportNode, allocateParaXmlId(), "0", orphanStyleIDRef, defaultOrphanCharPrIDRef,
           charPropertiesEl, charPrById, charPrCache, nextCharPrId, headerDoc, imageContext, sectionCorePrefix,
         );
       }
@@ -2539,12 +2854,19 @@ export async function applyProseMirrorDocToHwpx(
     let workingBuffer = await zip.generateAsync({ type: "arraybuffer" });
 
     // Phase 2: 테이블 구조 패치 (기존 경로 유지)
-    const { patches: tablePatches, warnings: tableWarnings } = collectTablePatches(doc);
+    const { patches: tablePatches, newTables, warnings: tableWarnings } = collectTablePatches(doc);
     warnings.push(...tableWarnings);
     if (tablePatches.length) {
       const patched = await applyTablePatches(workingBuffer, tablePatches);
       workingBuffer = patched.buffer;
       warnings.push(...patched.warnings);
+    }
+
+    // Phase 2.5: 새로 생성된 표 삽입
+    if (newTables.length) {
+      const inserted = await insertNewTablesIntoArchive(workingBuffer, newTables);
+      workingBuffer = inserted.buffer;
+      warnings.push(...inserted.warnings);
     }
 
     // Phase 3: 자간 패치 (HWPX 원본 세그먼트가 있을 때만 — DOCX/PPTX 변환 시 base.hwpx에 charPr 없음)
@@ -2572,14 +2894,14 @@ export async function applyProseMirrorDocToHwpx(
 
   // ── 기존 byte-offset 패치 경로 (hwpxDocumentModel 없을 때 폴백) ────────────
   const { edits, warnings: previewWarnings } = collectDocumentEdits(doc, sourceSegments, extraSegmentsMap);
-  const { patches: tablePatches, warnings: tableWarnings } = collectTablePatches(doc);
+  const { patches: tablePatches, newTables: fallbackNewTables, warnings: tableWarnings } = collectTablePatches(doc);
   const { edits: letterSpacingEdits, warnings: letterSpacingWarnings } = collectLetterSpacingEdits(
     doc,
     sourceSegments,
     extraSegmentsMap,
   );
 
-  if (!edits.length && !tablePatches.length && !letterSpacingEdits.length) {
+  if (!edits.length && !tablePatches.length && !fallbackNewTables.length && !letterSpacingEdits.length) {
     const blob = new Blob([fileBuffer], { type: "application/zip" });
     const integrityIssues = await validateHwpxArchive(fileBuffer);
     return {
@@ -2601,6 +2923,12 @@ export async function applyProseMirrorDocToHwpx(
     const patched = await applyTablePatches(workingBuffer, tablePatches);
     workingBuffer = patched.buffer;
     runtimeWarnings = patched.warnings;
+  }
+
+  if (fallbackNewTables.length) {
+    const inserted = await insertNewTablesIntoArchive(workingBuffer, fallbackNewTables);
+    workingBuffer = inserted.buffer;
+    runtimeWarnings = [...runtimeWarnings, ...inserted.warnings];
   }
 
   if (letterSpacingEdits.length) {

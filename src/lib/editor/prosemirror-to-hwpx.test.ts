@@ -298,7 +298,11 @@ describe("collectDocumentEdits", () => {
 
     const result = collectDocumentEdits(doc, sourceSegments);
     expect(result.edits).toEqual([]);
-    expect(result.warnings).toEqual([]);
+    // Sprint 4.1: grid validation now detects the empty row and missing cell
+    expect(result.warnings).toEqual([
+      "표(Contents/section0.xml::tbl::0) 1번째 행의 논리 열 수(0)가 표 전체 열 수(1)와 일치하지 않습니다.",
+      "표(Contents/section0.xml::tbl::0)의 논리 격자에 빈 셀이 있습니다: (1,0)",
+    ]);
   });
 
   it("includes compatibility warnings for unsupported nodes/marks", () => {
@@ -340,7 +344,7 @@ describe("collectDocumentEdits", () => {
     };
     const result = collectDocumentEdits(doc, sourceSegments);
     expect(
-      result.warnings.some((warning) => warning.includes("객체 노드(image)")),
+      result.warnings.some((warning) => warning.includes("개체(image)")),
     ).toBe(false);
     expect(
       result.warnings.some((warning) => warning.includes("표식(link)")),
@@ -365,8 +369,8 @@ describe("collectExportCompatibilityWarnings", () => {
       ],
     };
     const warnings = collectExportCompatibilityWarnings(doc);
-    expect(warnings.some((warning) => warning.includes("객체 노드(image)"))).toBe(false);
-    expect(warnings.some((warning) => warning.includes("객체 노드(blockquote)"))).toBe(true);
+    expect(warnings.some((warning) => warning.includes("개체(image)"))).toBe(false);
+    expect(warnings.some((warning) => warning.includes("개체(blockquote)"))).toBe(true);
     expect(warnings.some((warning) => warning.includes("표식(code)"))).toBe(true);
     expect(warnings.some((warning) => warning.includes("표식(link)"))).toBe(true);
   });
@@ -1141,7 +1145,7 @@ describe("applyProseMirrorDocToHwpx image patch", () => {
       parsed.hwpxDocumentModel,
     );
     expect(result.integrityIssues).toEqual([]);
-    expect(result.warnings.some((warning) => warning.includes("객체 노드(image)"))).toBe(false);
+    expect(result.warnings.some((warning) => warning.includes("개체(image)"))).toBe(false);
 
     const outBuffer = await result.blob.arrayBuffer();
     const outZip = await JSZip.loadAsync(outBuffer);

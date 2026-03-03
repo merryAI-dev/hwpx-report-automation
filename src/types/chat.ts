@@ -46,6 +46,8 @@ export type ChatRequest = {
   messages: ChatMessageAPI[];
   documentContext: DocumentContext;
   approvedToolCall?: ApprovedToolCall;
+  model?: string;
+  monthlyCostLimitUsd?: number;
 };
 
 export type ChatMessageAPI = {

@@ -1,4 +1,5 @@
 import JSZip from "jszip";
+import { log } from "@/lib/logger";
 
 export type TextNodeRecord = {
   id: string;
@@ -186,6 +187,7 @@ function collectStyleHintsByTextIndex(xmlText: string): Map<number, { tag: strin
   try {
     doc = parseXml(xmlText);
   } catch {
+    log.warn("collectStyleHintsByTextIndex: XML parse failed");
     return map;
   }
 
@@ -622,6 +624,7 @@ export async function inspectHwpx(
         }
       }
     } catch {
+      log.debug("Style catalog: skipping malformed XML entry");
       continue;
     }
   }

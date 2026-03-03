@@ -7,10 +7,18 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test": "vitest run"
+    "test": "vitest run",
+    "test:hancom": "vitest run hancom-verify",
+    "verify:hwpx": "bash ../scripts/hancom-verify/verify-hwpx.sh",
+    "verify:all": "bash ../scripts/hancom-verify/verify-all.sh",
+    "verify:roundtrip": "bash ../scripts/hancom-verify/verify-roundtrip.sh",
+    "postinstall": "prisma generate"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
+    "@libsql/client": "^0.17.0",
+    "@prisma/adapter-libsql": "^7.4.2",
+    "@prisma/client": "^7.4.2",
     "@tiptap/extension-bubble-menu": "^3.20.0",
     "@tiptap/extension-color": "^3.20.0",
     "@tiptap/extension-font-family": "^3.20.0",
@@ -35,13 +43,16 @@
     "jszip": "^3.10.1",
     "mammoth": "^1.11.0",
     "next": "16.1.6",
+    "next-auth": "^5.0.0-beta.30",
     "openai": "^6.22.0",
+    "prisma": "^7.4.2",
     "react": "19.2.3",
     "react-dom": "19.2.3",
     "tippy.js": "^6.3.7",
     "zustand": "^5.0.8"
   },
   "devDependencies": {
+    "@tailwindcss/postcss": "^4.2.1",
     "@types/file-saver": "^2.0.7",
     "@types/jsdom": "^21.1.7",
     "@types/node": "^20",
@@ -50,6 +61,8 @@
     "eslint": "^9",
     "eslint-config-next": "16.1.6",
     "jsdom": "^28.1.0",
+    "postcss": "^8.5.8",
+    "tailwindcss": "^4.2.1",
     "tsx": "^4.21.0",
     "typescript": "^5",
     "vitest": "^4.0.18"

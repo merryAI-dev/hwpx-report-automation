@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Editor } from "@tiptap/core";
 import type { SidebarTab } from "@/store/document-store";
 import type { RecentFileSnapshotMeta } from "@/lib/recent-files";
+import { log } from "@/lib/logger";
 import { TableControls } from "./TableControls";
 import { ParagraphStyleModal } from "./ParagraphStyleModal";
 import { CharStyleModal } from "./CharStyleModal";
@@ -219,7 +220,7 @@ export function EditorToolbar({
         mimeType: file.type || "image/png",
       } as never).run();
     } catch (error) {
-      console.error("이미지 삽입 실패", error);
+      log.error("이미지 삽입 실패", error instanceof Error ? { message: error.message } : undefined);
     } finally {
       setImageUploading(false);
     }
@@ -243,6 +244,7 @@ export function EditorToolbar({
           ref={imageInputRef}
           type="file"
           accept="image/*"
+          data-image-input=""
           style={{ display: "none" }}
           onChange={(e) => {
             const file = e.target.files?.[0];

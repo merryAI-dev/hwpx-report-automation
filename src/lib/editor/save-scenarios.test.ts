@@ -755,7 +755,7 @@ describe("시나리오 7: 표 저장", () => {
     expect(sectionXml).toContain("표 뒤 단락");
   });
 
-  it("새로 추가된 표는 tableId 없어 저장 경고가 발생한다", async () => {
+  it("새로 추가된 표(tableId 없음)가 HWPX에 삽입된다", async () => {
     const input = await makeSingleParaHwpx("기존 내용");
     const parsed = await parseHwpxToProseMirror(input);
 
@@ -781,13 +781,15 @@ describe("시나리오 7: 표 저장", () => {
       input, doc, parsed.segments, parsed.extraSegmentsMap, parsed.hwpxDocumentModel,
     );
 
-    // 새 표에 대한 경고 발생 확인
-    expect(result.warnings.some((w) => w.includes("tableId") || w.includes("표"))).toBe(true);
     // 기존 내용은 유지
     const outBuf = await result.blob.arrayBuffer();
     const outZip = await JSZip.loadAsync(outBuf);
     const sectionXml = await outZip.file("Contents/section0.xml")!.async("string");
     expect(sectionXml).toContain("기존 내용");
+    // 새 표의 내용이 section XML에 포함됨
+    expect(sectionXml).toContain("새 표 내용");
+    // tbl 태그가 있어야 함
+    expect(sectionXml).toContain("tbl");
   });
 
   it("표가 있는 문서에서 새 단락을 추가해도 표 셀 텍스트가 top-level로 중복 주입되지 않는다", async () => {
@@ -813,5 +815,121 @@ describe("시나리오 7: 표 저장", () => {
     expect(countOccurrences(sectionXml, "A열")).toBe(1);
     expect(countOccurrences(sectionXml, "B열")).toBe(1);
     expect(countOccurrences(sectionXml, "표 뒤에 추가한 신규 단락")).toBe(1);
+  });
+});
+
+// ── Q1 회귀 테스트: 복합 편집 라운드트립 ──────────────────────────────────────
+
+describe("Q1 regression: complex roundtrip", () => {
+  it("텍스트 편집 + 새 단락 추가 + 새 표 추가가 모두 보존된다", async () => {
+    const input = await makeSingleParaHwpx("원본 텍스트");
+    const parsed = await parseHwpxToProseMirror(input);
+    expect(parsed.integrityIssues).toEqual([]);
+
+    const doc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+
+    // 1. 기존 텍스트 수정
+    const para = doc.content![0];
+    if (para.content?.[0]) {
+      para.content[0] = { type: "text", text: "수정된 텍스트" };
+    }
+
+    // 2. 새 단락 추가
+    doc.content!.push({
+      type: "paragraph",
+      content: [{ type: "text", text: "추가된 새 단락" }],
+    });
+
+    // 3. 새 표 추가 (tableId 없음)
+    doc.content!.push({
+      type: "table",
+      content: [
+        {
+          type: "tableRow",
+          content: [
+            {
+              type: "tableCell",
+              attrs: { colspan: 1, rowspan: 1 },
+              content: [{ type: "paragraph", content: [{ type: "text", text: "셀A" }] }],
+            },
+            {
+              type: "tableCell",
+              attrs: { colspan: 1, rowspan: 1 },
+              content: [{ type: "paragraph", content: [{ type: "text", text: "셀B" }] }],
+            },
+          ],
+        },
+        {
+          type: "tableRow",
+          content: [
+            {
+              type: "tableCell",
+              attrs: { colspan: 1, rowspan: 1 },
+              content: [{ type: "paragraph", content: [{ type: "text", text: "셀C" }] }],
+            },
+            {
+              type: "tableCell",
+              attrs: { colspan: 1, rowspan: 1 },
+              content: [{ type: "paragraph", content: [{ type: "text", text: "셀D" }] }],
+            },
+          ],
+        },
+      ],
+    });
+
+    const result = await applyProseMirrorDocToHwpx(
+      input, doc, parsed.segments, parsed.extraSegmentsMap, parsed.hwpxDocumentModel,
+    );
+    expect(result.integrityIssues).toEqual([]);
+
+    const outBuf = await result.blob.arrayBuffer();
+    const outZip = await JSZip.loadAsync(outBuf);
+    const sectionXml = await outZip.file("Contents/section0.xml")!.async("string");
+
+    // 기존 텍스트가 수정됨
+    expect(sectionXml).toContain("수정된 텍스트");
+    expect(sectionXml).not.toContain("원본 텍스트");
+
+    // 새 단락이 존재
+    expect(sectionXml).toContain("추가된 새 단락");
+
+    // 새 표의 모든 셀 내용이 존재
+    expect(sectionXml).toContain("셀A");
+    expect(sectionXml).toContain("셀B");
+    expect(sectionXml).toContain("셀C");
+    expect(sectionXml).toContain("셀D");
+
+    // 아카이브가 올바른 ZIP
+    expect(outBuf.byteLength).toBeGreaterThan(0);
+  });
+
+  it("라운드트립 후 재파싱이 정상 동작한다", async () => {
+    const input = await makeSingleParaHwpx("라운드트립 테스트");
+    const parsed = await parseHwpxToProseMirror(input);
+
+    const doc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+    const para = doc.content![0];
+    if (para.content?.[0]) {
+      para.content[0] = { type: "text", text: "수정 후 텍스트" };
+    }
+
+    const result = await applyProseMirrorDocToHwpx(
+      input, doc, parsed.segments, parsed.extraSegmentsMap, parsed.hwpxDocumentModel,
+    );
+
+    // 출력 파일을 다시 파싱
+    const outBuf = await result.blob.arrayBuffer();
+    const reparsed = await parseHwpxToProseMirror(outBuf);
+    expect(reparsed.integrityIssues).toEqual([]);
+
+    // 수정된 텍스트가 세그먼트에 존재
+    const seg = reparsed.segments.find((s) => s.text.includes("수정 후 텍스트"));
+    expect(seg).toBeTruthy();
+
+    // 다시 저장하면 정상 동작
+    const result2 = await applyProseMirrorDocToHwpx(
+      outBuf, reparsed.doc, reparsed.segments, reparsed.extraSegmentsMap, reparsed.hwpxDocumentModel,
+    );
+    expect(result2.integrityIssues).toEqual([]);
   });
 });

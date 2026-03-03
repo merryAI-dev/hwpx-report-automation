@@ -58,7 +58,6 @@ type EditorSelectionState = {
 
 type DocumentState = {
   fileName: string;
-  sourceBuffer: ArrayBuffer | null;
   editorDoc: JSONContent | null;
   sourceSegments: EditorSegment[];
   extraSegmentsMap: Record<string, string[]>;
@@ -106,6 +105,12 @@ type DocumentState = {
   chatMessages: ChatMessageUI[];
   chatBusy: boolean;
   pendingToolCall: PendingToolCall | null;
+
+  // Tool call rollback (Task 2.2)
+  lastToolCallSnapshot: JSONContent | null;
+
+  // Server persistence (Sprint 5)
+  documentId: string | null;
 
   resetDocument: () => void;
   setLoadedDocument: (params: {
@@ -172,6 +177,13 @@ type DocumentState = {
   clearChat: () => void;
   appendToolCallToLastMessage: (tc: import("@/types/chat").ToolCallInfo) => void;
   appendToolResultToLastMessage: (tr: import("@/types/chat").ToolResultInfo) => void;
+
+  // Tool call rollback (Task 2.2)
+  saveToolCallSnapshot: () => void;
+  undoLastToolCall: () => JSONContent | null;
+
+  // Server persistence (Sprint 5)
+  setDocumentId: (id: string | null) => void;
 };
 
 const INITIAL_INSTRUCTION = "문장을 간결하게 다듬고 기술 문서 톤으로 수정해줘.";
@@ -183,7 +195,6 @@ const initialDownload: DownloadState = {
 
 export const useDocumentStore = create<DocumentState>((set, get) => ({
   fileName: "",
-  sourceBuffer: null,
   editorDoc: null,
   sourceSegments: [],
   extraSegmentsMap: {},
@@ -225,10 +236,13 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   chatBusy: false,
   pendingToolCall: null,
 
+  lastToolCallSnapshot: null,
+
+  documentId: null,
+
   resetDocument: () =>
     set({
       fileName: "",
-      sourceBuffer: null,
       editorDoc: null,
       sourceSegments: [],
       extraSegmentsMap: {},
@@ -251,6 +265,8 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       chatMessages: [],
       chatBusy: false,
       pendingToolCall: null,
+      lastToolCallSnapshot: null,
+      documentId: null,
       download: initialDownload,
       renderHtml: null,
       renderElementMap: null,
@@ -258,10 +274,9 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       history: [],
     }),
 
-  setLoadedDocument: ({ fileName, buffer, doc, segments, extraSegmentsMap, integrityIssues, hwpxDocumentModel }) =>
+  setLoadedDocument: ({ fileName, buffer: _buffer, doc, segments, extraSegmentsMap, integrityIssues, hwpxDocumentModel }) =>
     set({
       fileName,
-      sourceBuffer: buffer,
       editorDoc: doc,
       sourceSegments: segments,
       extraSegmentsMap,
@@ -306,24 +321,30 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   setDownload: (download) => set({ download }),
   setRenderResult: (renderHtml, renderElementMap) => set({ renderHtml, renderElementMap }),
   pushHistory: (summary, editCount, options) =>
-    set((state) => ({
-      history: [
-        {
-          id: `history-${state.history.length}-${Date.now()}`,
-          timestamp: Date.now(),
-          summary,
-          editCount,
-          actor: options?.actor ?? "system",
-          snapshotDoc:
-            options?.snapshotDoc !== undefined
-              ? options.snapshotDoc
-              : state.editorDoc
-                ? JSON.parse(JSON.stringify(state.editorDoc))
-                : null,
-        },
-        ...state.history,
-      ].slice(0, 100),
-    })),
+    set((state) => {
+      const historyIndex = state.history.length;
+      // Snapshot every 5th entry to reduce memory usage (Task 2.4)
+      const shouldSnapshot = historyIndex % 5 === 0;
+      const snapshotDoc =
+        options?.snapshotDoc !== undefined
+          ? options.snapshotDoc
+          : shouldSnapshot && state.editorDoc
+            ? structuredClone(state.editorDoc)
+            : null;
+      return {
+        history: [
+          {
+            id: `history-${historyIndex}-${Date.now()}`,
+            timestamp: Date.now(),
+            summary,
+            editCount,
+            actor: options?.actor ?? "system",
+            snapshotDoc,
+          },
+          ...state.history,
+        ].slice(0, 100),
+      };
+    }),
 
   // Phase 2-1: Accept/Reject
   setBatchDecision: (id, decision) =>
@@ -417,4 +438,21 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       }
       return { chatMessages: msgs };
     }),
+
+  // Tool call rollback (Task 2.2)
+  saveToolCallSnapshot: () =>
+    set((state) => ({
+      lastToolCallSnapshot: state.editorDoc
+        ? structuredClone(state.editorDoc)
+        : null,
+    })),
+
+  undoLastToolCall: () => {
+    const { lastToolCallSnapshot } = get();
+    if (!lastToolCallSnapshot) return null;
+    set({ lastToolCallSnapshot: null });
+    return lastToolCallSnapshot;
+  },
+
+  setDocumentId: (id) => set({ documentId: id }),
 }));

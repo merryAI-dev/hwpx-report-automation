@@ -1,0 +1,77 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+}
+
+model Document {
+  id        String   @id @default(cuid())
+  name      String
+  /// HWPX binary stored as base64-encoded blob
+  hwpxBlob  Bytes
+  /// ProseMirror JSON doc snapshot
+  docJson   String
+  /// Segments JSON
+  segments  String
+  /// Extra segments map JSON
+  extraSegmentsMap String @default("{}")
+  /// Size in bytes of the original HWPX file
+  sizeBytes Int      @default(0)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  versions  DocumentVersion[]
+
+  @@index([updatedAt])
+}
+
+model DocumentVersion {
+  id         String   @id @default(cuid())
+  documentId String
+  /// ProseMirror JSON doc snapshot at this version
+  docJson    String
+  /// Human label: "auto-save", "manual-save", "ai-edit", etc.
+  label      String   @default("save")
+  createdAt  DateTime @default(now())
+
+  document   Document @relation(fields: [documentId], references: [id], onDelete: Cascade)
+
+  @@index([documentId, createdAt])
+}
+
+model ApiKeyConfig {
+  id        String   @id @default(cuid())
+  /// User email (unique per provider)
+  userEmail String
+  /// "anthropic" | "openai"
+  provider  String
+  /// AES-256-GCM encrypted key (base64)
+  encryptedKey String
+  /// AES IV (base64)
+  iv        String
+  /// AES auth tag (base64)
+  authTag   String
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([userEmail, provider])
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  /// User email or "system"
+  userEmail String
+  /// "ai-suggest" | "ai-batch" | "ai-chat" | "ai-verify" | "document-save" | ...
+  action    String
+  /// Endpoint path
+  endpoint  String
+  /// Optional details JSON
+  details   String   @default("{}")
+  createdAt DateTime @default(now())
+
+  @@index([userEmail, createdAt])
+  @@index([action, createdAt])
+}

@@ -126,9 +126,9 @@ export function DocumentAnalysisPanel({
       <div>
         <label className="sidebar-label">2. 객체 커버리지</label>
         <div className="sidebar-box">
-          {compatibilityWarnings.some((w) => w.includes("객체 노드"))
-            ? "일부 객체 노드가 HWPX에 완전 반영되지 않을 수 있습니다."
-            : "현재 문서 기준 객체/표 반영 경고 없음"}
+          {compatibilityWarnings.some((w) => w.includes("객체 노드") || w.includes("개체"))
+            ? "일부 개체가 HWPX에 완전히 반영되지 않을 수 있습니다."
+            : "현재 문서 기준 개체/표 반영 경고 없음"}
         </div>
       </div>
 
@@ -142,7 +142,7 @@ export function DocumentAnalysisPanel({
       <div>
         <label className="sidebar-label">4. 성능 상태</label>
         <div className="sidebar-box">
-          세그먼트 {performanceStats.segmentCount}개 / 복잡도 {performanceStats.complexity}
+          문단 {performanceStats.segmentCount}개 / 복잡도 {performanceStats.complexity}
         </div>
       </div>
 

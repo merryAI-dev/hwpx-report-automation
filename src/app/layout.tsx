@@ -1,5 +1,9 @@
 import type { Metadata } from "next";
 import { IBM_Plex_Mono, Noto_Sans_KR } from "next/font/google";
+import { ErrorBoundary } from "@/components/common/ErrorBoundary";
+import { AppNav } from "@/components/common/AppNav";
+import { ToastContainer } from "@/components/common/ToastContainer";
+import { KeyboardShortcutsPanel } from "@/components/common/KeyboardShortcutsPanel";
 import "./globals.css";
 
 const notoSansKr = Noto_Sans_KR({
@@ -27,7 +31,12 @@ export default function RootLayout({
   return (
     <html lang="ko">
       <body className={`${notoSansKr.variable} ${ibmMono.variable}`}>
-        {children}
+        <ErrorBoundary>
+          <AppNav />
+          {children}
+          <ToastContainer />
+          <KeyboardShortcutsPanel />
+        </ErrorBoundary>
       </body>
     </html>
   );
