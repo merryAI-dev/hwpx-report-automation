@@ -65,7 +65,7 @@ describe("Performance Benchmarks — Flash Attention 식 최적화 측정", () =
         // serialize back (like writing back to HBM)
         new XMLSerializer().serializeToString(doc);
       }
-    }, 20);
+    }, 5);
 
     // NEW: regex 방식 (Flash Attention의 SRAM 타일 처리에 해당)
     const newWay = bench(() => {
@@ -77,10 +77,10 @@ describe("Performance Benchmarks — Flash Attention 식 최적화 측정", () =
         const _merged = xml.match(/merged="([^"]*)"/)?.[1] ?? "0";
         const _id = xml.match(/<[^>]*?\sid="([^"]*)"/)?.[1] ?? null;
       }
-    }, 20);
+    }, 5);
 
     const speedup = oldWay.avgMs / newWay.avgMs;
-    console.log("\n📊 Tier 1.1: XML 속성 추출 (100 paragraphs × 20 iterations)");
+    console.log("\n📊 Tier 1.1: XML 속성 추출 (100 paragraphs × 5 iterations)");
     console.log(`   OLD (DOMParser + XMLSerializer): ${oldWay.avgMs.toFixed(2)}ms avg`);
     console.log(`   NEW (regex):                     ${newWay.avgMs.toFixed(2)}ms avg`);
     console.log(`   ⚡ Speedup: ${speedup.toFixed(1)}× faster`);

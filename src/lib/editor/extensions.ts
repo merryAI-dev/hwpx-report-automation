@@ -15,6 +15,7 @@ import Subscript from "@tiptap/extension-subscript";
 import { Extension } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { Transaction, EditorState } from "@tiptap/pm/state";
+import { FontSize } from "./font-size-extension";
 import { HwpxMetadataExtension } from "./schema";
 import { SlashCommandExtension } from "./slash-commands";
 import { DiffHighlightExtension } from "./diff-highlight-extension";
@@ -139,6 +140,9 @@ export function createEditorExtensions(options: EditorExtensionOptions = {}) {
     Color.configure({ types: ["textStyle"] }),
     Highlight.configure({ multicolor: true }),
     FontFamily.configure({
+      types: ["textStyle"],
+    }),
+    FontSize.configure({
       types: ["textStyle"],
     }),
     Underline,
