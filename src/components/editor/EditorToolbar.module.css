@@ -1,0 +1,149 @@
+.toolbar {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 16px 9px;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(248, 251, 255, 0.72) 100%);
+  backdrop-filter: blur(18px) saturate(150%);
+  -webkit-backdrop-filter: blur(18px) saturate(150%);
+  border-bottom: 1px solid rgba(148, 163, 184, 0.35);
+  box-shadow:
+    0 8px 24px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  position: sticky;
+  top: 0;
+  z-index: 100;
+  gap: 8px;
+}
+
+.toolbarRow {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: nowrap;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scrollbar-width: none; /* Firefox */
+  -ms-overflow-style: none; /* IE/Edge */
+}
+
+.toolbarRow::-webkit-scrollbar {
+  display: none; /* Chrome/Safari */
+}
+
+.group {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(255, 255, 255, 0.62);
+  border: 1px solid rgba(148, 163, 184, 0.24);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
+  padding: 4px;
+  border-radius: 10px;
+}
+
+.sep {
+  width: 1px;
+  height: 20px;
+  background: linear-gradient(
+    180deg,
+    rgba(148, 163, 184, 0.05) 0%,
+    rgba(148, 163, 184, 0.45) 50%,
+    rgba(148, 163, 184, 0.05) 100%
+  );
+}
+
+.btn {
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.2);
+  padding: 3px 8px;
+  font-size: 12px;
+  font-weight: 500;
+  color: #334155;
+  border-radius: 7px;
+  cursor: pointer;
+  transition: all 0.16s ease;
+  white-space: nowrap;
+}
+
+.btn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.82);
+  border-color: rgba(125, 150, 180, 0.35);
+  color: #0f172a;
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
+}
+
+.btnActive {
+  background: rgba(255, 255, 255, 0.96) !important;
+  border-color: rgba(59, 130, 246, 0.4) !important;
+  color: #0f4f8a !important;
+  box-shadow:
+    0 6px 14px rgba(37, 99, 235, 0.16),
+    inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
+}
+
+.fontSelect {
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.22);
+  padding: 3px 4px;
+  font-size: 12px;
+  color: #1e293b;
+  outline: none;
+  cursor: pointer;
+  max-width: 90px;
+  border-radius: 6px;
+}
+
+.sizeSelect {
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.22);
+  padding: 3px 4px;
+  font-size: 12px;
+  color: #1e293b;
+  outline: none;
+  cursor: pointer;
+  max-width: 50px;
+  border-radius: 6px;
+}
+
+.recentSelect {
+  border: 1px solid transparent;
+  background: rgba(255, 255, 255, 0.22);
+  padding: 3px 6px;
+  font-size: 12px;
+  color: #1e293b;
+  outline: none;
+  cursor: pointer;
+  max-width: 220px;
+  border-radius: 6px;
+}
+
+.panelToggles {
+  margin-left: auto;
+  display: flex;
+  gap: 4px;
+}
+
+.downloadLink {
+  font-size: 16px;
+  color: #0f4f8a;
+  padding: 0 8px;
+  font-weight: bold;
+}
+
+@media (max-width: 900px) {
+  .toolbar {
+    padding: 8px 10px 7px;
+    gap: 6px;
+  }
+
+  .group {
+    padding: 3px;
+    border-radius: 8px;
+  }
+
+  .btn {
+    padding: 2px 6px;
+    font-size: 11px;
+  }
+}

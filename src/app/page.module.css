@@ -1,141 +1,184 @@
+/* HWP-like full-window application shell */
 .page {
-  --background: #fafafa;
-  --foreground: #fff;
-
-  --text-primary: #000;
-  --text-secondary: #666;
-
-  --button-primary-hover: #383838;
-  --button-secondary-hover: #f2f2f2;
-  --button-secondary-border: #ebebeb;
-
   display: flex;
-  min-height: 100vh;
-  align-items: center;
-  justify-content: center;
-  font-family: var(--font-geist-sans);
-  background-color: var(--background);
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
+  background:
+    radial-gradient(1400px 500px at 50% -200px, rgba(191, 219, 254, 0.5), transparent 70%),
+    linear-gradient(180deg, #eef2f7 0%, #dde3ea 100%);
+  color: #1a1a1a;
+  font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
 }
 
+/* ── Main workspace: canvas + sidebar ── */
 .main {
+  flex: 1;
+  min-height: 0;
   display: flex;
-  min-height: 100vh;
-  width: 100%;
-  max-width: 800px;
+  overflow: hidden;
+}
+
+/* Editor canvas (scrollable) */
+.editorArea {
+  flex: 1;
+  min-width: 0;
+  overflow-y: auto;
+  overflow-x: hidden;
+  background: transparent;
+  display: flex;
   flex-direction: column;
-  align-items: flex-start;
-  justify-content: space-between;
-  background-color: var(--foreground);
-  padding: 120px 60px;
-}
-
-.intro {
-  display: flex;
-  flex-direction: column;
-  align-items: flex-start;
-  text-align: left;
-  gap: 24px;
-}
-
-.intro h1 {
-  max-width: 320px;
-  font-size: 40px;
-  font-weight: 600;
-  line-height: 48px;
-  letter-spacing: -2.4px;
-  text-wrap: balance;
-  color: var(--text-primary);
-}
-
-.intro p {
-  max-width: 440px;
-  font-size: 18px;
-  line-height: 32px;
-  text-wrap: balance;
-  color: var(--text-secondary);
-}
-
-.intro a {
-  font-weight: 500;
-  color: var(--text-primary);
-}
-
-.ctas {
-  display: flex;
-  flex-direction: row;
-  width: 100%;
-  max-width: 440px;
-  gap: 16px;
-  font-size: 14px;
-}
-
-.ctas a {
-  display: flex;
-  justify-content: center;
   align-items: center;
-  height: 40px;
-  padding: 0 16px;
-  border-radius: 128px;
-  border: 1px solid transparent;
-  transition: 0.2s;
+  padding-top: 0;
+}
+
+/* Ruler + paper wrapper centered */
+.editorCenter {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  padding: 18px 0 32px;
+}
+
+/* ── Warning banners ── */
+.warning,
+.warningSoft {
+  border-radius: 12px;
+  padding: 8px 14px;
+  font-size: 12px;
+  flex-shrink: 0;
+  margin: 8px 0 0;
+  width: min(794px, calc(100vw - 24px));
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
+}
+
+.warning {
+  border: 1px solid rgba(251, 146, 60, 0.4);
+  background: rgba(255, 241, 237, 0.72);
+  color: #7c2d12;
+}
+
+.warningSoft {
+  border: 1px solid rgba(245, 158, 11, 0.35);
+  background: rgba(255, 251, 235, 0.7);
+  color: #7c4a03;
+}
+
+.warning strong,
+.warningSoft strong {
+  display: inline;
+  margin-right: 6px;
+}
+
+.warning p,
+.warningSoft p {
+  display: inline;
+  line-height: 1.4;
+}
+
+/* ── View mode tab switcher (편집/미리보기) ── */
+.viewTabs {
+  display: flex;
+  gap: 0;
+  flex-shrink: 0;
+  background: rgba(255, 255, 255, 0.64);
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  backdrop-filter: blur(10px) saturate(140%);
+  -webkit-backdrop-filter: blur(10px) saturate(140%);
+  box-shadow:
+    0 10px 26px rgba(15, 23, 42, 0.08),
+    inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  width: 794px;
+  margin: 6px 0 0;
+  border-radius: 10px 10px 0 0;
+  overflow: hidden;
+}
+
+.viewTabBtn {
+  padding: 6px 18px;
+  border: none;
+  border-right: 1px solid rgba(148, 163, 184, 0.28);
+  background: transparent;
+  color: #475569;
+  font-size: 12px;
+  font-family: inherit;
   cursor: pointer;
-  width: fit-content;
-  font-weight: 500;
+  transition: all 0.15s ease;
 }
 
-a.primary {
-  background: var(--text-primary);
-  color: var(--background);
-  gap: 8px;
+.viewTabBtn:hover:not(:disabled) {
+  background: rgba(255, 255, 255, 0.72);
+  color: #0f172a;
 }
 
-a.secondary {
-  border-color: var(--button-secondary-border);
+.viewTabBtn:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
-/* Enable hover only on non-touch devices */
-@media (hover: hover) and (pointer: fine) {
-  a.primary:hover {
-    background: var(--button-primary-hover);
-    border-color: transparent;
-  }
-
-  a.secondary:hover {
-    background: var(--button-secondary-hover);
-    border-color: transparent;
-  }
+.viewTabBtnActive {
+  background: rgba(255, 255, 255, 0.95) !important;
+  color: #1a4880;
+  font-weight: 700;
+  border-bottom: 2px solid #1a4880;
 }
 
-@media (max-width: 600px) {
-  .main {
-    padding: 48px 24px;
-  }
-
-  .intro {
-    gap: 16px;
-  }
-
-  .intro h1 {
-    font-size: 32px;
-    line-height: 40px;
-    letter-spacing: -1.92px;
-  }
+/* ── Java HTML preview pane inside the paper ── */
+.previewPane {
+  width: 794px;
+  min-height: 1123px;
+  background: #fff;
+  padding: 60px 80px;
+  line-height: 1.6;
+  color: #111;
+  font-size: 10pt;
+  font-family: '바탕', 'Batang', serif;
+  cursor: default;
 }
 
-@media (prefers-color-scheme: dark) {
-  .logo {
-    filter: invert();
+.previewPane [data-segment-id] {
+  cursor: pointer;
+  border-radius: 2px;
+  transition: background 0.1s;
+}
+
+.previewPane [data-segment-id]:hover {
+  background: #e8f2ff;
+  outline: 1px solid #90c0f0;
+}
+
+.previewPane table {
+  border-collapse: collapse;
+  width: 100%;
+  margin: 10px 0;
+}
+
+.previewPane td,
+.previewPane th {
+  border: 1px solid #888;
+  padding: 4px 6px;
+  vertical-align: top;
+  font-size: 9pt;
+}
+
+.previewPane h2,
+.previewPane h3 {
+  font-weight: bold;
+  margin: 14px 0 6px;
+}
+
+@media (max-width: 920px) {
+  .warning,
+  .warningSoft {
+    width: calc(100vw - 20px);
+    border-radius: 10px;
   }
 
-  .page {
-    --background: #000;
-    --foreground: #000;
-
-    --text-primary: #ededed;
-    --text-secondary: #999;
-
-    --button-primary-hover: #ccc;
-    --button-secondary-hover: #1a1a1a;
-    --button-secondary-border: #1a1a1a;
+  .viewTabs,
+  .previewPane {
+    width: 100%;
+    border-radius: 0;
   }
 }
