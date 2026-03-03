@@ -67,14 +67,14 @@ export function AuditLogViewer() {
   };
 
   return (
-    <div className="rounded-lg border bg-white p-5 shadow-sm">
+    <div className="rounded-lg border border-[var(--color-notion-border)] bg-white p-5">
       <div className="mb-4 flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-gray-700">감사 로그</h3>
+        <h3 className="text-sm font-semibold text-[var(--color-notion-text)]">감사 로그</h3>
         <div className="flex items-center gap-2">
           <select
             value={actionFilter}
             onChange={(e) => handleFilterChange(e.target.value)}
-            className="rounded border px-2 py-1 text-xs focus:border-blue-500 focus:outline-none"
+            className="rounded border border-[var(--color-notion-border)] px-2 py-1 text-xs focus:border-[var(--color-notion-accent)] focus:outline-none"
           >
             {ACTION_FILTERS.map((f) => (
               <option key={f.value} value={f.value}>
@@ -83,7 +83,7 @@ export function AuditLogViewer() {
             ))}
           </select>
           {data && (
-            <span className="text-xs text-gray-400">
+            <span className="text-xs text-[var(--color-notion-text-tertiary)]">
               총 {data.total}건
             </span>
           )}
@@ -91,18 +91,18 @@ export function AuditLogViewer() {
       </div>
 
       {error && (
-        <p className="mb-3 text-sm text-red-600">{error}</p>
+        <p className="mb-3 text-sm text-[var(--color-notion-red)]">{error}</p>
       )}
 
       {loading && !data && (
-        <p className="py-8 text-center text-sm text-gray-400">로딩 중...</p>
+        <p className="py-8 text-center text-sm text-[var(--color-notion-text-tertiary)]">로딩 중...</p>
       )}
 
       {data && (
         <>
           <div className="max-h-96 overflow-y-auto">
             <table className="w-full text-left text-xs">
-              <thead className="sticky top-0 border-b bg-white text-gray-500">
+              <thead className="sticky top-0 border-b border-[var(--color-notion-border)] bg-white text-[var(--color-notion-text-secondary)]">
                 <tr>
                   <th className="pb-2 pr-3">시간</th>
                   <th className="pb-2 pr-3">사용자</th>
@@ -111,9 +111,9 @@ export function AuditLogViewer() {
                   <th className="pb-2">상세</th>
                 </tr>
               </thead>
-              <tbody className="divide-y">
+              <tbody className="divide-y divide-[var(--color-notion-border)]">
                 {data.entries.map((entry) => (
-                  <tr key={entry.id} className="text-gray-600">
+                  <tr key={entry.id} className="text-[var(--color-notion-text-secondary)]">
                     <td className="whitespace-nowrap py-1.5 pr-3">
                       {new Date(entry.createdAt).toLocaleString("ko-KR", {
                         month: "short",
@@ -125,21 +125,21 @@ export function AuditLogViewer() {
                     </td>
                     <td className="py-1.5 pr-3">{entry.userEmail}</td>
                     <td className="py-1.5 pr-3">
-                      <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-700">
+                      <span className="rounded bg-[var(--color-notion-accent-light)] px-1.5 py-0.5 text-[var(--color-notion-accent)]">
                         {entry.action}
                       </span>
                     </td>
-                    <td className="py-1.5 pr-3 font-mono text-gray-400">
+                    <td className="py-1.5 pr-3 font-mono text-[var(--color-notion-text-tertiary)]">
                       {entry.endpoint}
                     </td>
-                    <td className="max-w-[200px] truncate py-1.5 text-gray-400">
+                    <td className="max-w-[200px] truncate py-1.5 text-[var(--color-notion-text-tertiary)]">
                       {entry.details !== "{}" ? entry.details : "—"}
                     </td>
                   </tr>
                 ))}
                 {data.entries.length === 0 && (
                   <tr>
-                    <td colSpan={5} className="py-8 text-center text-gray-400">
+                    <td colSpan={5} className="py-8 text-center text-[var(--color-notion-text-tertiary)]">
                       {actionFilter ? "해당 액션의 로그가 없습니다" : "감사 로그가 없습니다"}
                     </td>
                   </tr>
@@ -150,23 +150,23 @@ export function AuditLogViewer() {
 
           {/* Pagination */}
           {data.totalPages > 1 && (
-            <div className="mt-3 flex items-center justify-between border-t pt-3">
+            <div className="mt-3 flex items-center justify-between border-t border-[var(--color-notion-border)] pt-3">
               <button
                 type="button"
                 onClick={() => setPage((p) => Math.max(1, p - 1))}
                 disabled={page <= 1 || loading}
-                className="rounded border px-3 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                className="rounded border border-[var(--color-notion-border)] px-3 py-1 text-xs text-[var(--color-notion-text-secondary)] hover:bg-[var(--color-notion-bg-hover)] disabled:opacity-40"
               >
                 이전
               </button>
-              <span className="text-xs text-gray-500">
+              <span className="text-xs text-[var(--color-notion-text-secondary)]">
                 {data.page} / {data.totalPages} 페이지
               </span>
               <button
                 type="button"
                 onClick={() => setPage((p) => Math.min(data.totalPages, p + 1))}
                 disabled={page >= data.totalPages || loading}
-                className="rounded border px-3 py-1 text-xs text-gray-600 hover:bg-gray-50 disabled:opacity-40"
+                className="rounded border border-[var(--color-notion-border)] px-3 py-1 text-xs text-[var(--color-notion-text-secondary)] hover:bg-[var(--color-notion-bg-hover)] disabled:opacity-40"
               >
                 다음
               </button>

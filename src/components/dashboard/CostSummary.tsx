@@ -50,11 +50,11 @@ export function CostSummary() {
 
   if (loading) {
     return (
-      <div className="rounded-lg border bg-white p-5 shadow-sm">
-        <div className="mb-3 h-4 w-24 animate-pulse rounded bg-gray-200" />
+      <div className="rounded-lg border border-[var(--color-notion-border)] bg-white p-5">
+        <div className="mb-3 h-4 w-24 animate-pulse rounded bg-[var(--color-notion-bg-active)]" />
         <div className="grid grid-cols-2 gap-3 md:grid-cols-4">
           {[...Array(4)].map((_, i) => (
-            <div key={i} className="h-20 animate-pulse rounded-md bg-gray-100" />
+            <div key={i} className="h-20 animate-pulse rounded-md bg-[var(--color-notion-bg-hover)]" />
           ))}
         </div>
       </div>
@@ -63,41 +63,41 @@ export function CostSummary() {
 
   if (error || !data) {
     return (
-      <div className="rounded-lg border bg-white p-5 shadow-sm">
-        <h3 className="mb-2 text-sm font-semibold text-gray-700">AI 비용 추적</h3>
-        <p className="text-sm text-gray-400">{error || "데이터 없음"}</p>
+      <div className="rounded-lg border border-[var(--color-notion-border)] bg-white p-5">
+        <h3 className="mb-2 text-sm font-semibold text-[var(--color-notion-text)]">AI 비용 추적</h3>
+        <p className="text-sm text-[var(--color-notion-text-tertiary)]">{error || "데이터 없음"}</p>
       </div>
     );
   }
 
   return (
-    <div className="rounded-lg border bg-white p-5 shadow-sm">
-      <h3 className="mb-3 text-sm font-semibold text-gray-700">AI 비용 추적</h3>
+    <div className="rounded-lg border border-[var(--color-notion-border)] bg-white p-5">
+      <h3 className="mb-3 text-sm font-semibold text-[var(--color-notion-text)]">AI 비용 추적</h3>
 
       <div className="mb-4 grid grid-cols-2 gap-3 md:grid-cols-4">
-        <div className="rounded-md bg-blue-50 p-3">
-          <p className="text-xs text-blue-600">주간 비용</p>
-          <p className="mt-1 text-lg font-bold text-blue-900">
+        <div className="rounded-md bg-[var(--color-notion-accent-light)] p-3">
+          <p className="text-xs text-[var(--color-notion-accent)]">주간 비용</p>
+          <p className="mt-1 text-lg font-bold text-[var(--color-notion-text)]">
             {formatCost(data.weekly.totalCostUsd)}
           </p>
-          <p className="text-[10px] text-blue-500">{data.weekly.callCount}회 호출</p>
+          <p className="text-[10px] text-[var(--color-notion-accent)]">{data.weekly.callCount}회 호출</p>
         </div>
-        <div className="rounded-md bg-gray-50 p-3">
-          <p className="text-xs text-gray-600">월간 비용</p>
-          <p className="mt-1 text-lg font-bold text-gray-900">
+        <div className="rounded-md bg-[var(--color-notion-bg-secondary)] p-3">
+          <p className="text-xs text-[var(--color-notion-text-secondary)]">월간 비용</p>
+          <p className="mt-1 text-lg font-bold text-[var(--color-notion-text)]">
             {formatCost(data.monthly.totalCostUsd)}
           </p>
-          <p className="text-[10px] text-gray-500">{data.monthly.callCount}회 호출</p>
+          <p className="text-[10px] text-[var(--color-notion-text-tertiary)]">{data.monthly.callCount}회 호출</p>
         </div>
-        <div className="rounded-md bg-gray-50 p-3">
-          <p className="text-xs text-gray-600">주간 입력 토큰</p>
-          <p className="mt-1 text-lg font-bold text-gray-900">
+        <div className="rounded-md bg-[var(--color-notion-bg-secondary)] p-3">
+          <p className="text-xs text-[var(--color-notion-text-secondary)]">주간 입력 토큰</p>
+          <p className="mt-1 text-lg font-bold text-[var(--color-notion-text)]">
             {formatTokens(data.weekly.totalInputTokens)}
           </p>
         </div>
-        <div className="rounded-md bg-gray-50 p-3">
-          <p className="text-xs text-gray-600">주간 출력 토큰</p>
-          <p className="mt-1 text-lg font-bold text-gray-900">
+        <div className="rounded-md bg-[var(--color-notion-bg-secondary)] p-3">
+          <p className="text-xs text-[var(--color-notion-text-secondary)]">주간 출력 토큰</p>
+          <p className="mt-1 text-lg font-bold text-[var(--color-notion-text)]">
             {formatTokens(data.weekly.totalOutputTokens)}
           </p>
         </div>
@@ -106,15 +106,15 @@ export function CostSummary() {
       {/* Model breakdown */}
       {Object.keys(data.weekly.byModel).length > 0 && (
         <div className="mb-3">
-          <p className="mb-1 text-xs font-medium text-gray-500">모델별 비용</p>
+          <p className="mb-1 text-xs font-medium text-[var(--color-notion-text-secondary)]">모델별 비용</p>
           <div className="flex flex-wrap gap-2">
             {Object.entries(data.weekly.byModel).map(([model, cost]) => (
               <span
                 key={model}
-                className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-2.5 py-1 text-xs"
+                className="inline-flex items-center gap-1 rounded-full bg-[var(--color-notion-bg-hover)] px-2.5 py-1 text-xs"
               >
-                <span className="text-gray-700">{model}</span>
-                <span className="font-medium text-blue-600">{formatCost(cost)}</span>
+                <span className="text-[var(--color-notion-text)]">{model}</span>
+                <span className="font-medium text-[var(--color-notion-accent)]">{formatCost(cost)}</span>
               </span>
             ))}
           </div>
@@ -124,19 +124,19 @@ export function CostSummary() {
       {/* Daily cost mini chart */}
       {data.dailyCosts.length > 0 && (
         <div>
-          <p className="mb-1 text-xs font-medium text-gray-500">일별 비용 (최근 7일)</p>
+          <p className="mb-1 text-xs font-medium text-[var(--color-notion-text-secondary)]">일별 비용 (최근 7일)</p>
           <div className="flex items-end gap-1" style={{ height: 60 }}>
             {data.dailyCosts.map((day) => {
               const max = Math.max(...data.dailyCosts.map((d) => d.costUsd), 0.001);
               const pct = (day.costUsd / max) * 100;
               return (
                 <div key={day.date} className="flex flex-1 flex-col items-center gap-0.5">
-                  <span className="text-[9px] text-gray-400">{formatCost(day.costUsd)}</span>
+                  <span className="text-[9px] text-[var(--color-notion-text-tertiary)]">{formatCost(day.costUsd)}</span>
                   <div
-                    className="w-full rounded-t bg-blue-400"
+                    className="w-full rounded-t bg-[var(--color-notion-accent)]"
                     style={{ height: `${Math.max(pct, 4)}%` }}
                   />
-                  <span className="text-[9px] text-gray-400">{day.date.slice(5)}</span>
+                  <span className="text-[9px] text-[var(--color-notion-text-tertiary)]">{day.date.slice(5)}</span>
                 </div>
               );
             })}

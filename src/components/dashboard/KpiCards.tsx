@@ -8,10 +8,10 @@ type KpiCardProps = {
 
 function KpiCard({ label, value, sub }: KpiCardProps) {
   return (
-    <div className="rounded-lg border bg-white p-5 shadow-sm">
-      <p className="text-sm font-medium text-gray-500">{label}</p>
-      <p className="mt-1 text-2xl font-bold text-gray-900">{value}</p>
-      {sub && <p className="mt-1 text-xs text-gray-400">{sub}</p>}
+    <div className="rounded-lg border border-[var(--color-notion-border)] bg-white p-5">
+      <p className="text-sm font-medium text-[var(--color-notion-text-secondary)]">{label}</p>
+      <p className="mt-1 text-2xl font-bold text-[var(--color-notion-text)]">{value}</p>
+      {sub && <p className="mt-1 text-xs text-[var(--color-notion-text-tertiary)]">{sub}</p>}
     </div>
   );
 }
@@ -73,56 +73,56 @@ export function KpiCards({ stats }: { stats: DashboardStats }) {
       </div>
 
       {/* 일별 처리량 */}
-      <div className="rounded-lg border bg-white p-5 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-gray-700">일별 API 처리량 (최근 7일)</h3>
+      <div className="rounded-lg border border-[var(--color-notion-border)] bg-white p-5">
+        <h3 className="mb-3 text-sm font-semibold text-[var(--color-notion-text)]">일별 API 처리량 (최근 7일)</h3>
         <div className="flex items-end gap-2" style={{ height: 120 }}>
           {stats.dailyThroughput.map((day) => {
             const max = Math.max(...stats.dailyThroughput.map((d) => d.count), 1);
             const pct = (day.count / max) * 100;
             return (
               <div key={day.date} className="flex flex-1 flex-col items-center gap-1">
-                <span className="text-xs text-gray-500">{day.count}</span>
+                <span className="text-xs text-[var(--color-notion-text-secondary)]">{day.count}</span>
                 <div
-                  className="w-full rounded-t bg-blue-500"
+                  className="w-full rounded-t bg-[var(--color-notion-accent)]"
                   style={{ height: `${Math.max(pct, 4)}%` }}
                 />
-                <span className="text-[10px] text-gray-400">
+                <span className="text-[10px] text-[var(--color-notion-text-tertiary)]">
                   {day.date.slice(5)}
                 </span>
               </div>
             );
           })}
           {stats.dailyThroughput.length === 0 && (
-            <p className="text-sm text-gray-400">데이터 없음</p>
+            <p className="text-sm text-[var(--color-notion-text-tertiary)]">데이터 없음</p>
           )}
         </div>
       </div>
 
       {/* 액션별 분포 */}
-      <div className="rounded-lg border bg-white p-5 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-gray-700">액션별 분포</h3>
+      <div className="rounded-lg border border-[var(--color-notion-border)] bg-white p-5">
+        <h3 className="mb-3 text-sm font-semibold text-[var(--color-notion-text)]">액션별 분포</h3>
         <div className="flex flex-wrap gap-3">
           {Object.entries(stats.actionBreakdown).map(([action, count]) => (
             <span
               key={action}
-              className="inline-flex items-center gap-1 rounded-full bg-gray-100 px-3 py-1 text-xs font-medium text-gray-700"
+              className="inline-flex items-center gap-1 rounded-full bg-[var(--color-notion-bg-hover)] px-3 py-1 text-xs font-medium text-[var(--color-notion-text)]"
             >
               {action}
-              <span className="text-blue-600">{count}</span>
+              <span className="text-[var(--color-notion-accent)]">{count}</span>
             </span>
           ))}
           {Object.keys(stats.actionBreakdown).length === 0 && (
-            <p className="text-sm text-gray-400">데이터 없음</p>
+            <p className="text-sm text-[var(--color-notion-text-tertiary)]">데이터 없음</p>
           )}
         </div>
       </div>
 
       {/* 최근 활동 */}
-      <div className="rounded-lg border bg-white p-5 shadow-sm">
-        <h3 className="mb-3 text-sm font-semibold text-gray-700">최근 활동</h3>
+      <div className="rounded-lg border border-[var(--color-notion-border)] bg-white p-5">
+        <h3 className="mb-3 text-sm font-semibold text-[var(--color-notion-text)]">최근 활동</h3>
         <div className="max-h-64 overflow-y-auto">
           <table className="w-full text-left text-xs">
-            <thead className="border-b text-gray-500">
+            <thead className="border-b border-[var(--color-notion-border)] text-[var(--color-notion-text-secondary)]">
               <tr>
                 <th className="pb-2 pr-4">시간</th>
                 <th className="pb-2 pr-4">사용자</th>
@@ -130,9 +130,9 @@ export function KpiCards({ stats }: { stats: DashboardStats }) {
                 <th className="pb-2">엔드포인트</th>
               </tr>
             </thead>
-            <tbody className="divide-y">
+            <tbody className="divide-y divide-[var(--color-notion-border)]">
               {stats.recentActivity.map((row) => (
-                <tr key={row.id} className="text-gray-600">
+                <tr key={row.id} className="text-[var(--color-notion-text-secondary)]">
                   <td className="py-1.5 pr-4 whitespace-nowrap">
                     {new Date(row.createdAt).toLocaleString("ko-KR", {
                       hour: "2-digit",
@@ -143,16 +143,16 @@ export function KpiCards({ stats }: { stats: DashboardStats }) {
                   </td>
                   <td className="py-1.5 pr-4">{row.userEmail}</td>
                   <td className="py-1.5 pr-4">
-                    <span className="rounded bg-blue-50 px-1.5 py-0.5 text-blue-700">
+                    <span className="rounded bg-[var(--color-notion-accent-light)] px-1.5 py-0.5 text-[var(--color-notion-accent)]">
                       {row.action}
                     </span>
                   </td>
-                  <td className="py-1.5 font-mono text-gray-400">{row.endpoint}</td>
+                  <td className="py-1.5 font-mono text-[var(--color-notion-text-tertiary)]">{row.endpoint}</td>
                 </tr>
               ))}
               {stats.recentActivity.length === 0 && (
                 <tr>
-                  <td colSpan={4} className="py-4 text-center text-gray-400">
+                  <td colSpan={4} className="py-4 text-center text-[var(--color-notion-text-tertiary)]">
                     활동 기록이 없습니다
                   </td>
                 </tr>
