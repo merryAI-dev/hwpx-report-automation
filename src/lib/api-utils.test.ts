@@ -9,6 +9,14 @@ vi.mock("./logger", () => ({
   },
 }));
 
+vi.mock("./auth", () => ({
+  auth: vi.fn().mockResolvedValue({ user: { email: "test@example.com" } }),
+}));
+
+vi.mock("./api-keys", () => ({
+  getApiKey: vi.fn().mockResolvedValue("test-key"),
+}));
+
 import { requireString, requireApiKey, withTimeout, handleApiError } from "./api-utils";
 
 describe("requireString", () => {

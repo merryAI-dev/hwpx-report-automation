@@ -1,7 +1,7 @@
 import type { NextConfig } from "next";
 
 const nextConfig: NextConfig = {
-  // Limit request body for API routes (10MB)
+  output: "standalone",
   serverExternalPackages: ["@libsql/client"],
 
   headers: async () => [

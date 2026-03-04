@@ -4,7 +4,7 @@ import type {
   DocumentContext,
   DocumentContextSegment,
 } from "@/types/chat";
-import { requireApiKey } from "@/lib/api-utils";
+import { requireUserApiKey } from "@/lib/api-utils";
 import { extractErrorMessage } from "@/lib/errors";
 import { log } from "@/lib/logger";
 import {
@@ -243,7 +243,7 @@ export async function POST(request: Request) {
 
   let apiKey: string;
   try {
-    apiKey = requireApiKey("ANTHROPIC_API_KEY", "Anthropic");
+    ({ apiKey } = await requireUserApiKey("anthropic"));
   } catch (err) {
     return new Response(
       JSON.stringify({ error: extractErrorMessage(err), code: "API_KEY_MISSING" }),
