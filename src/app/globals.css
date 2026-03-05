@@ -64,13 +64,26 @@ a {
   background: #ddddd8;
 }
 
-.btn.primary {
+.btn.primary,
+.btn-primary {
   background: var(--color-notion-accent, #2383e2);
   color: #fff;
 }
 
-.btn.primary:hover:not(:disabled) {
+.btn.primary:hover:not(:disabled),
+.btn-primary:hover:not(:disabled) {
   background: var(--color-notion-accent-hover, #0b6bcb);
+}
+
+.btn-primary {
+  border: none;
+  border-radius: 6px;
+  padding: 6px 14px;
+  font-size: 13px;
+  font-family: var(--font-sans);
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.12s ease;
 }
 
 .btn:disabled {
