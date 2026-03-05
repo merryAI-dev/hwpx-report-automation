@@ -200,4 +200,102 @@ describe("real hwpx roundtrip", () => {
     expect(boldSeg).toBeTruthy();
     expect(boldSeg?.styleHints.hwpxBold).toBe("true");
   }, 120000);
+
+  integrationTest("table cell text modification roundtrips without corruption", async () => {
+    const input = await fsp.readFile(REAL_FIXTURE_PATH);
+    const inputBuffer = Uint8Array.from(input).buffer;
+    const parsed = await parseHwpxToProseMirror(inputBuffer);
+    expect(parsed.integrityIssues).toEqual([]);
+    if (!parsed.hwpxDocumentModel) return;
+
+    // Find a table node with tableId in the doc
+    const findTableWithContent = (node: JSONContent): JSONContent | null => {
+      if (node.type === "table" && (node.attrs as Record<string, unknown>)?.tableId) {
+        // Check it has at least one cell with text
+        const hasText = JSON.stringify(node).includes('"type":"text"');
+        if (hasText) return node;
+      }
+      for (const child of node.content ?? []) {
+        const found = findTableWithContent(child);
+        if (found) return found;
+      }
+      return null;
+    };
+
+    const table = findTableWithContent(parsed.doc);
+    if (!table) {
+      console.log("No table with tableId and text content found in fixture — skipping");
+      return;
+    }
+
+    const tableId = (table.attrs as Record<string, unknown>).tableId;
+    console.log(`Testing table cell modification on tableId: ${tableId}`);
+
+    // Deep clone and modify the first text node in the table
+    const editedDoc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+    const editedTable = findTableWithContent(editedDoc)!;
+    const marker = `[TBL] ${Date.now().toString(36)}`;
+    let modified = false;
+
+    const modifyFirstText = (node: JSONContent): boolean => {
+      if (node.type === "text" && node.text && node.text.trim().length > 0) {
+        node.text = marker;
+        return true;
+      }
+      for (const child of node.content ?? []) {
+        if (modifyFirstText(child)) return true;
+      }
+      return false;
+    };
+    modified = modifyFirstText(editedTable);
+    expect(modified).toBe(true);
+
+    // Export
+    const result = await applyProseMirrorDocToHwpx(
+      inputBuffer,
+      editedDoc,
+      parsed.segments,
+      parsed.extraSegmentsMap,
+      parsed.hwpxDocumentModel,
+    );
+    expect(result.integrityIssues).toEqual([]);
+    if (result.warnings.length) {
+      console.log("Export warnings:", result.warnings);
+    }
+
+    // Validate the output archive
+    const outBuffer = await result.blob.arrayBuffer();
+    const inspected = await inspectHwpx(outBuffer);
+    expect(inspected.integrityIssues).toEqual([]);
+
+    // Re-parse and verify marker text exists
+    const reparsed = await parseHwpxToProseMirror(outBuffer);
+    expect(reparsed.integrityIssues).toEqual([]);
+
+    // Check marker is present somewhere in the reparsed doc
+    const docJson = JSON.stringify(reparsed.doc);
+    expect(docJson).toContain(marker);
+
+    // Verify section0.xml is well-formed by checking the raw XML
+    const JSZip = (await import("jszip")).default;
+    const zip = await JSZip.loadAsync(outBuffer);
+    const sectionFile = zip.file("Contents/section0.xml");
+    expect(sectionFile).toBeTruthy();
+    const xml = await sectionFile!.async("string");
+
+    // Check for malformed XML indicators
+    expect(xml).toContain(marker);
+    expect(xml.startsWith("<?xml") || xml.startsWith("<")).toBe(true);
+
+    // Check namespace consistency — no duplicate conflicting xmlns declarations
+    const nsMatches = [...xml.matchAll(/xmlns:hp="([^"]+)"/g)];
+    const uniqueNs = new Set(nsMatches.map((m) => m[1]));
+    if (uniqueNs.size > 1) {
+      console.warn("Multiple xmlns:hp URIs found:", [...uniqueNs]);
+    }
+    // Should have at most one unique xmlns:hp URI
+    expect(uniqueNs.size).toBeLessThanOrEqual(1);
+
+    console.log("Table cell roundtrip test passed successfully");
+  }, 120000);
 });
