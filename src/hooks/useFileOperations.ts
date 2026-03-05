@@ -318,6 +318,9 @@ export function useFileOperations(editor: Editor | null) {
       const result = await applyProseMirrorDocToHwpx(hwpxDocumentModel.baseBuffer, editorDoc, sourceSegments, extraSegmentsMap, hwpxDocumentModel);
       setEditsPreview(result.edits);
       setExportWarnings(result.warnings);
+      if (result.warnings.length) {
+        log.warn("HWPX export warnings", { warnings: result.warnings });
+      }
       if (result.integrityIssues.length) {
         throw new Error(`무결성 경고 ${result.integrityIssues.join(" | ")}`);
       }

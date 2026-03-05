@@ -43,12 +43,17 @@ export function DocumentEditor({
   onNewParaCreated,
   getHwpxDocumentModel,
 }: DocumentEditorProps) {
+  // 에디터 자체 입력(onUpdate)으로 인한 store 변경인지 추적하는 플래그.
+  // true이면 content prop이 바뀌어도 setContent를 건너뛴다 (커서/스크롤 보존).
+  const isLocalUpdateRef = useRef(false);
+
   const editor = useEditor({
     immediatelyRender: false,
     extensions: createEditorExtensions({ onAiCommand, onNewParaCreated, getHwpxDocumentModel }),
     content: content || { type: "doc", content: [{ type: "paragraph" }] },
     editable,
     onUpdate: ({ editor: tiptapEditor }) => {
+      isLocalUpdateRef.current = true;
       onUpdateDoc(tiptapEditor.getJSON());
     },
     onSelectionUpdate: ({ editor: tiptapEditor }) => {
@@ -66,17 +71,16 @@ export function DocumentEditor({
     return () => onEditorReady(null);
   }, [editor, onEditorReady]);
 
-  // content 참조가 바뀔 때만 setContent — JSON.stringify 2회 비교 제거
-  const prevContentRef = useRef<JSONContent | null>(null);
+  // 외부 변경(AI 편집, 히스토리 복원 등)에서만 setContent 호출.
+  // 사용자 타이핑 → onUpdate → store → content prop 변경 사이클에서는 건너뛴다.
   useEffect(() => {
     if (!editor || !content) {
       return;
     }
-    // 참조 동일성 체크: store에서 같은 객체이면 skip (O(1) vs O(doc_size))
-    if (prevContentRef.current === content) {
+    if (isLocalUpdateRef.current) {
+      isLocalUpdateRef.current = false;
       return;
     }
-    prevContentRef.current = content;
     editor.commands.setContent(content, { emitUpdate: false });
   }, [content, editor]);
 
