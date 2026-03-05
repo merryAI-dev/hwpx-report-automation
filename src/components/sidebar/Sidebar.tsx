@@ -11,6 +11,7 @@ const TAB_LABELS: Record<SidebarTab, string> = {
   chat: "AI 채팅",
   analysis: "문서 분석",
   history: "수정 이력",
+  batch: "배치 템플릿",
 };
 
 const MIN_WIDTH = 220;
@@ -25,6 +26,7 @@ type SidebarProps = {
   chat: ReactNode;
   analysis: ReactNode;
   history: ReactNode;
+  batch: ReactNode;
 };
 
 export function Sidebar({
@@ -35,6 +37,7 @@ export function Sidebar({
   chat,
   analysis,
   history,
+  batch,
 }: SidebarProps) {
   const [width, setWidth] = useState(DEFAULT_WIDTH);
   const [dragging, setDragging] = useState(false);
@@ -89,6 +92,7 @@ export function Sidebar({
         {activeTab === "chat" ? chat : null}
         {activeTab === "analysis" ? analysis : null}
         {activeTab === "history" ? history : null}
+        {activeTab === "batch" ? batch : null}
       </div>
     </aside>
   );

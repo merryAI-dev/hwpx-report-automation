@@ -8,7 +8,7 @@ import type { HwpxDocumentModel } from "@/types/hwpx-model";
 
 import type { ChatMessageUI, PendingToolCall } from "@/types/chat";
 
-export type SidebarTab = "outline" | "ai" | "chat" | "history" | "analysis";
+export type SidebarTab = "outline" | "ai" | "chat" | "history" | "analysis" | "batch";
 
 export type RenderElementInfo = {
   segmentId: string;

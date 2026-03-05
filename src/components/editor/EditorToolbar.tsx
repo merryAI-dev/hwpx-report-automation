@@ -388,6 +388,13 @@ export const EditorToolbar = memo(function EditorToolbar({
               disabled={false}
               onClick={() => onSetSidebarTab("history")}
             />
+            <Btn
+              label="배치"
+              title="배치 템플릿 변환"
+              active={isTabActive("batch")}
+              disabled={false}
+              onClick={() => onSetSidebarTab("batch")}
+            />
           </div>
         </div>
 

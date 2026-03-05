@@ -15,6 +15,7 @@ import { AiSuggestionPanel } from "@/components/sidebar/AiSuggestionPanel";
 import { ChatPanel } from "@/components/sidebar/ChatPanel";
 import { EditHistoryPanel } from "@/components/sidebar/EditHistoryPanel";
 import { DocumentAnalysisPanel } from "@/components/sidebar/DocumentAnalysisPanel";
+import { BatchTemplatePanel } from "@/components/sidebar/BatchTemplatePanel";
 import { buildBatchApplyPlan, collectSectionBatchItems } from "@/lib/editor/batch-ai";
 import { buildDirtySummary } from "@/lib/editor/document-store";
 import { collectExportCompatibilityWarnings } from "@/lib/editor/prosemirror-to-hwpx";
@@ -562,6 +563,7 @@ export default function Home() {
               disabled={isBusy}
             />
           }
+          batch={<BatchTemplatePanel editor={editor} />}
         />
       </main>
 
