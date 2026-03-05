@@ -563,7 +563,28 @@ export default function Home() {
               disabled={isBusy}
             />
           }
-          batch={<BatchTemplatePanel editor={editor} />}
+          batch={
+            <BatchTemplatePanel
+              editor={editor}
+              onSaveRow={async (rowIdx, totalRows) => {
+                const base = fileName
+                  ? fileName.replace(/\.hwpx$/i, "")
+                  : "document";
+                const padded = String(rowIdx + 1).padStart(
+                  String(totalRows).length,
+                  "0",
+                );
+                const overrideFileName = `${base}_row${padded}.hwpx`;
+                await fileOps.runHwpxExport({
+                  kind: "manual-save",
+                  fileLabel: `row${padded}`,
+                  triggerDownload: true,
+                  markClean: false,
+                  overrideFileName,
+                });
+              }}
+            />
+          }
         />
       </main>
 

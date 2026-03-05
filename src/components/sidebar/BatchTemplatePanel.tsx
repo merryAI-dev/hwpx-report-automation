@@ -171,15 +171,18 @@ function fillPlaceholders(
 
 type BatchTemplatePanelProps = {
   editor: Editor | null;
+  /** 행 저장 콜백 — 행 번호가 포함된 파일명으로 HWPX를 다운로드한다 */
+  onSaveRow?: (rowIdx: number, totalRows: number) => Promise<void>;
 };
 
-export function BatchTemplatePanel({ editor }: BatchTemplatePanelProps) {
+export function BatchTemplatePanel({ editor, onSaveRow }: BatchTemplatePanelProps) {
   const [state, setState] = useState<ApplyState>("idle");
   const [csvHeaders, setCsvHeaders] = useState<string[]>([]);
   const [csvRows, setCsvRows] = useState<CsvRow[]>([]);
   const [suggestions, setSuggestions] = useState<Suggestion[]>([]);
   const [editedSuggestions, setEditedSuggestions] = useState<Suggestion[]>([]);
   const [errorMsg, setErrorMsg] = useState("");
+  const [isSaving, setIsSaving] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // 플레이스홀더 템플릿 스냅샷 (행 채우기 전 상태)
@@ -291,6 +294,23 @@ export function BatchTemplatePanel({ editor }: BatchTemplatePanelProps) {
     setCompletedRows((prev) => new Set(prev).add(currentRowIdx));
     setState("applied");
   }, [currentRowIdx]);
+
+  // ── 현재 행 저장 후 → 다음 행 ────────────────────────────────────────────
+
+  const handleSaveAndNext = useCallback(async () => {
+    if (!onSaveRow) return;
+    setIsSaving(true);
+    setErrorMsg("");
+    try {
+      await onSaveRow(currentRowIdx, csvRows.length);
+      setCompletedRows((prev) => new Set(prev).add(currentRowIdx));
+      setState("applied");
+    } catch (err) {
+      setErrorMsg(err instanceof Error ? err.message : String(err));
+    } finally {
+      setIsSaving(false);
+    }
+  }, [onSaveRow, currentRowIdx, csvRows.length]);
 
   // ── 템플릿 복원 (채우기 취소) ──────────────────────────────────────────────
 
@@ -562,21 +582,37 @@ export function BatchTemplatePanel({ editor }: BatchTemplatePanelProps) {
             })}
           </div>
 
+          {errorMsg && (
+            <p className="text-xs text-red-600">{errorMsg}</p>
+          )}
+
           <div className="flex gap-2">
             <button
               type="button"
               className="flex-1 rounded-md border border-[var(--color-notion-border)] px-3 py-2 text-xs hover:bg-[var(--color-notion-bg-hover)]"
+              disabled={isSaving}
               onClick={handleRestoreTemplate}
             >
-              취소 (템플릿 복원)
+              취소
             </button>
-            <button
-              type="button"
-              className="flex-1 rounded-md bg-[var(--color-notion-accent)] px-3 py-2 text-xs font-medium text-white hover:opacity-90"
-              onClick={handleMarkDone}
-            >
-              완료 → 다음 행
-            </button>
+            {onSaveRow ? (
+              <button
+                type="button"
+                className="flex-1 rounded-md bg-[var(--color-notion-accent)] px-3 py-2 text-xs font-medium text-white hover:opacity-90 disabled:opacity-50"
+                disabled={isSaving}
+                onClick={handleSaveAndNext}
+              >
+                {isSaving ? "저장 중..." : "저장 후 다음 →"}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className="flex-1 rounded-md bg-[var(--color-notion-accent)] px-3 py-2 text-xs font-medium text-white hover:opacity-90"
+                onClick={handleMarkDone}
+              >
+                완료 → 다음 행
+              </button>
+            )}
           </div>
         </div>
       )}
