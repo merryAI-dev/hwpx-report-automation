@@ -6,7 +6,12 @@ function isPublicPath(pathname: string): boolean {
 }
 
 function isPublicApiPath(pathname: string): boolean {
-  return pathname === "/api/auth/login" || pathname === "/api/auth/logout" || pathname === "/api/auth/session";
+  return pathname === "/api/auth/login"
+    || pathname === "/api/auth/logout"
+    || pathname === "/api/auth/session"
+    || pathname === "/api/auth/providers"
+    || pathname.startsWith("/api/auth/oidc/start/")
+    || pathname.startsWith("/api/auth/oidc/callback/");
 }
 
 export async function proxy(request: NextRequest) {

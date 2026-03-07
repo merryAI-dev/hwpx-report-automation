@@ -26,11 +26,44 @@ npm run dev
 BLOB_STORAGE_FS_ROOT=/absolute/path/to/blob-storage
 BLOB_SIGNING_SECRET=replace-this-in-production
 BLOB_SIGNED_URL_TTL_SECONDS=900
+AUTH_SECRET=replace-this-in-production
+AUTH_IDENTITY_PROVIDERS_JSON='[
+  {
+    "id": "corp-oidc",
+    "type": "oidc",
+    "displayName": "Corp OIDC",
+    "issuer": "https://id.example.com",
+    "clientId": "client-123",
+    "clientSecretEnv": "OIDC_CORP_CLIENT_SECRET",
+    "authorizationEndpoint": "https://id.example.com/authorize",
+    "tokenEndpoint": "https://id.example.com/oauth/token",
+    "userInfoEndpoint": "https://id.example.com/userinfo",
+    "scope": "openid profile email"
+  }
+]'
+AUTH_TENANT_SEED_JSON='{
+  "tenants": [
+    { "tenantId": "alpha", "tenantName": "Alpha Workspace" },
+    { "tenantId": "beta", "tenantName": "Beta Workspace" }
+  ],
+  "principals": [
+    {
+      "providerId": "corp-oidc",
+      "emailDomain": "corp.example.com",
+      "memberships": [{ "tenantId": "alpha", "role": "editor" }]
+    }
+  ],
+  "defaultMemberships": [{ "tenantId": "alpha", "role": "viewer" }]
+}'
+OIDC_CORP_CLIENT_SECRET=replace-this-in-production
 ```
 
 - 기본 저장 위치는 `web/.blob-storage`
 - `POST /api/blob/upload`는 저장 후 서명된 다운로드 URL을 반환
 - `GET /api/blob/download/[blobId]?...`는 서명 검증 후 파일을 반환
+- `GET /api/auth/providers`는 공개 provider/tenant catalog를 반환
+- `GET /api/auth/oidc/start/[providerId]`는 OIDC authorization code + PKCE 흐름을 시작
+- `GET /api/auth/oidc/callback/[providerId]`는 토큰 교환 후 tenant seed를 적용해 세션을 발급
 
 ## Vercel Deploy
 
