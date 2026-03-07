@@ -34,6 +34,7 @@ import type { PresetKey } from "@/lib/editor/ai-presets";
 import { uploadBlobForSignedDownload } from "@/lib/blob-storage-client";
 import { buildTemplateCatalogFromDoc } from "@/lib/template-catalog";
 import type { SessionIdentityProvider, SessionTenantMembership } from "@/lib/auth/session";
+import { evaluateQualityGate, type QualityGateResult } from "@/lib/quality-gates";
 import {
   listRecentFileSnapshots,
   loadRecentFileSnapshot,
@@ -346,7 +347,11 @@ type BatchJobPayload = {
     resultCount: number;
     itemCount: number;
     error: string | null;
-    results: Array<{ id: string; suggestion: string }>;
+    results: Array<{
+      id: string;
+      suggestion: string;
+      qualityGate: QualityGateResult;
+    }>;
   };
   error?: string;
 };
@@ -490,6 +495,8 @@ export default function Home() {
     // Phase 2-6: Verification
     verificationResult,
     verificationLoading,
+    singleSuggestionQualityGate,
+    singleSuggestionApproved,
     // Batch mode
     batchMode,
     batchJob,
@@ -536,6 +543,8 @@ export default function Home() {
     // Phase 2-6
     setVerificationResult,
     setVerificationLoading,
+    setSingleSuggestionQualityGate,
+    setSingleSuggestionApproved,
     // Batch mode
     setBatchMode,
     setBatchJob,
@@ -684,8 +693,9 @@ export default function Home() {
           id: item.id,
           before: item.originalText,
           after: item.suggestion,
+          qualityGate: batchSuggestions.find((row) => row.id === item.id)?.qualityGate,
         })),
-    [batchPlan],
+    [batchPlan, batchSuggestions],
   );
   const templateValidationWarnings = useMemo(
     () =>
@@ -936,6 +946,8 @@ export default function Home() {
     setAiBusy(true);
     setActiveSidebarTab("ai");
     setVerificationResult(null);
+    setSingleSuggestionQualityGate(null);
+    setSingleSuggestionApproved(false);
     setStatus("AI 제안을 생성 중입니다...");
     try {
       const response = await fetch("/api/suggest", {
@@ -951,8 +963,19 @@ export default function Home() {
       if (!response.ok) {
         throw new Error(payload.error || "AI 제안 생성 실패");
       }
-      setAiSuggestion(payload.suggestion || "");
-      setStatus("AI 제안이 생성되었습니다.");
+      const suggestionText = payload.suggestion || "";
+      const qualityGate = evaluateQualityGate({
+        originalText: text,
+        suggestion: suggestionText,
+      });
+      setAiSuggestion(suggestionText);
+      setSingleSuggestionQualityGate(qualityGate);
+      setSingleSuggestionApproved(!qualityGate.requiresApproval);
+      setStatus(
+        qualityGate.requiresApproval
+          ? `AI 제안 생성 완료: 게이트 승인 필요 (${qualityGate.issues.length}건)`
+          : "AI 제안이 생성되었습니다.",
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "AI 제안 실패";
       setStatus(message);
@@ -970,6 +993,10 @@ export default function Home() {
       setStatus("적용할 AI 제안이 없습니다.");
       return;
     }
+    if (singleSuggestionQualityGate?.requiresApproval && !singleSuggestionApproved) {
+      setStatus("품질 게이트 승인 후에만 적용할 수 있습니다.");
+      return;
+    }
     const hasSelection = editor.state.selection.from !== editor.state.selection.to;
     if (hasSelection) {
       editor.chain().focus().insertContent(aiSuggestion).run();
@@ -981,10 +1008,20 @@ export default function Home() {
       setStatus("선택된 문단이 없습니다.");
       return;
     }
-    const replaced = replaceSegmentText(editor, segmentId, aiSuggestion);
-    setStatus(replaced ? "문단 전체에 AI 제안을 적용했습니다." : "대상 문단을 찾지 못했습니다.");
+  const replaced = replaceSegmentText(editor, segmentId, aiSuggestion);
+  setStatus(replaced ? "문단 전체에 AI 제안을 적용했습니다." : "대상 문단을 찾지 못했습니다.");
   };
 
+  const onApproveSingleSuggestion = () => {
+    if (!singleSuggestionQualityGate?.requiresApproval) {
+      setStatus("승인이 필요한 제안이 아닙니다.");
+      return;
+    }
+    setSingleSuggestionApproved(true);
+    setStatus("단일 AI 제안이 승인되었습니다.");
+  };
+
+  const isHwpxFile = fileName.toLowerCase().endsWith(".hwpx");
   const runHwpxExport = useCallback(
     async (params: {
       kind: Exclude<RecentFileKind, "opened">;
@@ -1251,7 +1288,12 @@ export default function Home() {
         if (job.status === "completed") {
           const nextPlan = buildBatchApplyPlan(requestedBatchItems, job.results);
           const changedCount = nextPlan.filter((row) => row.changed).length;
-          setStatus(`AI 섹션 일괄 제안 완료: 대상 ${nextPlan.length}개 중 변경 ${changedCount}개`);
+          const gatedCount = job.results.filter((row) => row.qualityGate.requiresApproval).length;
+          setStatus(
+            gatedCount
+              ? `AI 섹션 일괄 제안 완료: 변경 ${changedCount}개 / 승인 필요 ${gatedCount}개`
+              : `AI 섹션 일괄 제안 완료: 대상 ${nextPlan.length}개 중 변경 ${changedCount}개`,
+          );
           break;
         }
 
@@ -1274,7 +1316,22 @@ export default function Home() {
       setStatus("적용할 일괄 AI 제안이 없습니다.");
       return;
     }
-    const plan = buildBatchApplyPlan(batchItems, batchSuggestions).filter((item) => item.changed);
+    const gateById = new Map(batchSuggestions.map((item) => [item.id, item.qualityGate]));
+    const approvedIds = new Set(
+      Object.entries(batchDecisions)
+        .filter(([, decision]) => decision === "accepted")
+        .map(([id]) => id),
+    );
+    const changedPlan = buildBatchApplyPlan(batchItems, batchSuggestions).filter((item) => item.changed);
+    const plan = changedPlan.filter((item) => {
+      const gate = gateById.get(item.id);
+      return !gate?.requiresApproval || approvedIds.has(item.id);
+    });
+    const blockedCount = changedPlan.length - plan.length;
+    if (!plan.length) {
+      setStatus("승인되지 않은 위험 항목만 남아 있어 전체 적용할 수 없습니다.");
+      return;
+    }
     const appliedCount = applyBatchSegmentTexts(
       editor,
       plan.map((item) => ({
@@ -1288,8 +1345,13 @@ export default function Home() {
     }
     setBatchSuggestions([]);
     clearBatchDecisions();
+    setBatchJob(null);
     pushHistory(`AI 섹션 일괄 적용 (${appliedCount}건)`, appliedCount);
-    setStatus(`AI 섹션 일괄 적용 완료: ${appliedCount}건`);
+    setStatus(
+      blockedCount
+        ? `AI 섹션 일괄 적용 완료: ${appliedCount}건 적용 / ${blockedCount}건은 승인 필요로 보류`
+        : `AI 섹션 일괄 적용 완료: ${appliedCount}건`,
+    );
   };
 
   /* ── Phase 2-1: Apply only accepted batch suggestions ── */
@@ -1322,6 +1384,7 @@ export default function Home() {
     }
     setBatchSuggestions([]);
     clearBatchDecisions();
+    setBatchJob(null);
     pushHistory(`AI 선택 적용 (${appliedCount}건)`, appliedCount);
     setStatus(`AI 선택 적용 완료: ${appliedCount}건`);
   };
@@ -2160,6 +2223,8 @@ export default function Home() {
               instruction={instruction}
               suggestion={aiSuggestion}
               selectedText={selection.selectedText}
+              singleQualityGate={singleSuggestionQualityGate}
+              singleSuggestionApproved={singleSuggestionApproved}
               batchTargetCount={batchItems.length}
               batchSuggestionCount={batchSuggestionCount}
               batchDiffItems={batchDiffItems}
@@ -2168,6 +2233,7 @@ export default function Home() {
               onChangeInstruction={setInstruction}
               onRequestSuggestion={() => void onGenerateSuggestion()}
               onApplySuggestion={onApplySuggestion}
+              onApproveSuggestion={onApproveSingleSuggestion}
               onRequestBatchSuggestion={() => void onGenerateBatchSuggestions()}
               onApplyBatchSuggestion={onApplyBatchSuggestions}
               batchDecisions={batchDecisions}

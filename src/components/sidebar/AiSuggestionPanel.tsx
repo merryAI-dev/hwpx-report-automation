@@ -3,7 +3,8 @@
 import { useMemo } from "react";
 import { diffWords } from "diff";
 import type { InstructionPreset, PresetKey } from "@/lib/editor/ai-presets";
-import type { BatchJobState, VerificationResult } from "@/store/document-store";
+import type { BatchJobState, BatchSuggestionItem, VerificationResult } from "@/store/document-store";
+import type { QualityGateResult } from "@/lib/quality-gates";
 
 function InlineDiff({ before, after }: { before: string; after: string }) {
   const changes = diffWords(before, after);
@@ -34,14 +35,17 @@ type AiSuggestionPanelProps = {
   instruction: string;
   suggestion: string;
   selectedText: string;
+  singleQualityGate: QualityGateResult | null;
+  singleSuggestionApproved: boolean;
   batchTargetCount: number;
   batchSuggestionCount: number;
-  batchDiffItems: Array<{ id: string; before: string; after: string }>;
+  batchDiffItems: Array<{ id: string; before: string; after: string; qualityGate?: BatchSuggestionItem["qualityGate"] }>;
   batchJob: BatchJobState | null;
   isBusy: boolean;
   onChangeInstruction: (instruction: string) => void;
   onRequestSuggestion: () => void;
   onApplySuggestion: () => void;
+  onApproveSuggestion: () => void;
   onRequestBatchSuggestion: () => void;
   onApplyBatchSuggestion: () => void;
   // Phase 2-1: Accept/Reject
@@ -65,6 +69,8 @@ export function AiSuggestionPanel({
   instruction,
   suggestion,
   selectedText,
+  singleQualityGate,
+  singleSuggestionApproved,
   batchTargetCount,
   batchSuggestionCount,
   batchDiffItems,
@@ -73,6 +79,7 @@ export function AiSuggestionPanel({
   onChangeInstruction,
   onRequestSuggestion,
   onApplySuggestion,
+  onApproveSuggestion,
   onRequestBatchSuggestion,
   onApplyBatchSuggestion,
   batchDecisions,
@@ -139,9 +146,19 @@ export function AiSuggestionPanel({
         <button type="button" className="btn" disabled={isBusy} onClick={onRequestSuggestion}>
           AI 제안 생성
         </button>
-        <button type="button" className="btn" disabled={isBusy || !suggestion} onClick={onApplySuggestion}>
+        <button
+          type="button"
+          className="btn"
+          disabled={isBusy || !suggestion || (!!singleQualityGate?.requiresApproval && !singleSuggestionApproved)}
+          onClick={onApplySuggestion}
+        >
           제안 적용
         </button>
+        {singleQualityGate?.requiresApproval ? (
+          <button type="button" className="btn" disabled={isBusy || singleSuggestionApproved} onClick={onApproveSuggestion}>
+            {singleSuggestionApproved ? "게이트 승인됨" : "게이트 승인"}
+          </button>
+        ) : null}
         <button
           type="button"
           className="btn"
@@ -152,6 +169,28 @@ export function AiSuggestionPanel({
           {verificationLoading ? "검증 중..." : "검증"}
         </button>
       </div>
+
+      {singleQualityGate && (
+        <div
+          style={{
+            padding: "4px 8px",
+            fontSize: 12,
+            borderRadius: 2,
+            border: singleQualityGate.passed ? "1px solid #86efac" : "1px solid #fca5a5",
+            background: singleQualityGate.passed ? "#dcfce7" : "#fef2f2",
+            color: singleQualityGate.passed ? "#166534" : "#991b1b",
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: singleQualityGate.issues.length ? 4 : 0 }}>
+            {singleQualityGate.passed ? "규칙 기반 게이트 통과" : "규칙 기반 게이트 이슈"}
+          </div>
+          {singleQualityGate.issues.map((issue, index) => (
+            <div key={`sg-${index}`} style={{ marginTop: 2 }}>
+              - {issue.message}
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Verification result */}
       {verificationResult && (
@@ -262,6 +301,20 @@ export function AiSuggestionPanel({
                   <strong style={{ flex: 1, overflow: "hidden", textOverflow: "ellipsis" }}>
                     {item.id}
                   </strong>
+                  {item.qualityGate?.requiresApproval ? (
+                    <span
+                      style={{
+                        fontSize: 10,
+                        padding: "1px 6px",
+                        borderRadius: 999,
+                        border: "1px solid #fca5a5",
+                        color: "#991b1b",
+                        background: "#fef2f2",
+                      }}
+                    >
+                      승인 필요
+                    </span>
+                  ) : null}
                   <button
                     type="button"
                     className="batch-decision-btn"
@@ -282,6 +335,13 @@ export function AiSuggestionPanel({
                   </button>
                 </div>
                 <InlineDiff before={item.before} after={item.after} />
+                {item.qualityGate?.issues.length ? (
+                  <div style={{ marginTop: 6, fontSize: 11, color: "#7c2d12" }}>
+                    {item.qualityGate.issues.map((issue, index) => (
+                      <div key={`bg-${item.id}-${index}`}>- {issue.message}</div>
+                    ))}
+                  </div>
+                ) : null}
               </li>
             );
           })}

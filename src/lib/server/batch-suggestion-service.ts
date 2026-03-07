@@ -1,4 +1,5 @@
 import OpenAI from "openai";
+import { evaluateQualityGate, type QualityGateResult } from "@/lib/quality-gates";
 
 export type BatchItem = {
   id: string;
@@ -11,6 +12,7 @@ export type BatchItem = {
 export type BatchSuggestionRow = {
   id: string;
   suggestion: string;
+  qualityGate: QualityGateResult;
 };
 
 export type BatchSuggestionResponse = {
@@ -85,6 +87,7 @@ export async function generateBatchSuggestions(
   const raw = completion.choices[0]?.message?.content || "{}";
   const parsed = JSON.parse(raw) as Partial<BatchSuggestionResponse>;
   const mapped = new Map(items.map((item) => [item.id, item.text]));
+  const originalTextById = new Map(items.map((item) => [item.id, item.text]));
   const results: BatchSuggestionRow[] = [];
 
   for (const row of parsed.results || []) {
@@ -96,12 +99,26 @@ export async function generateBatchSuggestions(
     if (!suggestion) {
       continue;
     }
-    results.push({ id, suggestion });
+    results.push({
+      id,
+      suggestion,
+      qualityGate: evaluateQualityGate({
+        originalText: originalTextById.get(id) || "",
+        suggestion,
+      }),
+    });
     mapped.delete(id);
   }
 
   for (const [id, originalText] of mapped.entries()) {
-    results.push({ id, suggestion: originalText });
+    results.push({
+      id,
+      suggestion: originalText,
+      qualityGate: evaluateQualityGate({
+        originalText,
+        suggestion: originalText,
+      }),
+    });
   }
 
   return { results };
