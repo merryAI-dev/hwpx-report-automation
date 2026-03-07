@@ -47,6 +47,10 @@ export type VerificationResult = {
 type DownloadState = {
   blob: Blob | null;
   fileName: string;
+  remoteUrl?: string | null;
+  remoteExpiresAt?: string | null;
+  provider?: string | null;
+  blobId?: string | null;
 };
 
 type EditorSelectionState = {
@@ -170,6 +174,10 @@ const INITIAL_INSTRUCTION = "문장을 간결하게 다듬고 기술 문서 톤�
 const initialDownload: DownloadState = {
   blob: null,
   fileName: "edited.hwpx",
+  remoteUrl: null,
+  remoteExpiresAt: null,
+  provider: null,
+  blobId: null,
 };
 
 export const useDocumentStore = create<DocumentState>((set, get) => ({

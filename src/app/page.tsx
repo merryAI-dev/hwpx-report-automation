@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Editor, JSONContent } from "@tiptap/core";
-import { Fragment, Schema, type Node as PMNode } from "@tiptap/pm/model";
+import { Fragment, type Node as PMNode } from "@tiptap/pm/model";
 import { useCallback } from "react";
 import { DocumentEditor } from "@/components/editor/DocumentEditor";
 import { EditorToolbar } from "@/components/editor/EditorToolbar";
@@ -31,6 +31,7 @@ import { triggerDiffHighlightUpdate } from "@/lib/editor/diff-highlight-extensio
 import type { DiffHighlightSuggestion } from "@/lib/editor/diff-highlight-extension";
 import { INSTRUCTION_PRESETS } from "@/lib/editor/ai-presets";
 import type { PresetKey } from "@/lib/editor/ai-presets";
+import { uploadBlobForSignedDownload } from "@/lib/blob-storage-client";
 import {
   listRecentFileSnapshots,
   loadRecentFileSnapshot,
@@ -206,16 +207,6 @@ function extractNodeText(node: JSONContent): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function textToInlineNodes(schema: Schema, text: string): PMNode[] {
-  const parts = text.split("\n");
-  const nodes: PMNode[] = [];
-  parts.forEach((part, i) => {
-    if (part) nodes.push(schema.text(part));
-    if (i < parts.length - 1) nodes.push(schema.nodes.hardBreak.create());
-  });
-  return nodes;
 }
 
 function fillTableRows(
@@ -455,13 +446,10 @@ export default function Home() {
   } = useDocumentStore();
 
   // Phase 2: appendTransaction 이후 Zustand 갱신 신호
-  const onNewParaCreated = useCallback(
-    (_paraId: string, _fileName: string) => {
-      const model = useDocumentStore.getState().hwpxDocumentModel;
-      if (model) setHwpxDocumentModel(model);
-    },
-    [setHwpxDocumentModel],
-  );
+  const onNewParaCreated = useCallback(() => {
+    const model = useDocumentStore.getState().hwpxDocumentModel;
+    if (model) setHwpxDocumentModel(model);
+  }, [setHwpxDocumentModel]);
 
   // Phase 2: 항상 최신 model을 반환하는 getter (클로저 stale 방지)
   const getHwpxDocumentModel = useCallback(
@@ -493,12 +481,21 @@ export default function Home() {
     void refreshRecentSnapshots();
   }, [refreshRecentSnapshots]);
 
-  const downloadUrl = useMemo(() => {
+  const localDownloadUrl = useMemo(() => {
     if (!download.blob) {
       return "";
     }
     return URL.createObjectURL(download.blob);
   }, [download.blob]);
+  const downloadUrl = useMemo(() => {
+    if (
+      download.remoteUrl &&
+      (!download.remoteExpiresAt || Date.now() < Date.parse(download.remoteExpiresAt))
+    ) {
+      return download.remoteUrl;
+    }
+    return localDownloadUrl;
+  }, [download.remoteUrl, download.remoteExpiresAt, localDownloadUrl]);
 
   const dirtySummary = useMemo(() => buildDirtySummary(editsPreview), [editsPreview]);
   const batchItems = useMemo(
@@ -528,11 +525,50 @@ export default function Home() {
 
   useEffect(() => {
     return () => {
-      if (downloadUrl) {
-        URL.revokeObjectURL(downloadUrl);
+      if (localDownloadUrl) {
+        URL.revokeObjectURL(localDownloadUrl);
       }
     };
-  }, [downloadUrl]);
+  }, [localDownloadUrl]);
+
+  /* ── Phase 2-4: Document Analysis ── */
+  const fireDocumentAnalysis = useCallback((segments: Array<{ segmentId: string; text: string }>) => {
+    setAnalysisLoading(true);
+    const items = segments
+      .filter((s) => s.text.trim())
+      .slice(0, 100)
+      .map((s) => ({
+        id: s.segmentId,
+        text: s.text.slice(0, 200),
+      }));
+    if (!items.length) {
+      setAnalysisLoading(false);
+      return;
+    }
+    fetch("/api/analyze-document", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ segments: items }),
+    })
+      .then(async (resp) => {
+        if (!resp.ok) return;
+        const data = await resp.json();
+        setDocumentAnalysis(data);
+        if (data.suggestedPreset) {
+          const preset = INSTRUCTION_PRESETS.find((p) => p.key === data.suggestedPreset);
+          if (preset) {
+            setSelectedPreset(preset.key);
+            if (preset.instruction) {
+              setInstruction(preset.instruction);
+            }
+          }
+        }
+      })
+      .catch(() => {
+        // Analysis is optional
+      })
+      .finally(() => setAnalysisLoading(false));
+  }, [setAnalysisLoading, setDocumentAnalysis, setSelectedPreset, setInstruction]);
 
   /* ── Diff highlight sync: React → Editor ── */
   useEffect(() => {
@@ -658,6 +694,7 @@ export default function Home() {
       setLoadedDocument,
       setOutline,
       refreshRecentSnapshots,
+      fireDocumentAnalysis,
     ],
   );
 
@@ -687,46 +724,6 @@ export default function Home() {
       const message = error instanceof Error ? error.message : "최근 파일 로드 실패";
       setStatus(message);
     }
-  };
-
-  /* ── Phase 2-4: Document Analysis ── */
-  const fireDocumentAnalysis = (segments: Array<{ segmentId: string; text: string }>) => {
-    setAnalysisLoading(true);
-    const items = segments
-      .filter((s) => s.text.trim())
-      .slice(0, 100)
-      .map((s) => ({
-        id: s.segmentId,
-        text: s.text.slice(0, 200),
-      }));
-    if (!items.length) {
-      setAnalysisLoading(false);
-      return;
-    }
-    fetch("/api/analyze-document", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ segments: items }),
-    })
-      .then(async (resp) => {
-        if (!resp.ok) return;
-        const data = await resp.json();
-        setDocumentAnalysis(data);
-        // Auto-select preset if suggested
-        if (data.suggestedPreset) {
-          const preset = INSTRUCTION_PRESETS.find((p) => p.key === data.suggestedPreset);
-          if (preset) {
-            setSelectedPreset(preset.key);
-            if (preset.instruction) {
-              setInstruction(preset.instruction);
-            }
-          }
-        }
-      })
-      .catch(() => {
-        // Analysis is optional
-      })
-      .finally(() => setAnalysisLoading(false));
   };
 
   const onEditorUpdateDoc = (doc: Parameters<typeof setEditorDoc>[0]) => {
@@ -796,7 +793,6 @@ export default function Home() {
     setStatus(replaced ? "문단 전체에 AI 제안을 적용했습니다." : "대상 문단을 찾지 못했습니다.");
   };
 
-  const isHwpxFile = fileName.toLowerCase().endsWith(".hwpx");
   const runHwpxExport = useCallback(
     async (params: {
       kind: Exclude<RecentFileKind, "opened">;
@@ -820,9 +816,36 @@ export default function Home() {
       }
 
       const nextName = params.overrideFileName ?? createUniqueHwpxFileName(fileName || "document.hwpx", params.fileLabel);
+      let remoteDownload:
+        | {
+            blobId: string;
+            provider: string;
+            downloadUrl: string;
+            expiresAt: string;
+          }
+        | null = null;
+      let remoteUploadWarning: string | null = null;
+
+      try {
+        const uploaded = await uploadBlobForSignedDownload(result.blob, nextName);
+        remoteDownload = {
+          blobId: uploaded.blobId,
+          provider: uploaded.provider,
+          downloadUrl: uploaded.downloadUrl,
+          expiresAt: uploaded.expiresAt,
+        };
+      } catch (error) {
+        remoteUploadWarning =
+          error instanceof Error ? error.message : "외부 저장소 업로드에 실패했습니다.";
+      }
+
       setDownload({
         blob: result.blob,
         fileName: nextName,
+        remoteUrl: remoteDownload?.downloadUrl ?? null,
+        remoteExpiresAt: remoteDownload?.expiresAt ?? null,
+        provider: remoteDownload?.provider ?? null,
+        blobId: remoteDownload?.blobId ?? null,
       });
 
       if (params.triggerDownload) {
@@ -851,6 +874,8 @@ export default function Home() {
       return {
         edits: result.edits.length,
         fileName: nextName,
+        storage: remoteDownload,
+        storageWarning: remoteUploadWarning,
       };
     },
     [
@@ -886,7 +911,15 @@ export default function Home() {
         overrideFileName: customFileName,
       });
       pushHistory(`저장 완료 (${result.edits}건)`, result.edits);
-      setStatus(`저장 완료: ${result.fileName}`);
+      if (result.storage) {
+        setStatus(
+          `저장 완료: ${result.fileName} (외부저장 ${result.storage.provider}, 서명 URL 만료 ${new Date(result.storage.expiresAt).toLocaleTimeString("ko-KR")})`,
+        );
+      } else if (result.storageWarning) {
+        setStatus(`저장 완료: ${result.fileName} (${result.storageWarning})`);
+      } else {
+        setStatus(`저장 완료: ${result.fileName}`);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "저장 실패";
       setStatus(message);
@@ -914,7 +947,13 @@ export default function Home() {
         triggerDownload: false,
         markClean: false,
       });
-      setStatus(`자동 저장 완료: ${result.fileName}`);
+      if (result.storage) {
+        setStatus(`자동 저장 완료: ${result.fileName} (외부저장 ${result.storage.provider})`);
+      } else if (result.storageWarning) {
+        setStatus(`자동 저장 완료: ${result.fileName} (${result.storageWarning})`);
+      } else {
+        setStatus(`자동 저장 완료: ${result.fileName}`);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "자동 저장 실패";
       setStatus(`자동 저장 실패: ${message}`);
@@ -1756,7 +1795,14 @@ export default function Home() {
           setStatus("DOCX 파일을 생성하고 있습니다...");
           try {
             const result = await exportToDocx(editorDoc, fileName || "document");
-            setDownload({ blob: result.blob, fileName: result.fileName });
+            setDownload({
+              blob: result.blob,
+              fileName: result.fileName,
+              remoteUrl: null,
+              remoteExpiresAt: null,
+              provider: null,
+              blobId: null,
+            });
             setStatus(`DOCX 내보내기 완료: ${result.fileName}`);
           } catch (error) {
             const message = error instanceof Error ? error.message : "DOCX 내보내기 실패";
