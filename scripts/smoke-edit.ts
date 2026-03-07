@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { JSDOM } from "jsdom";
-import { applyTextEdits, inspectHwpx, validateHwpxArchive } from "../src/lib/hwpx";
+import { applyTextEdits, inspectHwpx } from "../src/lib/hwpx";
+import { formatHwpxValidationReport, validateHwpxForNode } from "../src/lib/node/hwpx-validator";
 
 async function main() {
   const dom = new JSDOM("");
@@ -12,12 +13,13 @@ async function main() {
   const outputPath = path.resolve(process.cwd(), "../examples/edited-by-system.hwpx");
 
   const input = await fs.readFile(inputPath);
-  const beforeIssues = await validateHwpxArchive(input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength));
-  if (beforeIssues.length) {
-    throw new Error(`input 무결성 경고: ${beforeIssues.join(" | ")}`);
+  const inputBuffer = input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength);
+  const beforeReport = await validateHwpxForNode(inputBuffer);
+  if (beforeReport.issues.length) {
+    throw new Error(formatHwpxValidationReport("input", beforeReport));
   }
 
-  const inspected = await inspectHwpx(input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength));
+  const inspected = await inspectHwpx(inputBuffer);
   const target = inspected.textNodes.find((node) => node.text.trim().length > 0);
   if (!target) {
     throw new Error("수정 가능한 텍스트 노드를 찾지 못했습니다.");
@@ -35,15 +37,16 @@ async function main() {
   ]);
 
   const outBuffer = new Uint8Array(await blob.arrayBuffer());
-  const afterIssues = await validateHwpxArchive(outBuffer.buffer);
-  if (afterIssues.length) {
-    throw new Error(`output 무결성 경고: ${afterIssues.join(" | ")}`);
+  const afterReport = await validateHwpxForNode(outBuffer.buffer);
+  if (afterReport.issues.length) {
+    throw new Error(formatHwpxValidationReport("output", afterReport));
   }
   await fs.writeFile(outputPath, outBuffer);
   console.log(`created: ${outputPath}`);
   console.log(`edited node: ${target.fileName} :: ${target.textIndex}`);
   console.log(`before: ${target.text}`);
   console.log(`after : ${editedText}`);
+  console.log(formatHwpxValidationReport("output", afterReport));
 }
 
 main().catch((error) => {
