@@ -2,6 +2,13 @@
 
 import { describe, expect, it } from "vitest";
 import { BatchJobManager } from "./batch-jobs";
+import type { QualityGateResult } from "@/lib/quality-gates";
+
+const passedGate: QualityGateResult = {
+  passed: true,
+  requiresApproval: false,
+  issues: [],
+};
 
 describe("BatchJobManager", () => {
   it("processes chunked jobs progressively and stores accumulated results", async () => {
@@ -13,7 +20,7 @@ describe("BatchJobManager", () => {
         return () => ++tick;
       })(),
       runChunk: async ({ items }) => ({
-        results: items.map((item) => ({ id: item.id, suggestion: item.text.toUpperCase() })),
+        results: items.map((item) => ({ id: item.id, suggestion: item.text.toUpperCase(), qualityGate: passedGate })),
       }),
     });
 
@@ -35,9 +42,9 @@ describe("BatchJobManager", () => {
     expect(completed?.completedChunks).toBe(2);
     expect(completed?.resultCount).toBe(3);
     expect(completed?.results).toEqual([
-      { id: "a", suggestion: "ONE" },
-      { id: "b", suggestion: "TWO" },
-      { id: "c", suggestion: "THREE" },
+      { id: "a", suggestion: "ONE", qualityGate: passedGate },
+      { id: "b", suggestion: "TWO", qualityGate: passedGate },
+      { id: "c", suggestion: "THREE", qualityGate: passedGate },
     ]);
   });
 
@@ -52,7 +59,7 @@ describe("BatchJobManager", () => {
           throw new Error("chunk failed");
         }
         return {
-          results: items.map((item) => ({ id: item.id, suggestion: item.text })),
+          results: items.map((item) => ({ id: item.id, suggestion: item.text, qualityGate: passedGate })),
         };
       },
     });

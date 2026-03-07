@@ -5,6 +5,7 @@ import type { TextEdit } from "@/lib/hwpx";
 import type { OutlineItem } from "@/lib/editor/document-store";
 import type { PresetKey } from "@/lib/editor/ai-presets";
 import type { HwpxDocumentModel } from "@/types/hwpx-model";
+import type { QualityGateResult } from "@/lib/quality-gates";
 
 import type { ChatMessageUI, PendingToolCall } from "@/types/chat";
 
@@ -26,6 +27,7 @@ export type EditHistoryItem = {
 export type BatchSuggestionItem = {
   id: string;
   suggestion: string;
+  qualityGate: QualityGateResult;
 };
 
 export type BatchJobStatus = "queued" | "running" | "completed" | "failed";
@@ -103,6 +105,8 @@ type DocumentState = {
   // Phase 2-6: Verification
   verificationResult: VerificationResult | null;
   verificationLoading: boolean;
+  singleSuggestionQualityGate: QualityGateResult | null;
+  singleSuggestionApproved: boolean;
   // Batch mode
   batchMode: "section" | "document";
   batchJob: BatchJobState | null;
@@ -162,6 +166,8 @@ type DocumentState = {
   // Phase 2-6
   setVerificationResult: (result: VerificationResult | null) => void;
   setVerificationLoading: (loading: boolean) => void;
+  setSingleSuggestionQualityGate: (gate: QualityGateResult | null) => void;
+  setSingleSuggestionApproved: (approved: boolean) => void;
   // Batch mode
   setBatchMode: (mode: "section" | "document") => void;
   setBatchJob: (batchJob: BatchJobState | null) => void;
@@ -221,6 +227,8 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   terminologyDict: {},
   verificationResult: null,
   verificationLoading: false,
+  singleSuggestionQualityGate: null,
+  singleSuggestionApproved: false,
   batchMode: "section",
   batchJob: null,
   formMode: false,
@@ -252,6 +260,8 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       terminologyDict: {},
       verificationResult: null,
       verificationLoading: false,
+      singleSuggestionQualityGate: null,
+      singleSuggestionApproved: false,
       batchMode: "section",
       batchJob: null,
       hwpxDocumentModel: null,
@@ -284,6 +294,8 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       terminologyDict: {},
       verificationResult: null,
       verificationLoading: false,
+      singleSuggestionQualityGate: null,
+      singleSuggestionApproved: false,
       batchMode: "section",
       batchJob: null,
       selection: { selectedSegmentId: null, selectedText: "" },
@@ -356,6 +368,8 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   // Phase 2-6: Verification
   setVerificationResult: (verificationResult) => set({ verificationResult }),
   setVerificationLoading: (verificationLoading) => set({ verificationLoading }),
+  setSingleSuggestionQualityGate: (singleSuggestionQualityGate) => set({ singleSuggestionQualityGate }),
+  setSingleSuggestionApproved: (singleSuggestionApproved) => set({ singleSuggestionApproved }),
 
   // Batch mode
   setBatchMode: (batchMode) => set({ batchMode }),
