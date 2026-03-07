@@ -194,7 +194,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   outline: [],
   editsPreview: [],
   history: [],
-  status: "HWPX 또는 DOCX 파일을 업로드하세요.",
+  status: "HWP, HWPX, DOCX 또는 PPTX 파일을 업로드하세요.",
   isBusy: false,
   isDirty: false,
   sidebarCollapsed: false,
@@ -258,7 +258,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       download: initialDownload,
       renderHtml: null,
       renderElementMap: null,
-      status: "HWPX 또는 DOCX 파일을 업로드하세요.",
+      status: "HWP, HWPX, DOCX 또는 PPTX 파일을 업로드하세요.",
       history: [],
     }),
 

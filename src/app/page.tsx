@@ -337,6 +337,77 @@ type JavaRenderPayload = {
   elementMap?: Record<string, RenderElementInfo>;
 };
 
+type HwpIntakeErrorPayload = {
+  error?: string;
+  code?: string;
+  details?: string[];
+};
+
+function getFileExtension(fileName: string): string {
+  return fileName.toLowerCase().split(".").pop() || "";
+}
+
+function getFormatLabel(extension: string): string {
+  if (extension === "hwp") return "HWP";
+  if (extension === "docx") return "DOCX";
+  if (extension === "pptx") return "PPTX";
+  return "HWPX";
+}
+
+function parseContentDispositionFileName(headerValue: string | null): string | null {
+  if (!headerValue) {
+    return null;
+  }
+
+  const utfMatch = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utfMatch?.[1]) {
+    try {
+      return decodeURIComponent(utfMatch[1]);
+    } catch {
+      return utfMatch[1];
+    }
+  }
+
+  const plainMatch = headerValue.match(/filename=\"?([^\";]+)\"?/i);
+  return plainMatch?.[1] ?? null;
+}
+
+async function readHwpIntakeError(response: Response): Promise<string> {
+  try {
+    const payload = (await response.json()) as HwpIntakeErrorPayload;
+    const details = Array.isArray(payload.details) ? payload.details.filter(Boolean) : [];
+    return [payload.error || `HWP 변환 실패 (${response.status})`, ...details].join(" | ");
+  } catch {
+    return `HWP 변환 실패 (${response.status})`;
+  }
+}
+
+async function convertLegacyHwpForEditor(file: File): Promise<File> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch("/api/hwp-intake", {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(await readHwpIntakeError(response));
+  }
+
+  const blob = await response.blob();
+  const headerFileName = parseContentDispositionFileName(response.headers.get("content-disposition"));
+  const convertedFileName =
+    response.headers.get("x-converted-file-name")
+    || headerFileName
+    || `${toFileStem(file.name)}.hwpx`;
+
+  return new File([blob], convertedFileName, {
+    type: blob.type || "application/octet-stream",
+    lastModified: Date.now(),
+  });
+}
+
 export default function Home() {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [viewMode, setViewMode] = useState<"editor" | "preview">("editor");
@@ -612,12 +683,26 @@ export default function Home() {
     async (file: File, recentKind: RecentFileKind | null = "opened") => {
       setBusy(true);
       setViewMode("editor");
-      const ext = file.name.toLowerCase().split(".").pop() || "";
-      const formatLabel = ext === "docx" ? "DOCX" : ext === "pptx" ? "PPTX" : "HWPX";
-      const isHwpx = ext === "hwpx";
-      setStatus(`${formatLabel}를 분석하고 변환 중입니다...`);
       try {
-        const buffer = await file.arrayBuffer();
+        const sourceExt = getFileExtension(file.name);
+        let workingFile = file;
+        let ext = sourceExt;
+
+        if (sourceExt === "hwp") {
+          setStatus("HWP를 HWPX로 변환 중입니다...");
+          workingFile = await convertLegacyHwpForEditor(file);
+          ext = "hwpx";
+        }
+
+        const formatLabel = getFormatLabel(ext);
+        const isHwpx = ext === "hwpx";
+        setStatus(
+          sourceExt === "hwp"
+            ? "HWP를 HWPX로 변환한 뒤 문서를 분석 중입니다..."
+            : `${formatLabel}를 분석하고 변환 중입니다...`,
+        );
+
+        const buffer = await workingFile.arrayBuffer();
         let parsePromise;
         if (ext === "docx") parsePromise = parseDocxToProseMirror(buffer);
         else if (ext === "pptx") parsePromise = parsePptxToProseMirror(buffer);
@@ -630,7 +715,7 @@ export default function Home() {
             : (async () => {
                 try {
                   const fd = new FormData();
-                  fd.append("file", file);
+                  fd.append("file", workingFile);
                   const resp = await fetch("/api/hwpx-render", { method: "POST", body: fd });
                   if (resp.ok) {
                     const payload = (await resp.json()) as JavaRenderPayload;
@@ -659,7 +744,7 @@ export default function Home() {
         }
 
         setLoadedDocument({
-          fileName: file.name,
+          fileName: workingFile.name,
           buffer,
           doc: parsed.doc,
           segments: parsed.segments,
@@ -674,8 +759,8 @@ export default function Home() {
 
         if (recentKind) {
           const snapshotMeta = await saveRecentFileSnapshot({
-            name: file.name,
-            blob: file,
+            name: workingFile.name,
+            blob: workingFile,
             kind: recentKind,
           });
           if (snapshotMeta) {
@@ -685,8 +770,10 @@ export default function Home() {
 
         setStatus(
           parsed.integrityIssues.length
-            ? `로드 완료: 세그먼트 ${parsed.segments.length}개 (경고 ${parsed.integrityIssues.length}개)`
-            : `로드 완료: 세그먼트 ${parsed.segments.length}개`,
+            ? `${
+              sourceExt === "hwp" ? "HWP 변환 후 로드 완료" : "로드 완료"
+            }: 세그먼트 ${parsed.segments.length}개 (경고 ${parsed.integrityIssues.length}개)`
+            : `${sourceExt === "hwp" ? "HWP 변환 후 로드 완료" : "로드 완료"}: 세그먼트 ${parsed.segments.length}개`,
         );
 
         // Phase 2-4: Auto-analyze document on upload
@@ -1000,7 +1087,7 @@ export default function Home() {
   /* ── Phase 2-7: Progressive batch suggestions ── */
   const onGenerateBatchSuggestions = async () => {
     if (!editorDoc) {
-      setStatus("먼저 HWPX 파일을 업로드하세요.");
+      setStatus("먼저 문서를 업로드하세요.");
       return;
     }
     if (!batchItems.length) {
