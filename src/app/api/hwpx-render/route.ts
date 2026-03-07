@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withApiAuth } from "@/lib/auth/with-api-auth";
 
 const JAVA_API_URL = process.env.JAVA_API_URL || "http://localhost:8080";
 
@@ -9,7 +10,7 @@ const JAVA_API_URL = process.env.JAVA_API_URL || "http://localhost:8080";
  * forwards it to the Java hwpxlib rendering server, and returns the
  * JSON payload `{ html, elementMap, outline }`.
  */
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest) {
   try {
     const formData = await req.formData();
     const file = formData.get("file");
@@ -40,3 +41,5 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: message }, { status: 502 });
   }
 }
+
+export const POST = withApiAuth(handlePost);
