@@ -9,6 +9,7 @@ Vercel에 바로 배포 가능한 HWPX 편집기입니다.
 - 일괄 섹션 재작성 (`/api/suggest-batch`)
 - 원문/제안 diff 프리뷰
 - `{{TITLE}}` 같은 플레이스홀더 치환
+- 파일시스템 기반 외부 blob 저장소 + 서명된 다운로드 URL
 
 ## Local Run
 
@@ -18,6 +19,18 @@ npm run dev
 ```
 
 브라우저에서 `http://localhost:3000` 열기
+
+선택 환경변수:
+
+```bash
+BLOB_STORAGE_FS_ROOT=/absolute/path/to/blob-storage
+BLOB_SIGNING_SECRET=replace-this-in-production
+BLOB_SIGNED_URL_TTL_SECONDS=900
+```
+
+- 기본 저장 위치는 `web/.blob-storage`
+- `POST /api/blob/upload`는 저장 후 서명된 다운로드 URL을 반환
+- `GET /api/blob/download/[blobId]?...`는 서명 검증 후 파일을 반환
 
 ## Vercel Deploy
 
