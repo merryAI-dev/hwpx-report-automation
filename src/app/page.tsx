@@ -89,7 +89,6 @@ type SegmentTextUpdate = {
   text: string;
 };
 
-const BATCH_API_CHUNK_SIZE = 40;
 const AUTOSAVE_INTERVAL_MS = 60_000;
 let uniqueSaveSequence = 0;
 
@@ -337,6 +336,25 @@ type JavaRenderPayload = {
   elementMap?: Record<string, RenderElementInfo>;
 };
 
+<<<<<<< HEAD
+type BatchJobPayload = {
+  job?: {
+    id: string;
+    status: "queued" | "running" | "completed" | "failed";
+    completedChunks: number;
+    totalChunks: number;
+    resultCount: number;
+    itemCount: number;
+    error: string | null;
+    results: Array<{ id: string; suggestion: string }>;
+  };
+  error?: string;
+};
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
 type HwpIntakeErrorPayload = {
   error?: string;
   code?: string;
@@ -460,6 +478,7 @@ export default function Home() {
     verificationLoading,
     // Batch mode
     batchMode,
+    batchJob,
     // Form mode
     formMode,
 
@@ -505,6 +524,7 @@ export default function Home() {
     setVerificationLoading,
     // Batch mode
     setBatchMode,
+    setBatchJob,
     // Form mode
     setFormMode,
 
@@ -1099,46 +1119,73 @@ export default function Home() {
     setActiveSidebarTab("ai");
     clearBatchDecisions();
     setBatchSuggestions([]);
-
-    const chunks: Array<typeof batchItems> = [];
-    for (let index = 0; index < batchItems.length; index += BATCH_API_CHUNK_SIZE) {
-      chunks.push(batchItems.slice(index, index + BATCH_API_CHUNK_SIZE));
-    }
-
-    let accumulated: Array<{ id: string; suggestion: string }> = [];
+    setBatchJob(null);
+    const requestedBatchItems = [...batchItems];
 
     try {
-      for (let ci = 0; ci < chunks.length; ci++) {
-        setStatus(`AI 생성 중... (${ci + 1}/${chunks.length})`);
-        const chunk = chunks[ci];
-        const response = await fetch("/api/suggest-batch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            items: chunk,
-            instruction,
-            model: undefined,
-          }),
-        });
-        const payload = (await response.json()) as {
-          results?: Array<{ id?: string; suggestion?: string }>;
-          error?: string;
-        };
-        if (!response.ok) {
-          throw new Error(payload.error || "AI 일괄 제안 생성 실패");
-        }
-        const chunkResults = (payload.results || [])
-          .map((row) => ({
-            id: String(row.id || "").trim(),
-            suggestion: String(row.suggestion || "").trim(),
-          }))
-          .filter((row) => row.id && row.suggestion);
-        accumulated = [...accumulated, ...chunkResults];
-        setBatchSuggestions([...accumulated]); // progressive UI update
+      const createResponse = await fetch("/api/batch-jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: requestedBatchItems,
+          instruction,
+          model: undefined,
+        }),
+      });
+      const createdPayload = (await createResponse.json()) as BatchJobPayload;
+      if (!createResponse.ok || !createdPayload.job) {
+        throw new Error(createdPayload.error || "AI 일괄 작업 생성 실패");
       }
-      const nextPlan = buildBatchApplyPlan(batchItems, accumulated);
-      const changedCount = nextPlan.filter((row) => row.changed).length;
-      setStatus(`AI 섹션 일괄 제안 완료: 대상 ${nextPlan.length}개 중 변경 ${changedCount}개`);
+
+      setBatchJob({
+        id: createdPayload.job.id,
+        status: createdPayload.job.status,
+        completedChunks: createdPayload.job.completedChunks,
+        totalChunks: createdPayload.job.totalChunks,
+        resultCount: createdPayload.job.resultCount,
+        itemCount: createdPayload.job.itemCount,
+        error: createdPayload.job.error,
+      });
+      setStatus(`AI 일괄 작업 생성됨... (0/${createdPayload.job.totalChunks})`);
+
+      while (true) {
+        await sleep(800);
+        const response = await fetch(`/api/batch-jobs/${createdPayload.job.id}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as BatchJobPayload;
+        if (!response.ok) {
+          throw new Error(payload.error || "AI 일괄 작업 조회 실패");
+        }
+        const job = payload.job;
+        if (!job) {
+          throw new Error("배치 작업 상태가 비어 있습니다.");
+        }
+
+        setBatchJob({
+          id: job.id,
+          status: job.status,
+          completedChunks: job.completedChunks,
+          totalChunks: job.totalChunks,
+          resultCount: job.resultCount,
+          itemCount: job.itemCount,
+          error: job.error,
+        });
+        setBatchSuggestions(job.results);
+
+        if (job.status === "failed") {
+          throw new Error(job.error || "AI 일괄 작업 실패");
+        }
+        if (job.status === "completed") {
+          const nextPlan = buildBatchApplyPlan(requestedBatchItems, job.results);
+          const changedCount = nextPlan.filter((row) => row.changed).length;
+          setStatus(`AI 섹션 일괄 제안 완료: 대상 ${nextPlan.length}개 중 변경 ${changedCount}개`);
+          break;
+        }
+
+        setStatus(`AI 생성 작업 진행 중... (${job.completedChunks}/${job.totalChunks})`);
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "AI 일괄 제안 실패";
       setStatus(message);
@@ -2033,6 +2080,7 @@ export default function Home() {
               batchTargetCount={batchItems.length}
               batchSuggestionCount={batchSuggestionCount}
               batchDiffItems={batchDiffItems}
+              batchJob={batchJob}
               isBusy={isBusy || aiBusy}
               onChangeInstruction={setInstruction}
               onRequestSuggestion={() => void onGenerateSuggestion()}

@@ -29,6 +29,18 @@ export type BatchSuggestionItem = {
   suggestion: string;
 };
 
+export type BatchJobStatus = "queued" | "running" | "completed" | "failed";
+
+export type BatchJobState = {
+  id: string;
+  status: BatchJobStatus;
+  completedChunks: number;
+  totalChunks: number;
+  resultCount: number;
+  itemCount: number;
+  error: string | null;
+};
+
 export type DocumentAnalysis = {
   documentType: string;
   suggestedPreset: string;
@@ -99,6 +111,7 @@ type DocumentState = {
   verificationLoading: boolean;
   // Batch mode
   batchMode: "section" | "document";
+  batchJob: BatchJobState | null;
 
   // Form mode
   formMode: boolean;
@@ -158,6 +171,7 @@ type DocumentState = {
   setVerificationLoading: (loading: boolean) => void;
   // Batch mode
   setBatchMode: (mode: "section" | "document") => void;
+  setBatchJob: (batchJob: BatchJobState | null) => void;
   // Form mode
   setFormMode: (formMode: boolean) => void;
 
@@ -220,6 +234,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   verificationResult: null,
   verificationLoading: false,
   batchMode: "section",
+  batchJob: null,
   formMode: false,
 
   hwpxDocumentModel: null,
@@ -251,6 +266,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       verificationResult: null,
       verificationLoading: false,
       batchMode: "section",
+      batchJob: null,
       hwpxDocumentModel: null,
       chatMessages: [],
       chatBusy: false,
@@ -283,6 +299,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       verificationResult: null,
       verificationLoading: false,
       batchMode: "section",
+      batchJob: null,
       selection: { selectedSegmentId: null, selectedText: "" },
       download: {
         blob: null,
@@ -357,6 +374,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   // Batch mode
   setBatchMode: (batchMode) => set({ batchMode }),
+  setBatchJob: (batchJob) => set({ batchJob }),
 
   // Form mode
   setFormMode: (formMode) => set({ formMode }),

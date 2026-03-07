@@ -3,7 +3,7 @@
 import { useMemo } from "react";
 import { diffWords } from "diff";
 import type { InstructionPreset, PresetKey } from "@/lib/editor/ai-presets";
-import type { VerificationResult } from "@/store/document-store";
+import type { BatchJobState, VerificationResult } from "@/store/document-store";
 
 function InlineDiff({ before, after }: { before: string; after: string }) {
   const changes = diffWords(before, after);
@@ -37,6 +37,7 @@ type AiSuggestionPanelProps = {
   batchTargetCount: number;
   batchSuggestionCount: number;
   batchDiffItems: Array<{ id: string; before: string; after: string }>;
+  batchJob: BatchJobState | null;
   isBusy: boolean;
   onChangeInstruction: (instruction: string) => void;
   onRequestSuggestion: () => void;
@@ -67,6 +68,7 @@ export function AiSuggestionPanel({
   batchTargetCount,
   batchSuggestionCount,
   batchDiffItems,
+  batchJob,
   isBusy,
   onChangeInstruction,
   onRequestSuggestion,
@@ -204,6 +206,12 @@ export function AiSuggestionPanel({
       <label className="sidebar-label">일괄 수정</label>
       <div className="sidebar-box">
         현재 대상 {batchTargetCount}개 / 생성된 제안 {batchSuggestionCount}개
+        {batchJob ? (
+          <div style={{ marginTop: 6, fontSize: 11, color: "#4b5563" }}>
+            작업 {batchJob.status} / 청크 {batchJob.completedChunks}/{batchJob.totalChunks} / 결과 {batchJob.resultCount}개
+            {batchJob.error ? <div style={{ color: "#b91c1c", marginTop: 4 }}>{batchJob.error}</div> : null}
+          </div>
+        ) : null}
       </div>
       <div className="sidebar-actions">
         <button
