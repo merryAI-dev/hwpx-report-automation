@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import { withApiAuth } from "@/lib/auth/with-api-auth";
 
 type RequestBody = {
   originalText?: string;
@@ -8,7 +9,7 @@ type RequestBody = {
   model?: string;
 };
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const apiKey = process.env.OPENAI_API_KEY;
   const baseURL = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
   const defaultModel = process.env.OPENAI_MODEL || "gpt-4.1-mini";
@@ -73,3 +74,5 @@ ${instruction || "(없음)"}
     return NextResponse.json({ error: message }, { status: 502 });
   }
 }
+
+export const POST = withApiAuth(handlePost);

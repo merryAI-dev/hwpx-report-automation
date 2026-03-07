@@ -1766,6 +1766,11 @@ export default function Home() {
           }
         }}
         onSave={onSave}
+        onLogout={() => {
+          void fetch("/api/auth/logout", { method: "POST" }).finally(() => {
+            window.location.assign("/login");
+          });
+        }}
         formMode={formMode}
         onToggleFormMode={() => setFormMode(!formMode)}
       />

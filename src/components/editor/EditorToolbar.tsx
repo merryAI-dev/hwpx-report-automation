@@ -47,6 +47,7 @@ type EditorToolbarProps = {
   onExportPdf: () => void;
   onExportDocx: () => void;
   onSave: () => void;
+  onLogout: () => void;
   formMode: boolean;
   onToggleFormMode: () => void;
 };
@@ -116,6 +117,7 @@ export function EditorToolbar({
   onExportPdf,
   onExportDocx,
   onSave,
+  onLogout,
   formMode,
   onToggleFormMode,
 }: EditorToolbarProps) {
@@ -271,6 +273,13 @@ export function EditorToolbar({
               active={false}
               disabled={globalDisabled || !hasDocument}
               onClick={onSave}
+            />
+            <Btn
+              label="로그아웃"
+              title="세션 종료"
+              active={false}
+              disabled={globalDisabled}
+              onClick={onLogout}
             />
           </div>
         </div>
