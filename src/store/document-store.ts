@@ -4,6 +4,7 @@ import type { EditorSegment } from "@/lib/editor/hwpx-to-prosemirror";
 import type { TextEdit } from "@/lib/hwpx";
 import type { OutlineItem } from "@/lib/editor/document-store";
 import type { PresetKey } from "@/lib/editor/ai-presets";
+import type { TemplateCatalog } from "@/lib/template-catalog";
 import type { HwpxDocumentModel } from "@/types/hwpx-model";
 
 import type { ChatMessageUI, PendingToolCall } from "@/types/chat";
@@ -85,6 +86,7 @@ type DocumentState = {
   selectedPreset: PresetKey;
   // Phase 2-4: Document Intelligence
   documentAnalysis: DocumentAnalysis | null;
+  templateCatalog: TemplateCatalog | null;
   analysisLoading: boolean;
   // Phase 2-5: Terminology
   terminologyDict: Record<string, string>;
@@ -141,6 +143,7 @@ type DocumentState = {
   setSelectedPreset: (preset: PresetKey) => void;
   // Phase 2-4
   setDocumentAnalysis: (analysis: DocumentAnalysis | null) => void;
+  setTemplateCatalog: (catalog: TemplateCatalog | null) => void;
   setAnalysisLoading: (loading: boolean) => void;
   // Phase 2-5
   setTerminologyDict: (dict: Record<string, string>) => void;
@@ -203,6 +206,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   batchDecisions: {},
   selectedPreset: "custom",
   documentAnalysis: null,
+  templateCatalog: null,
   analysisLoading: false,
   terminologyDict: {},
   verificationResult: null,
@@ -233,6 +237,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       batchSuggestions: [],
       batchDecisions: {},
       documentAnalysis: null,
+      templateCatalog: null,
       analysisLoading: false,
       terminologyDict: {},
       verificationResult: null,
@@ -265,6 +270,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       batchSuggestions: [],
       batchDecisions: {},
       documentAnalysis: null,
+      templateCatalog: null,
       terminologyDict: {},
       verificationResult: null,
       verificationLoading: false,
@@ -321,6 +327,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   // Phase 2-4: Document Intelligence
   setDocumentAnalysis: (documentAnalysis) => set({ documentAnalysis }),
+  setTemplateCatalog: (templateCatalog) => set({ templateCatalog }),
   setAnalysisLoading: (analysisLoading) => set({ analysisLoading }),
 
   // Phase 2-5: Terminology

@@ -9,6 +9,7 @@ Vercel에 바로 배포 가능한 HWPX 편집기입니다.
 - 일괄 섹션 재작성 (`/api/suggest-batch`)
 - 원문/제안 diff 프리뷰
 - `{{TITLE}}` 같은 플레이스홀더 치환
+- 템플릿 메타태그 카탈로그 추출 (`{{TITLE}}`, `{{date:report_date|required|label=보고일}}`)
 
 ## Local Run
 
@@ -30,6 +31,7 @@ npm run dev
 
 - 편집은 XML 텍스트 노드만 바꾸므로 스타일 속성은 유지됩니다.
 - HWPX 내부 XML 구조에 따라 일부 노드는 표시되지 않을 수 있습니다.
+- 템플릿 카탈로그는 문서의 `{{...}}` 메타태그를 스캔해 필드 목록, 버전, 충돌 이슈를 계산합니다.
 
 ## Pass Criteria / Tests
 

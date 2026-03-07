@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Editor, JSONContent } from "@tiptap/core";
-import { Fragment, Schema, type Node as PMNode } from "@tiptap/pm/model";
+import { Fragment, type Node as PMNode } from "@tiptap/pm/model";
 import { useCallback } from "react";
 import { DocumentEditor } from "@/components/editor/DocumentEditor";
 import { EditorToolbar } from "@/components/editor/EditorToolbar";
@@ -31,6 +31,7 @@ import { triggerDiffHighlightUpdate } from "@/lib/editor/diff-highlight-extensio
 import type { DiffHighlightSuggestion } from "@/lib/editor/diff-highlight-extension";
 import { INSTRUCTION_PRESETS } from "@/lib/editor/ai-presets";
 import type { PresetKey } from "@/lib/editor/ai-presets";
+import { buildTemplateCatalogFromDoc } from "@/lib/template-catalog";
 import {
   listRecentFileSnapshots,
   loadRecentFileSnapshot,
@@ -208,16 +209,6 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
-function textToInlineNodes(schema: Schema, text: string): PMNode[] {
-  const parts = text.split("\n");
-  const nodes: PMNode[] = [];
-  parts.forEach((part, i) => {
-    if (part) nodes.push(schema.text(part));
-    if (i < parts.length - 1) nodes.push(schema.nodes.hardBreak.create());
-  });
-  return nodes;
-}
-
 function fillTableRows(
   editor: Editor,
   tableIndex: number,
@@ -388,6 +379,7 @@ export default function Home() {
     selectedPreset,
     // Phase 2-4: Document Intelligence
     documentAnalysis,
+    templateCatalog,
     analysisLoading,
     // Phase 2-5: Terminology
     terminologyDict,
@@ -431,6 +423,7 @@ export default function Home() {
     setSelectedPreset,
     // Phase 2-4
     setDocumentAnalysis,
+    setTemplateCatalog,
     setAnalysisLoading,
     // Phase 2-5
     updateTerminologyEntry,
@@ -455,13 +448,10 @@ export default function Home() {
   } = useDocumentStore();
 
   // Phase 2: appendTransaction 이후 Zustand 갱신 신호
-  const onNewParaCreated = useCallback(
-    (_paraId: string, _fileName: string) => {
-      const model = useDocumentStore.getState().hwpxDocumentModel;
-      if (model) setHwpxDocumentModel(model);
-    },
-    [setHwpxDocumentModel],
-  );
+  const onNewParaCreated = useCallback(() => {
+    const model = useDocumentStore.getState().hwpxDocumentModel;
+    if (model) setHwpxDocumentModel(model);
+  }, [setHwpxDocumentModel]);
 
   // Phase 2: 항상 최신 model을 반환하는 getter (클로저 stale 방지)
   const getHwpxDocumentModel = useCallback(
@@ -525,6 +515,14 @@ export default function Home() {
         })),
     [batchPlan],
   );
+  const templateValidationWarnings = useMemo(
+    () =>
+      (templateCatalog?.issues || []).map(
+        (issue) =>
+          `[TEMPLATE-${issue.severity.toUpperCase()}][${issue.code}] ${issue.message}`,
+      ),
+    [templateCatalog],
+  );
 
   useEffect(() => {
     return () => {
@@ -533,6 +531,45 @@ export default function Home() {
       }
     };
   }, [downloadUrl]);
+
+  /* ── Phase 2-4: Document Analysis ── */
+  const fireDocumentAnalysis = useCallback((segments: Array<{ segmentId: string; text: string }>) => {
+    setAnalysisLoading(true);
+    const items = segments
+      .filter((s) => s.text.trim())
+      .slice(0, 100)
+      .map((s) => ({
+        id: s.segmentId,
+        text: s.text.slice(0, 200),
+      }));
+    if (!items.length) {
+      setAnalysisLoading(false);
+      return;
+    }
+    fetch("/api/analyze-document", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ segments: items }),
+    })
+      .then(async (resp) => {
+        if (!resp.ok) return;
+        const data = await resp.json();
+        setDocumentAnalysis(data);
+        if (data.suggestedPreset) {
+          const preset = INSTRUCTION_PRESETS.find((p) => p.key === data.suggestedPreset);
+          if (preset) {
+            setSelectedPreset(preset.key);
+            if (preset.instruction) {
+              setInstruction(preset.instruction);
+            }
+          }
+        }
+      })
+      .catch(() => {
+        // Analysis is optional
+      })
+      .finally(() => setAnalysisLoading(false));
+  }, [setAnalysisLoading, setDocumentAnalysis, setSelectedPreset, setInstruction]);
 
   /* ── Diff highlight sync: React → Editor ── */
   useEffect(() => {
@@ -621,6 +658,7 @@ export default function Home() {
           hwpxDocumentModel,
         });
         setOutline(buildOutlineFromDoc(parsed.doc));
+        setTemplateCatalog(buildTemplateCatalogFromDoc(parsed.doc));
         docRevisionRef.current = 0;
         lastAutoSavedRevisionRef.current = -1;
 
@@ -657,7 +695,9 @@ export default function Home() {
       setRenderResult,
       setLoadedDocument,
       setOutline,
+      setTemplateCatalog,
       refreshRecentSnapshots,
+      fireDocumentAnalysis,
     ],
   );
 
@@ -689,50 +729,11 @@ export default function Home() {
     }
   };
 
-  /* ── Phase 2-4: Document Analysis ── */
-  const fireDocumentAnalysis = (segments: Array<{ segmentId: string; text: string }>) => {
-    setAnalysisLoading(true);
-    const items = segments
-      .filter((s) => s.text.trim())
-      .slice(0, 100)
-      .map((s) => ({
-        id: s.segmentId,
-        text: s.text.slice(0, 200),
-      }));
-    if (!items.length) {
-      setAnalysisLoading(false);
-      return;
-    }
-    fetch("/api/analyze-document", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ segments: items }),
-    })
-      .then(async (resp) => {
-        if (!resp.ok) return;
-        const data = await resp.json();
-        setDocumentAnalysis(data);
-        // Auto-select preset if suggested
-        if (data.suggestedPreset) {
-          const preset = INSTRUCTION_PRESETS.find((p) => p.key === data.suggestedPreset);
-          if (preset) {
-            setSelectedPreset(preset.key);
-            if (preset.instruction) {
-              setInstruction(preset.instruction);
-            }
-          }
-        }
-      })
-      .catch(() => {
-        // Analysis is optional
-      })
-      .finally(() => setAnalysisLoading(false));
-  };
-
   const onEditorUpdateDoc = (doc: Parameters<typeof setEditorDoc>[0]) => {
     docRevisionRef.current += 1;
     setEditorDoc(doc);
     setOutline(buildOutlineFromDoc(doc));
+    setTemplateCatalog(buildTemplateCatalogFromDoc(doc));
     const next = collectDocumentEdits(doc, sourceSegments, extraSegmentsMap);
     setEditsPreview(next.edits);
     // exportWarnings는 내보내기 시에만 갱신 (편집 중 배너 노출 방지)
@@ -796,7 +797,6 @@ export default function Home() {
     setStatus(replaced ? "문단 전체에 AI 제안을 적용했습니다." : "대상 문단을 찾지 못했습니다.");
   };
 
-  const isHwpxFile = fileName.toLowerCase().endsWith(".hwpx");
   const runHwpxExport = useCallback(
     async (params: {
       kind: Exclude<RecentFileKind, "opened">;
@@ -814,7 +814,7 @@ export default function Home() {
 
       const result = await applyProseMirrorDocToHwpx(sourceBuffer, editorDoc, sourceSegments, extraSegmentsMap, hwpxDocumentModel);
       setEditsPreview(result.edits);
-      setExportWarnings(result.warnings);
+      setExportWarnings([...result.warnings, ...templateValidationWarnings]);
       if (result.integrityIssues.length) {
         throw new Error(`무결성 경고 ${result.integrityIssues.join(" | ")}`);
       }
@@ -865,6 +865,7 @@ export default function Home() {
       setDownload,
       setDirty,
       refreshRecentSnapshots,
+      templateValidationWarnings,
     ],
   );
 
@@ -1914,6 +1915,7 @@ export default function Home() {
           analysis={
             <DocumentAnalysisPanel
               analysis={documentAnalysis}
+              templateCatalog={templateCatalog}
               isLoading={analysisLoading}
               terminologyDict={terminologyDict}
               onUpdateEntry={updateTerminologyEntry}
