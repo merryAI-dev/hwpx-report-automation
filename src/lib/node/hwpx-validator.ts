@@ -53,12 +53,16 @@ export function resolveDvcCommandTemplate(
   return normalized ? normalized : null;
 }
 
-export function buildDvcCommand(commandTemplate: string, filePath: string): string {
+export function buildFileCommand(commandTemplate: string, filePath: string): string {
   const quotedFilePath = quoteForShell(filePath);
   if (commandTemplate.includes("{file}")) {
     return commandTemplate.split("{file}").join(quotedFilePath);
   }
   return `${commandTemplate} ${quotedFilePath}`;
+}
+
+export function buildDvcCommand(commandTemplate: string, filePath: string): string {
+  return buildFileCommand(commandTemplate, filePath);
 }
 
 async function executeShellCommand(command: string): Promise<CommandResult> {
@@ -144,7 +148,7 @@ export async function validateHwpxForNode(
   const tempFileFactory = options.tempFileFactory ?? writeTempHwpxFile;
   const execute = options.commandExecutor ?? executeShellCommand;
   const temp = await tempFileFactory(fileBuffer);
-  const command = buildDvcCommand(commandTemplate, temp.filePath);
+  const command = buildFileCommand(commandTemplate, temp.filePath);
 
   try {
     const result = await execute(command);

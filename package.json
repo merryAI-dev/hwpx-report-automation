@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
-    "validate:hwpx": "tsx scripts/validate-hwpx.ts"
+    "validate:hwpx": "tsx scripts/validate-hwpx.ts",
+    "regression:hancom": "tsx scripts/hancom-regression.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.78.0",
