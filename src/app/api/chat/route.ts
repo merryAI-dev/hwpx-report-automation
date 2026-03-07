@@ -4,6 +4,7 @@ import type {
   DocumentContext,
   DocumentContextSegment,
 } from "@/types/chat";
+import { withApiAuth } from "@/lib/auth/with-api-auth";
 
 const SYSTEM_PROMPT = `너는 한국어 문서 편집 전문 AI 어시스턴트다.
 사용자의 자연어 지시에 따라 문서를 분석하고 수정한다.
@@ -223,7 +224,7 @@ function sendSSE(
 
 /* ── Route handler ── */
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   const apiKey = process.env.ANTHROPIC_API_KEY;
   if (!apiKey) {
     return new Response(JSON.stringify({ error: "ANTHROPIC_API_KEY is not set." }), {
@@ -296,6 +297,8 @@ export async function POST(request: Request) {
     },
   });
 }
+
+export const POST = withApiAuth(handlePost);
 
 /* ── Agent loop: streaming + correct multi-tool handling ── */
 

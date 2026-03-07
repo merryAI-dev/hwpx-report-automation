@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import { withApiAuth } from "@/lib/auth/with-api-auth";
 
 type BatchItem = {
   id: string;
@@ -21,7 +22,7 @@ type BatchResponse = {
 
 const MAX_ITEMS = 40;
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   try {
     const apiKey = process.env.OPENAI_API_KEY;
     const baseURL = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
@@ -100,3 +101,5 @@ export async function POST(request: Request) {
     return NextResponse.json({ error: message }, { status: 500 });
   }
 }
+
+export const POST = withApiAuth(handlePost);
