@@ -176,7 +176,7 @@ export function EditorToolbar({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".hwpx,.docx,.pptx"
+          accept=".hwp,.hwpx,.docx,.pptx"
           style={{ display: "none" }}
           onChange={(e) => {
             const file = e.target.files?.[0];
