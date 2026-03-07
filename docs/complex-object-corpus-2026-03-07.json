@@ -1,0 +1,369 @@
+{
+  "generatedAt": "2026-03-07T09:48:49.940Z",
+  "fileCount": 10,
+  "aggregateCounts": {
+    "image": 6,
+    "drawing": 2,
+    "bookmark": 0,
+    "field": 0,
+    "footnote": 0,
+    "endnote": 0,
+    "pageControl": 19
+  },
+  "entries": [
+    {
+      "filePath": "/Users/boram/Hwp/hwpx-reader-src/test.hwpx",
+      "fileName": "test.hwpx",
+      "report": {
+        "sectionCount": 1,
+        "totalCount": 9,
+        "counts": {
+          "image": 6,
+          "drawing": 2,
+          "bookmark": 0,
+          "field": 0,
+          "footnote": 0,
+          "endnote": 0,
+          "pageControl": 1
+        },
+        "occurrences": [
+          {
+            "type": "drawing",
+            "fileName": "Contents/section0.xml",
+            "localName": "container",
+            "count": 1
+          },
+          {
+            "type": "drawing",
+            "fileName": "Contents/section0.xml",
+            "localName": "rect",
+            "count": 1
+          },
+          {
+            "type": "image",
+            "fileName": "Contents/section0.xml",
+            "localName": "pic",
+            "count": 6
+          },
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageNum",
+            "count": 1
+          }
+        ],
+        "warnings": [
+          "이미지 6건은 원본 XML로 보존되며 편집기에서 직접 수정되지 않습니다.",
+          "도형/개체 2건은 원본 XML로 보존되며 텍스트 편집 대상에서 제외됩니다.",
+          "페이지 제어 1건은 원본 레이아웃 설정을 유지하며 편집기에서 직접 수정하지 않습니다."
+        ]
+      }
+    },
+    {
+      "filePath": "/Users/boram/Hwp/hwpx-reader-src/test2.hwpx",
+      "fileName": "test2.hwpx",
+      "report": {
+        "sectionCount": 1,
+        "totalCount": 2,
+        "counts": {
+          "image": 0,
+          "drawing": 0,
+          "bookmark": 0,
+          "field": 0,
+          "footnote": 0,
+          "endnote": 0,
+          "pageControl": 2
+        },
+        "occurrences": [
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageHiding",
+            "count": 1
+          },
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageNum",
+            "count": 1
+          }
+        ],
+        "warnings": [
+          "페이지 제어 2건은 원본 레이아웃 설정을 유지하며 편집기에서 직접 수정하지 않습니다."
+        ]
+      }
+    },
+    {
+      "filePath": "/Users/boram/Hwp/hwpx-report-automation/examples/edited-by-system.hwpx",
+      "fileName": "edited-by-system.hwpx",
+      "report": {
+        "sectionCount": 1,
+        "totalCount": 2,
+        "counts": {
+          "image": 0,
+          "drawing": 0,
+          "bookmark": 0,
+          "field": 0,
+          "footnote": 0,
+          "endnote": 0,
+          "pageControl": 2
+        },
+        "occurrences": [
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageHiding",
+            "count": 1
+          },
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageNum",
+            "count": 1
+          }
+        ],
+        "warnings": [
+          "페이지 제어 2건은 원본 레이아웃 설정을 유지하며 편집기에서 직접 수정하지 않습니다."
+        ]
+      }
+    },
+    {
+      "filePath": "/Users/boram/Hwp/hwpx-report-automation/examples/edited-visible.hwpx",
+      "fileName": "edited-visible.hwpx",
+      "report": {
+        "sectionCount": 1,
+        "totalCount": 2,
+        "counts": {
+          "image": 0,
+          "drawing": 0,
+          "bookmark": 0,
+          "field": 0,
+          "footnote": 0,
+          "endnote": 0,
+          "pageControl": 2
+        },
+        "occurrences": [
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageHiding",
+            "count": 1
+          },
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageNum",
+            "count": 1
+          }
+        ],
+        "warnings": [
+          "페이지 제어 2건은 원본 레이아웃 설정을 유지하며 편집기에서 직접 수정하지 않습니다."
+        ]
+      }
+    },
+    {
+      "filePath": "/Users/boram/Hwp/hwpx-report-automation/examples/input-sample.hwpx",
+      "fileName": "input-sample.hwpx",
+      "report": {
+        "sectionCount": 1,
+        "totalCount": 2,
+        "counts": {
+          "image": 0,
+          "drawing": 0,
+          "bookmark": 0,
+          "field": 0,
+          "footnote": 0,
+          "endnote": 0,
+          "pageControl": 2
+        },
+        "occurrences": [
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageHiding",
+            "count": 1
+          },
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageNum",
+            "count": 1
+          }
+        ],
+        "warnings": [
+          "페이지 제어 2건은 원본 레이아웃 설정을 유지하며 편집기에서 직접 수정하지 않습니다."
+        ]
+      }
+    },
+    {
+      "filePath": "/Users/boram/Hwp/hwpx-report-automation/examples/today-project-report-fixed.hwpx",
+      "fileName": "today-project-report-fixed.hwpx",
+      "report": {
+        "sectionCount": 1,
+        "totalCount": 2,
+        "counts": {
+          "image": 0,
+          "drawing": 0,
+          "bookmark": 0,
+          "field": 0,
+          "footnote": 0,
+          "endnote": 0,
+          "pageControl": 2
+        },
+        "occurrences": [
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageHiding",
+            "count": 1
+          },
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageNum",
+            "count": 1
+          }
+        ],
+        "warnings": [
+          "페이지 제어 2건은 원본 레이아웃 설정을 유지하며 편집기에서 직접 수정하지 않습니다."
+        ]
+      }
+    },
+    {
+      "filePath": "/Users/boram/Hwp/hwpx-report-automation/examples/today-project-report-linkedin.hwpx",
+      "fileName": "today-project-report-linkedin.hwpx",
+      "report": {
+        "sectionCount": 1,
+        "totalCount": 2,
+        "counts": {
+          "image": 0,
+          "drawing": 0,
+          "bookmark": 0,
+          "field": 0,
+          "footnote": 0,
+          "endnote": 0,
+          "pageControl": 2
+        },
+        "occurrences": [
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageHiding",
+            "count": 1
+          },
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageNum",
+            "count": 1
+          }
+        ],
+        "warnings": [
+          "페이지 제어 2건은 원본 레이아웃 설정을 유지하며 편집기에서 직접 수정하지 않습니다."
+        ]
+      }
+    },
+    {
+      "filePath": "/Users/boram/Hwp/hwpx-report-automation/examples/today-project-report.backup-before-linkedin.hwpx",
+      "fileName": "today-project-report.backup-before-linkedin.hwpx",
+      "report": {
+        "sectionCount": 1,
+        "totalCount": 2,
+        "counts": {
+          "image": 0,
+          "drawing": 0,
+          "bookmark": 0,
+          "field": 0,
+          "footnote": 0,
+          "endnote": 0,
+          "pageControl": 2
+        },
+        "occurrences": [
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageHiding",
+            "count": 1
+          },
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageNum",
+            "count": 1
+          }
+        ],
+        "warnings": [
+          "페이지 제어 2건은 원본 레이아웃 설정을 유지하며 편집기에서 직접 수정하지 않습니다."
+        ]
+      }
+    },
+    {
+      "filePath": "/Users/boram/Hwp/hwpx-report-automation/examples/today-project-report.before-layout-fix.hwpx",
+      "fileName": "today-project-report.before-layout-fix.hwpx",
+      "report": {
+        "sectionCount": 1,
+        "totalCount": 2,
+        "counts": {
+          "image": 0,
+          "drawing": 0,
+          "bookmark": 0,
+          "field": 0,
+          "footnote": 0,
+          "endnote": 0,
+          "pageControl": 2
+        },
+        "occurrences": [
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageHiding",
+            "count": 1
+          },
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageNum",
+            "count": 1
+          }
+        ],
+        "warnings": [
+          "페이지 제어 2건은 원본 레이아웃 설정을 유지하며 편집기에서 직접 수정하지 않습니다."
+        ]
+      }
+    },
+    {
+      "filePath": "/Users/boram/Hwp/hwpx-report-automation/examples/today-project-report.hwpx",
+      "fileName": "today-project-report.hwpx",
+      "report": {
+        "sectionCount": 1,
+        "totalCount": 2,
+        "counts": {
+          "image": 0,
+          "drawing": 0,
+          "bookmark": 0,
+          "field": 0,
+          "footnote": 0,
+          "endnote": 0,
+          "pageControl": 2
+        },
+        "occurrences": [
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageHiding",
+            "count": 1
+          },
+          {
+            "type": "pageControl",
+            "fileName": "Contents/section0.xml",
+            "localName": "pageNum",
+            "count": 1
+          }
+        ],
+        "warnings": [
+          "페이지 제어 2건은 원본 레이아웃 설정을 유지하며 편집기에서 직접 수정하지 않습니다."
+        ]
+      }
+    }
+  ]
+}

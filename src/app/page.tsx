@@ -36,6 +36,7 @@ import { buildTemplateCatalogFromDoc } from "@/lib/template-catalog";
 import type { SessionIdentityProvider, SessionTenantMembership } from "@/lib/auth/session";
 import { evaluateQualityGate, type QualityGateResult } from "@/lib/quality-gates";
 import { recordPilotMetricEvent } from "@/lib/pilot-metrics";
+import { hasComplexObjectSignal } from "@/lib/editor/hwpx-complex-objects";
 import {
   listRecentFileSnapshots,
   loadRecentFileSnapshot,
@@ -464,6 +465,7 @@ export default function Home() {
     extraSegmentsMap,
     hwpxDocumentModel,
     integrityIssues,
+    complexObjectReport,
     exportWarnings,
     outline,
     editsPreview,
@@ -895,6 +897,7 @@ export default function Home() {
           segments: parsed.segments,
           extraSegmentsMap: parsed.extraSegmentsMap,
           integrityIssues: parsed.integrityIssues,
+          complexObjectReport: parsed.complexObjectReport,
           hwpxDocumentModel,
         });
         setOutline(buildOutlineFromDoc(parsed.doc));
@@ -1116,8 +1119,11 @@ export default function Home() {
       }
 
       const result = await applyProseMirrorDocToHwpx(sourceBuffer, editorDoc, sourceSegments, extraSegmentsMap, hwpxDocumentModel);
+      const combinedWarnings = Array.from(
+        new Set([...(complexObjectReport?.warnings ?? []), ...result.warnings]),
+      );
       setEditsPreview(result.edits);
-      setExportWarnings([...result.warnings, ...templateValidationWarnings]);
+      setExportWarnings(Array.from(new Set([...combinedWarnings, ...templateValidationWarnings])));
       if (result.integrityIssues.length) {
         throw new Error(`무결성 경고 ${result.integrityIssues.join(" | ")}`);
       }
@@ -1191,6 +1197,7 @@ export default function Home() {
       sourceSegments,
       extraSegmentsMap,
       hwpxDocumentModel,
+      complexObjectReport,
       fileName,
       setEditsPreview,
       setExportWarnings,
@@ -2293,6 +2300,14 @@ export default function Home() {
           ))}
         </div>
       ) : null}
+      {hasComplexObjectSignal(complexObjectReport) ? (
+        <div className={styles.warningSoft}>
+          <strong>복합 객체 주의</strong>
+          {complexObjectReport?.warnings.map((warning) => (
+            <p key={warning}>{warning}</p>
+          ))}
+        </div>
+      ) : null}
       {exportWarnings.length ? (
         <div className={styles.warningSoft}>
           <strong>내보내기 주의</strong>
@@ -2429,13 +2444,15 @@ export default function Home() {
               onClearChat={clearChat}
             />
           }
-          analysis={
-            <DocumentAnalysisPanel
-              analysis={documentAnalysis}
-              templateCatalog={templateCatalog}
-              isLoading={analysisLoading}
-              terminologyDict={terminologyDict}
-              onUpdateEntry={updateTerminologyEntry}
+            analysis={
+              <DocumentAnalysisPanel
+                analysis={documentAnalysis}
+                templateCatalog={templateCatalog}
+                complexObjectReport={complexObjectReport}
+                templateCatalog={templateCatalog}
+                isLoading={analysisLoading}
+                terminologyDict={terminologyDict}
+                onUpdateEntry={updateTerminologyEntry}
               onRemoveEntry={removeTerminologyEntry}
               onApplyTerminology={onApplyTerminology}
               isBusy={isBusy}

@@ -7,6 +7,7 @@ import type { PresetKey } from "@/lib/editor/ai-presets";
 import type { TemplateCatalog } from "@/lib/template-catalog";
 import type { HwpxDocumentModel } from "@/types/hwpx-model";
 import type { QualityGateResult } from "@/lib/quality-gates";
+import type { ComplexObjectReport } from "@/lib/editor/hwpx-complex-objects";
 
 import type { ChatMessageUI, PendingToolCall } from "@/types/chat";
 
@@ -80,6 +81,7 @@ type DocumentState = {
   sourceSegments: EditorSegment[];
   extraSegmentsMap: Record<string, string[]>;
   integrityIssues: string[];
+  complexObjectReport: ComplexObjectReport | null;
   exportWarnings: string[];
   outline: OutlineItem[];
   editsPreview: TextEdit[];
@@ -136,6 +138,7 @@ type DocumentState = {
     segments: EditorSegment[];
     extraSegmentsMap: Record<string, string[]>;
     integrityIssues: string[];
+    complexObjectReport: ComplexObjectReport | null;
     hwpxDocumentModel: HwpxDocumentModel | null;
   }) => void;
   setHwpxDocumentModel: (model: HwpxDocumentModel | null) => void;
@@ -210,6 +213,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   sourceSegments: [],
   extraSegmentsMap: {},
   integrityIssues: [],
+  complexObjectReport: null,
   exportWarnings: [],
   outline: [],
   editsPreview: [],
@@ -259,6 +263,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       sourceSegments: [],
       extraSegmentsMap: {},
       integrityIssues: [],
+      complexObjectReport: null,
       exportWarnings: [],
       outline: [],
       editsPreview: [],
@@ -288,7 +293,16 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       history: [],
     }),
 
-  setLoadedDocument: ({ fileName, buffer, doc, segments, extraSegmentsMap, integrityIssues, hwpxDocumentModel }) =>
+  setLoadedDocument: ({
+    fileName,
+    buffer,
+    doc,
+    segments,
+    extraSegmentsMap,
+    integrityIssues,
+    complexObjectReport,
+    hwpxDocumentModel,
+  }) =>
     set({
       fileName,
       sourceBuffer: buffer,
@@ -296,6 +310,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       sourceSegments: segments,
       extraSegmentsMap,
       integrityIssues,
+      complexObjectReport,
       hwpxDocumentModel,
       exportWarnings: [],
       editsPreview: [],

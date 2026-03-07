@@ -3,9 +3,15 @@
 import { useState } from "react";
 import type { TemplateCatalog } from "@/lib/template-catalog";
 import type { DocumentAnalysis } from "@/store/document-store";
+import {
+  COMPLEX_OBJECT_TYPE_LABELS,
+  hasComplexObjectSignal,
+  type ComplexObjectReport,
+} from "@/lib/editor/hwpx-complex-objects";
 
 type DocumentAnalysisPanelProps = {
   analysis: DocumentAnalysis | null;
+  complexObjectReport: ComplexObjectReport | null;
   templateCatalog: TemplateCatalog | null;
   isLoading: boolean;
   terminologyDict: Record<string, string>;
@@ -46,6 +52,7 @@ function ScoreBar({ score }: { score: number }) {
 
 export function DocumentAnalysisPanel({
   analysis,
+  complexObjectReport,
   templateCatalog,
   isLoading,
   terminologyDict,
@@ -57,25 +64,103 @@ export function DocumentAnalysisPanel({
   const [expandTerms, setExpandTerms] = useState(true);
   const [expandTemplateFields, setExpandTemplateFields] = useState(true);
 
+  const hasComplexObjects = hasComplexObjectSignal(complexObjectReport);
   const hasTemplateCatalog = !!templateCatalog && (
     templateCatalog.fieldCount > 0 || templateCatalog.issues.length > 0
   );
 
-  if (isLoading && !analysis && !hasTemplateCatalog) {
+  if (isLoading && !analysis && !hasTemplateCatalog && !hasComplexObjects) {
     return <p className="sidebar-empty">문서 분석 중...</p>;
   }
 
-  if (!analysis && !hasTemplateCatalog) {
+  if (!analysis && !hasTemplateCatalog && !hasComplexObjects) {
     return <p className="sidebar-empty">문서를 열면 자동으로 분석됩니다.</p>;
   }
 
   const dictEntries = Object.entries(terminologyDict);
+  const activeComplexCounts = complexObjectReport
+    ? Object.entries(complexObjectReport.counts).filter(([, count]) => count > 0)
+    : [];
 
   return (
     <div className="ai-panel">
-      {analysis && (
+      {hasComplexObjects && complexObjectReport ? (
+        <div>
+          <label className="sidebar-label">복합 객체</label>
+          <div
+            className="sidebar-box"
+            style={{ display: "grid", gap: 8, background: "#f8fafc" }}
+          >
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+              {complexObjectReport.sectionCount > 1 ? (
+                <span
+                  style={{
+                    fontSize: 11,
+                    padding: "2px 8px",
+                    borderRadius: 999,
+                    background: "#e0f2fe",
+                    color: "#0c4a6e",
+                    fontWeight: 600,
+                  }}
+                >
+                  섹션 {complexObjectReport.sectionCount}
+                </span>
+              ) : null}
+              {activeComplexCounts.map(([type, count]) => (
+                <span
+                  key={type}
+                  style={{
+                    fontSize: 11,
+                    padding: "2px 8px",
+                    borderRadius: 999,
+                    background: "#fff7ed",
+                    color: "#9a3412",
+                    fontWeight: 600,
+                  }}
+                >
+                  {COMPLEX_OBJECT_TYPE_LABELS[type as keyof typeof COMPLEX_OBJECT_TYPE_LABELS]} {count}
+                </span>
+              ))}
+            </div>
+            {complexObjectReport.warnings.length ? (
+              <ul style={{ listStyle: "none", display: "grid", gap: 4 }}>
+                {complexObjectReport.warnings.map((warning) => (
+                  <li
+                    key={warning}
+                    style={{
+                      fontSize: 12,
+                      padding: "4px 8px",
+                      background: "#fff7ed",
+                      border: "1px solid #fed7aa",
+                      borderRadius: 2,
+                      color: "#9a3412",
+                    }}
+                  >
+                    {warning}
+                  </li>
+                ))}
+              </ul>
+            ) : null}
+            {complexObjectReport.occurrences.length ? (
+              <div style={{ display: "grid", gap: 2 }}>
+                {complexObjectReport.occurrences.slice(0, 6).map((occurrence) => (
+                  <div
+                    key={`${occurrence.fileName}-${occurrence.type}-${occurrence.localName}`}
+                    style={{ fontSize: 11, color: "#64748b" }}
+                  >
+                    {occurrence.fileName} · {occurrence.localName} × {occurrence.count}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+      ) : null}
+
+      {isLoading ? <p style={{ fontSize: 12, color: "#64748b" }}>문서 분석 중...</p> : null}
+
+      {analysis ? (
         <>
-          {/* Document type */}
           <div>
             <label className="sidebar-label">문서 유형</label>
             <div className="sidebar-box" style={{ fontWeight: 600 }}>
@@ -83,109 +168,105 @@ export function DocumentAnalysisPanel({
             </div>
           </div>
 
-          {/* Readability score */}
           <div>
             <label className="sidebar-label">가독성 점수</label>
             <ScoreBar score={analysis.readabilityScore} />
           </div>
-        </>
-      )}
 
-      {/* Global issues */}
-      {analysis && analysis.globalIssues.length > 0 && (
-        <div>
-          <label className="sidebar-label">발견된 이슈</label>
-          <ul style={{ listStyle: "none", display: "grid", gap: 4 }}>
-            {analysis.globalIssues.map((issue, i) => (
-              <li
-                key={`issue-${i}`}
+          {analysis.globalIssues.length > 0 && (
+            <div>
+              <label className="sidebar-label">발견된 이슈</label>
+              <ul style={{ listStyle: "none", display: "grid", gap: 4 }}>
+                {analysis.globalIssues.map((issue, i) => (
+                  <li
+                    key={`issue-${i}`}
+                    style={{
+                      fontSize: 12,
+                      padding: "4px 8px",
+                      background: "#fffbeb",
+                      border: "1px solid #f5d899",
+                      borderRadius: 2,
+                      color: "#7c4a03",
+                    }}
+                  >
+                    {issue}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+
+          {analysis.inconsistentTerms.length > 0 && (
+            <div>
+              <button
+                type="button"
+                className="sidebar-label"
+                onClick={() => setExpandTerms(!expandTerms)}
                 style={{
-                  fontSize: 12,
-                  padding: "4px 8px",
-                  background: "#fffbeb",
-                  border: "1px solid #f5d899",
-                  borderRadius: 2,
-                  color: "#7c4a03",
+                  background: "none",
+                  border: "none",
+                  cursor: "pointer",
+                  padding: 0,
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 4,
                 }}
               >
-                {issue}
-              </li>
-            ))}
-          </ul>
-        </div>
-      )}
-
-      {/* Inconsistent terms */}
-      {analysis && analysis.inconsistentTerms.length > 0 && (
-        <div>
-          <button
-            type="button"
-            className="sidebar-label"
-            onClick={() => setExpandTerms(!expandTerms)}
-            style={{
-              background: "none",
-              border: "none",
-              cursor: "pointer",
-              padding: 0,
-              display: "flex",
-              alignItems: "center",
-              gap: 4,
-            }}
-          >
-            {expandTerms ? "▾" : "▸"} 용어 불일치 ({analysis.inconsistentTerms.length}건)
-          </button>
-          {expandTerms && (
-            <ul style={{ listStyle: "none", display: "grid", gap: 6, marginTop: 4 }}>
-              {analysis.inconsistentTerms.map((term, i) => (
-                <li
-                  key={`term-${i}`}
-                  style={{
-                    fontSize: 12,
-                    padding: "6px 8px",
-                    background: "#f8fbff",
-                    border: "1px solid #dbe6f1",
-                    borderRadius: 2,
-                  }}
-                >
-                  <div style={{ color: "#64748b", marginBottom: 2 }}>
-                    {term.variants.join(", ")}
-                  </div>
-                  <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
-                    <span style={{ fontSize: 11, color: "#888" }}>→</span>
-                    <strong>{term.suggestedTerm}</strong>
-                    {!terminologyDict[term.variants[0]] && (
-                      <button
-                        type="button"
-                        style={{
-                          marginLeft: "auto",
-                          fontSize: 11,
-                          padding: "1px 6px",
-                          border: "1px solid #b4b4b4",
-                          borderRadius: 2,
-                          background: "#f0f0f0",
-                          cursor: "pointer",
-                        }}
-                        onClick={() => {
-                          for (const v of term.variants) {
-                            if (v !== term.suggestedTerm) {
-                              onUpdateEntry(v, term.suggestedTerm);
-                            }
-                          }
-                        }}
-                      >
-                        사전 추가
-                      </button>
-                    )}
-                  </div>
-                </li>
-              ))}
-            </ul>
+                {expandTerms ? "▾" : "▸"} 용어 불일치 ({analysis.inconsistentTerms.length}건)
+              </button>
+              {expandTerms && (
+                <ul style={{ listStyle: "none", display: "grid", gap: 6, marginTop: 4 }}>
+                  {analysis.inconsistentTerms.map((term, i) => (
+                    <li
+                      key={`term-${i}`}
+                      style={{
+                        fontSize: 12,
+                        padding: "6px 8px",
+                        background: "#f8fbff",
+                        border: "1px solid #dbe6f1",
+                        borderRadius: 2,
+                      }}
+                    >
+                      <div style={{ color: "#64748b", marginBottom: 2 }}>
+                        {term.variants.join(", ")}
+                      </div>
+                      <div style={{ display: "flex", alignItems: "center", gap: 4 }}>
+                        <span style={{ fontSize: 11, color: "#888" }}>→</span>
+                        <strong>{term.suggestedTerm}</strong>
+                        {!terminologyDict[term.variants[0]] && (
+                          <button
+                            type="button"
+                            style={{
+                              marginLeft: "auto",
+                              fontSize: 11,
+                              padding: "1px 6px",
+                              border: "1px solid #b4b4b4",
+                              borderRadius: 2,
+                              background: "#f0f0f0",
+                              cursor: "pointer",
+                            }}
+                            onClick={() => {
+                              for (const v of term.variants) {
+                                if (v !== term.suggestedTerm) {
+                                  onUpdateEntry(v, term.suggestedTerm);
+                                }
+                              }
+                            }}
+                          >
+                            사전 추가
+                          </button>
+                        )}
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
           )}
-        </div>
-      )}
+        </>
+      ) : null}
 
-      {/* Template catalog */}
-      {templateCatalog && (
+      {templateCatalog ? (
         <div>
           <label className="sidebar-label">템플릿 카탈로그</label>
           <div
@@ -306,9 +387,8 @@ export function DocumentAnalysisPanel({
             </div>
           )}
         </div>
-      )}
+      ) : null}
 
-      {/* Terminology dictionary */}
       {dictEntries.length > 0 && (
         <div>
           <label className="sidebar-label">용어 사전 ({dictEntries.length}건)</label>
