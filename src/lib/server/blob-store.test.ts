@@ -25,9 +25,10 @@ async function createTempRoot(): Promise<string> {
 }
 
 describe("blob store", () => {
-  it("saves a blob to the filesystem and reads it back", async () => {
+  it("saves a tenant-scoped blob to the filesystem and reads it back", async () => {
     const root = await createTempRoot();
     const descriptor = await saveBlobObject({
+      tenantId: "alpha",
       fileName: "report.hwpx",
       contentType: "application/zip",
       buffer: new TextEncoder().encode("hello blob"),
@@ -39,9 +40,11 @@ describe("blob store", () => {
     });
 
     expect(descriptor.fileName).toBe("report.hwpx");
+    expect(descriptor.tenantId).toBe("alpha");
     expect(descriptor.byteLength).toBe(10);
 
     const loaded = await readBlobObject(descriptor.blobId, {
+      tenantId: "alpha",
       env: {
         BLOB_STORAGE_FS_ROOT: root,
         NODE_ENV: "test",
@@ -52,10 +55,11 @@ describe("blob store", () => {
     expect(loaded.buffer.toString("utf8")).toBe("hello blob");
   });
 
-  it("creates and verifies signed download URLs", () => {
+  it("creates and verifies tenant-scoped signed download URLs", () => {
     const signed = createSignedBlobDownload({
       descriptor: {
         blobId: "blob-123",
+        tenantId: "alpha",
         provider: "fs",
         fileName: "팀 보고서.hwpx",
         contentType: "application/zip",
@@ -73,6 +77,7 @@ describe("blob store", () => {
     expect(signed.url).toContain("/api/blob/download/blob-123?");
     const verification = verifyBlobDownloadSignature({
       blobId: "blob-123",
+      tenantId: "alpha",
       expires: signed.expires,
       signature: signed.signature,
       env: {
@@ -84,10 +89,11 @@ describe("blob store", () => {
     expect(verification).toEqual({ ok: true });
   });
 
-  it("rejects expired or mismatched signatures", () => {
+  it("rejects expired or mismatched tenant signatures", () => {
     expect(
       verifyBlobDownloadSignature({
         blobId: "blob-123",
+        tenantId: "alpha",
         expires: String(Date.parse("2026-03-07T00:00:30.000Z")),
         signature: "bad-signature",
         env: {
@@ -101,6 +107,7 @@ describe("blob store", () => {
     const signed = createSignedBlobDownload({
       descriptor: {
         blobId: "blob-123",
+        tenantId: "alpha",
         provider: "fs",
         fileName: "report.hwpx",
         contentType: "application/zip",
@@ -118,6 +125,21 @@ describe("blob store", () => {
     expect(
       verifyBlobDownloadSignature({
         blobId: "blob-123",
+        tenantId: "beta",
+        expires: signed.expires,
+        signature: signed.signature,
+        env: {
+          BLOB_SIGNING_SECRET: "test-secret",
+          NODE_ENV: "test",
+        },
+        now: Date.parse("2026-03-07T00:00:01.000Z"),
+      }),
+    ).toEqual({ ok: false, reason: "invalid" });
+
+    expect(
+      verifyBlobDownloadSignature({
+        blobId: "blob-123",
+        tenantId: "alpha",
         expires: signed.expires,
         signature: signed.signature,
         env: {

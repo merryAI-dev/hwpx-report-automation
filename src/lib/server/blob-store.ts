@@ -4,11 +4,13 @@ import path from "node:path";
 
 const DEFAULT_STORAGE_DIR = ".blob-storage";
 const DEFAULT_SIGNED_URL_TTL_SECONDS = 15 * 60;
+const TENANTS_DIR = "tenants";
 const OBJECTS_DIR = "objects";
 const METADATA_DIR = "metadata";
 
 export type StoredBlobDescriptor = {
   blobId: string;
+  tenantId: string;
   provider: "fs";
   fileName: string;
   contentType: string;
@@ -39,6 +41,14 @@ function sanitizeFileName(fileName: string): string {
   return sanitized || "document.hwpx";
 }
 
+function sanitizeTenantId(tenantId: string): string {
+  const normalized = tenantId.trim().replace(/[^a-zA-Z0-9._-]+/g, "-");
+  if (!normalized) {
+    throw new Error("tenantId is required");
+  }
+  return normalized;
+}
+
 function ensureBuffer(input: ArrayBuffer | Uint8Array): Buffer {
   if (input instanceof Uint8Array) {
     return Buffer.from(input.buffer, input.byteOffset, input.byteLength);
@@ -46,16 +56,20 @@ function ensureBuffer(input: ArrayBuffer | Uint8Array): Buffer {
   return Buffer.from(input);
 }
 
-function buildSignaturePayload(blobId: string, expires: string): string {
-  return `${blobId}:${expires}`;
+function buildSignaturePayload(blobId: string, tenantId: string, expires: string): string {
+  return `${blobId}:${tenantId}:${expires}`;
 }
 
-function objectPath(rootDir: string, blobId: string): string {
-  return path.join(rootDir, OBJECTS_DIR, blobId);
+function tenantRootPath(rootDir: string, tenantId: string): string {
+  return path.join(rootDir, TENANTS_DIR, sanitizeTenantId(tenantId));
 }
 
-function metadataPath(rootDir: string, blobId: string): string {
-  return path.join(rootDir, METADATA_DIR, `${blobId}.json`);
+function objectPath(rootDir: string, tenantId: string, blobId: string): string {
+  return path.join(tenantRootPath(rootDir, tenantId), OBJECTS_DIR, blobId);
+}
+
+function metadataPath(rootDir: string, tenantId: string, blobId: string): string {
+  return path.join(tenantRootPath(rootDir, tenantId), METADATA_DIR, `${blobId}.json`);
 }
 
 export function resolveBlobStorageRoot(env: BlobStoreEnv = process.env): string {
@@ -86,6 +100,7 @@ export function resolveSignedUrlTtlSeconds(env: BlobStoreEnv = process.env): num
 }
 
 export async function saveBlobObject(params: {
+  tenantId: string;
   fileName: string;
   contentType?: string;
   buffer: ArrayBuffer | Uint8Array;
@@ -94,6 +109,7 @@ export async function saveBlobObject(params: {
 }): Promise<StoredBlobDescriptor> {
   const env = params.env ?? process.env;
   const rootDir = resolveBlobStorageRoot(env);
+  const tenantId = sanitizeTenantId(params.tenantId);
   const blobId = crypto.randomUUID();
   const now = params.now ?? new Date();
   const fileName = sanitizeFileName(params.fileName);
@@ -101,6 +117,7 @@ export async function saveBlobObject(params: {
   const data = ensureBuffer(params.buffer);
   const descriptor: StoredBlobDescriptor = {
     blobId,
+    tenantId,
     provider: "fs",
     fileName,
     contentType,
@@ -108,39 +125,42 @@ export async function saveBlobObject(params: {
     createdAt: now.toISOString(),
   };
 
-  await fs.mkdir(path.join(rootDir, OBJECTS_DIR), { recursive: true });
-  await fs.mkdir(path.join(rootDir, METADATA_DIR), { recursive: true });
-  await fs.writeFile(objectPath(rootDir, blobId), data);
-  await fs.writeFile(metadataPath(rootDir, blobId), JSON.stringify(descriptor, null, 2), "utf8");
+  await fs.mkdir(path.join(tenantRootPath(rootDir, tenantId), OBJECTS_DIR), { recursive: true });
+  await fs.mkdir(path.join(tenantRootPath(rootDir, tenantId), METADATA_DIR), { recursive: true });
+  await fs.writeFile(objectPath(rootDir, tenantId, blobId), data);
+  await fs.writeFile(metadataPath(rootDir, tenantId, blobId), JSON.stringify(descriptor, null, 2), "utf8");
 
   return descriptor;
 }
 
 export async function readBlobObject(
   blobId: string,
-  options: { env?: BlobStoreEnv } = {},
+  options: { env?: BlobStoreEnv; tenantId: string },
 ): Promise<BlobDownloadPayload> {
   const rootDir = resolveBlobStorageRoot(options.env ?? process.env);
-  const metadataRaw = await fs.readFile(metadataPath(rootDir, blobId), "utf8");
+  const tenantId = sanitizeTenantId(options.tenantId);
+  const metadataRaw = await fs.readFile(metadataPath(rootDir, tenantId, blobId), "utf8");
   const metadata = JSON.parse(metadataRaw) as StoredBlobDescriptor;
-  const buffer = await fs.readFile(objectPath(rootDir, blobId));
+  const buffer = await fs.readFile(objectPath(rootDir, tenantId, blobId));
   return { metadata, buffer };
 }
 
 export function signBlobDownload(params: {
   blobId: string;
+  tenantId: string;
   expires: string;
   env?: BlobStoreEnv;
 }): string {
   const secret = resolveBlobSigningSecret(params.env ?? process.env);
   return crypto
     .createHmac("sha256", secret)
-    .update(buildSignaturePayload(params.blobId, params.expires))
+    .update(buildSignaturePayload(params.blobId, sanitizeTenantId(params.tenantId), params.expires))
     .digest("hex");
 }
 
 export function verifyBlobDownloadSignature(params: {
   blobId: string;
+  tenantId: string;
   expires: string;
   signature: string;
   env?: BlobStoreEnv;
@@ -155,6 +175,7 @@ export function verifyBlobDownloadSignature(params: {
   }
   const expected = signBlobDownload({
     blobId: params.blobId,
+    tenantId: params.tenantId,
     expires: params.expires,
     env: params.env,
   });
@@ -187,6 +208,7 @@ export function createSignedBlobDownload(params: {
   const expires = String(expiresAt);
   const signature = signBlobDownload({
     blobId: params.descriptor.blobId,
+    tenantId: params.descriptor.tenantId,
     expires,
     env,
   });

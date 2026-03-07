@@ -9,7 +9,6 @@ type RequestBody = {
 };
 
 async function handlePost(request: Request) {
-async function handlePost(request: Request) {
   try {
     const body = (await request.json()) as RequestBody;
     const results = await generateBatchSuggestions({

@@ -1,5 +1,5 @@
 import { NextResponse } from "next/server";
-import { readSessionFromRequest } from "@/lib/auth/session";
+import { getActiveTenantMembership, readSessionFromRequest } from "@/lib/auth/session";
 
 export async function GET(request: Request) {
   const session = await readSessionFromRequest(request);
@@ -9,7 +9,14 @@ export async function GET(request: Request) {
 
   return NextResponse.json({
     authenticated: true,
-    user: { email: session.email },
+    user: {
+      sub: session.sub,
+      email: session.email,
+      displayName: session.displayName,
+    },
+    provider: session.provider,
+    memberships: session.memberships,
+    activeTenant: getActiveTenantMembership(session),
     expiresAt: session.exp,
   });
 }
