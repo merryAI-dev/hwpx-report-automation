@@ -32,6 +32,7 @@ import type { DiffHighlightSuggestion } from "@/lib/editor/diff-highlight-extens
 import { INSTRUCTION_PRESETS } from "@/lib/editor/ai-presets";
 import type { PresetKey } from "@/lib/editor/ai-presets";
 import { uploadBlobForSignedDownload } from "@/lib/blob-storage-client";
+import type { SessionIdentityProvider, SessionTenantMembership } from "@/lib/auth/session";
 import {
   listRecentFileSnapshots,
   loadRecentFileSnapshot,
@@ -336,12 +337,27 @@ type JavaRenderPayload = {
   elementMap?: Record<string, RenderElementInfo>;
 };
 
+type AuthSessionResponse = {
+  authenticated: true;
+  user: {
+    sub: string;
+    email: string;
+    displayName: string;
+  };
+  provider: SessionIdentityProvider;
+  memberships: SessionTenantMembership[];
+  activeTenant: SessionTenantMembership | null;
+  expiresAt: number;
+};
+
 export default function Home() {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [viewMode, setViewMode] = useState<"editor" | "preview">("editor");
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [recentSnapshots, setRecentSnapshots] = useState<RecentFileSnapshotMeta[]>([]);
   const [selectedRecentSnapshotId, setSelectedRecentSnapshotId] = useState("");
+  const [authSession, setAuthSession] = useState<AuthSessionResponse | null>(null);
+  const [tenantSwitching, setTenantSwitching] = useState(false);
   const autoSaveInFlightRef = useRef(false);
   const docRevisionRef = useRef(0);
   const lastAutoSavedRevisionRef = useRef(-1);
@@ -480,6 +496,63 @@ export default function Home() {
   useEffect(() => {
     void refreshRecentSnapshots();
   }, [refreshRecentSnapshots]);
+
+  const refreshAuthSession = useCallback(async () => {
+    try {
+      const response = await fetch("/api/auth/session", {
+        method: "GET",
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        setAuthSession(null);
+        return;
+      }
+      const payload = (await response.json()) as AuthSessionResponse;
+      setAuthSession(payload);
+    } catch {
+      setAuthSession(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAuthSession();
+  }, [refreshAuthSession]);
+
+  const onSwitchTenant = useCallback(async (tenantId: string) => {
+    if (!authSession?.activeTenant || authSession.activeTenant.tenantId === tenantId) {
+      return;
+    }
+
+    setTenantSwitching(true);
+    try {
+      const response = await fetch("/api/auth/tenant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantId }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as Partial<AuthSessionResponse> & { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "테넌트 전환 실패");
+      }
+
+      setAuthSession(payload as AuthSessionResponse);
+      setDownload({
+        ...download,
+        remoteUrl: null,
+        remoteExpiresAt: null,
+        provider: null,
+        blobId: null,
+      });
+      setStatus(
+        `활성 테넌트를 ${(payload as AuthSessionResponse).activeTenant?.tenantName || tenantId}로 전환했습니다. 기존 서명 다운로드 URL은 초기화되었습니다.`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "테넌트 전환 실패";
+      setStatus(message);
+    } finally {
+      setTenantSwitching(false);
+    }
+  }, [authSession, download, setDownload, setStatus]);
 
   const localDownloadUrl = useMemo(() => {
     if (!download.blob) {
@@ -1769,7 +1842,6 @@ export default function Home() {
         hasDocument={!!editorDoc}
         downloadUrl={downloadUrl}
         downloadName={download.fileName}
-        onToggleSidebar={toggleSidebar}
         onSetSidebarTab={handleSetSidebarTab}
         onAiCommand={() => {
           setActiveSidebarTab("ai");
@@ -1812,6 +1884,19 @@ export default function Home() {
           }
         }}
         onSave={onSave}
+        sessionContext={
+          authSession
+            ? {
+                email: authSession.user.email,
+                displayName: authSession.user.displayName,
+                providerDisplayName: authSession.provider.displayName,
+                activeTenantId: authSession.activeTenant?.tenantId || "",
+                memberships: authSession.memberships,
+              }
+            : null
+        }
+        tenantSwitching={tenantSwitching}
+        onSwitchTenant={onSwitchTenant}
         onLogout={() => {
           void fetch("/api/auth/logout", { method: "POST" }).finally(() => {
             window.location.assign("/login");

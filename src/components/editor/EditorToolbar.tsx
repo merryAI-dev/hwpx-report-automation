@@ -35,7 +35,6 @@ type EditorToolbarProps = {
   hasDocument: boolean;
   downloadUrl: string;
   downloadName: string;
-  onToggleSidebar: () => void;
   onSetSidebarTab: (tab: SidebarTab) => void;
   onAiCommand: () => void;
   recentSnapshots: RecentFileSnapshotMeta[];
@@ -47,6 +46,19 @@ type EditorToolbarProps = {
   onExportPdf: () => void;
   onExportDocx: () => void;
   onSave: () => void;
+  sessionContext: {
+    email: string;
+    displayName: string;
+    providerDisplayName: string;
+    activeTenantId: string;
+    memberships: Array<{
+      tenantId: string;
+      tenantName: string;
+      role: string;
+    }>;
+  } | null;
+  tenantSwitching: boolean;
+  onSwitchTenant: (tenantId: string) => void;
   onLogout: () => void;
   formMode: boolean;
   onToggleFormMode: () => void;
@@ -105,7 +117,6 @@ export function EditorToolbar({
   hasDocument,
   downloadUrl,
   downloadName,
-  onToggleSidebar,
   onSetSidebarTab,
   onAiCommand,
   recentSnapshots,
@@ -117,6 +128,9 @@ export function EditorToolbar({
   onExportPdf,
   onExportDocx,
   onSave,
+  sessionContext,
+  tenantSwitching,
+  onSwitchTenant,
   onLogout,
   formMode,
   onToggleFormMode,
@@ -267,6 +281,27 @@ export function EditorToolbar({
           <div className={styles.sep} />
 
           <div className={styles.group}>
+            {sessionContext ? (
+              <>
+                <select
+                  className={styles.tenantSelect}
+                  value={sessionContext.activeTenantId}
+                  disabled={globalDisabled || tenantSwitching || sessionContext.memberships.length <= 1}
+                  title="활성 테넌트"
+                  onChange={(event) => onSwitchTenant(event.target.value)}
+                >
+                  {sessionContext.memberships.map((membership) => (
+                    <option key={membership.tenantId} value={membership.tenantId}>
+                      {`${membership.tenantName} · ${membership.role}`}
+                    </option>
+                  ))}
+                </select>
+                <span className={styles.sessionBadge}>{sessionContext.providerDisplayName}</span>
+                <span className={styles.sessionMeta} title={sessionContext.email}>
+                  {sessionContext.displayName}
+                </span>
+              </>
+            ) : null}
             <Btn
               label="저장"
               title="다른 이름으로 저장 (Ctrl/Cmd+S)"

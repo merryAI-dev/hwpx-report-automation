@@ -1,21 +1,27 @@
 import { NextResponse } from "next/server";
+import { withApiAuth } from "@/lib/auth/with-api-auth";
 import {
   readBlobObject,
   toContentDisposition,
   verifyBlobDownloadSignature,
 } from "@/lib/server/blob-store";
 
-export async function GET(
+export const GET = withApiAuth(async (
   request: Request,
-  context: { params: Promise<{ blobId: string }> },
-) {
-  const { blobId } = await context.params;
+  session,
+) => {
   const url = new URL(request.url);
+  const blobId = url.pathname.split("/").pop() || "";
   const expires = url.searchParams.get("expires") || "";
   const signature = url.searchParams.get("sig") || "";
 
+  if (!session.activeTenant) {
+    return NextResponse.json({ error: "Active tenant is required." }, { status: 403 });
+  }
+
   const verification = verifyBlobDownloadSignature({
     blobId,
+    tenantId: session.activeTenant.tenantId,
     expires,
     signature,
   });
@@ -32,7 +38,9 @@ export async function GET(
   }
 
   try {
-    const { metadata, buffer } = await readBlobObject(blobId);
+    const { metadata, buffer } = await readBlobObject(blobId, {
+      tenantId: session.activeTenant.tenantId,
+    });
     const requestedName = url.searchParams.get("name") || metadata.fileName;
     return new NextResponse(new Uint8Array(buffer), {
       headers: {
@@ -46,4 +54,4 @@ export async function GET(
     const message = error instanceof Error ? error.message : "blob not found";
     return NextResponse.json({ error: message }, { status: 404 });
   }
-}
+}, { requireTenant: true });

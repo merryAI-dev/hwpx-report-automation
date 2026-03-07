@@ -13,8 +13,24 @@ afterEach(() => {
 describe("auth routes", () => {
   it("creates a session cookie on successful login", async () => {
     process.env.AUTH_SECRET = "test-secret";
-    process.env.ADMIN_EMAIL = "admin@example.com";
-    process.env.ADMIN_PASSWORD = "letmein";
+    process.env.AUTH_USERS_JSON = JSON.stringify([
+      {
+        sub: "user-1",
+        email: "admin@example.com",
+        password: "letmein",
+        displayName: "Admin User",
+        provider: {
+          id: "corp-oidc",
+          type: "oidc",
+          displayName: "Corp OIDC",
+        },
+        memberships: [
+          { tenantId: "alpha", tenantName: "Alpha", role: "owner" },
+          { tenantId: "beta", tenantName: "Beta", role: "editor" },
+        ],
+        defaultTenantId: "beta",
+      },
+    ]);
 
     const request = new Request("http://localhost/api/auth/login", {
       method: "POST",
@@ -22,6 +38,7 @@ describe("auth routes", () => {
       body: JSON.stringify({
         email: "admin@example.com",
         password: "letmein",
+        tenantId: "alpha",
       }),
     });
 
@@ -31,15 +48,30 @@ describe("auth routes", () => {
     expect(response.status).toBe(200);
     expect(payload).toMatchObject({
       ok: true,
-      user: { email: "admin@example.com" },
+      user: {
+        email: "admin@example.com",
+        displayName: "Admin User",
+      },
+      provider: {
+        id: "corp-oidc",
+        type: "oidc",
+      },
+      activeTenant: {
+        tenantId: "alpha",
+      },
     });
     expect(response.headers.get("set-cookie")).toContain(SESSION_COOKIE_NAME);
   });
 
   it("rejects invalid credentials", async () => {
     process.env.AUTH_SECRET = "test-secret";
-    process.env.ADMIN_EMAIL = "admin@example.com";
-    process.env.ADMIN_PASSWORD = "letmein";
+    process.env.AUTH_USERS_JSON = JSON.stringify([
+      {
+        email: "admin@example.com",
+        password: "letmein",
+        memberships: [{ tenantId: "alpha", tenantName: "Alpha", role: "owner" }],
+      },
+    ]);
 
     const request = new Request("http://localhost/api/auth/login", {
       method: "POST",
@@ -56,7 +88,18 @@ describe("auth routes", () => {
 
   it("returns the current session when a valid cookie is present", async () => {
     process.env.AUTH_SECRET = "test-secret";
-    const token = await createSessionToken("admin@example.com");
+    const token = await createSessionToken({
+      sub: "user-1",
+      email: "admin@example.com",
+      displayName: "Admin User",
+      provider: {
+        id: "corp-oidc",
+        type: "oidc",
+        displayName: "Corp OIDC",
+      },
+      memberships: [{ tenantId: "alpha", tenantName: "Alpha", role: "owner" }],
+      activeTenantId: "alpha",
+    });
 
     const request = new Request("http://localhost/api/auth/session", {
       headers: {
@@ -70,6 +113,8 @@ describe("auth routes", () => {
     expect(response.status).toBe(200);
     expect(payload.authenticated).toBe(true);
     expect(payload.user.email).toBe("admin@example.com");
+    expect(payload.activeTenant.tenantId).toBe("alpha");
+    expect(payload.provider.type).toBe("oidc");
   });
 
   it("clears the session cookie on logout", async () => {
