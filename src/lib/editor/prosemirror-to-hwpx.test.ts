@@ -4,6 +4,7 @@ import type { JSONContent } from "@tiptap/core";
 import { applyProseMirrorDocToHwpx, collectDocumentEdits } from "./prosemirror-to-hwpx";
 import type { EditorSegment } from "./hwpx-to-prosemirror";
 import { parseHwpxToProseMirror } from "./hwpx-to-prosemirror";
+import { buildCompatibilityWarning } from "./hwpx-compatibility";
 
 function makeDoc(): JSONContent {
   return {
@@ -295,6 +296,79 @@ describe("collectDocumentEdits", () => {
     const result = collectDocumentEdits(doc, sourceSegments);
     expect(result.edits).toEqual([]);
     expect(result.warnings).toEqual([]);
+  });
+
+  it("maps metadata-less text to an explicit compatibility warning", () => {
+    const result = collectDocumentEdits(
+      {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            content: [{ type: "text", text: "새 문단" }],
+          },
+        ],
+      },
+      [],
+    );
+
+    expect(result.warnings).toEqual([
+      buildCompatibilityWarning("text.new-block-without-metadata"),
+    ]);
+  });
+
+  it("maps unknown segment ids to an explicit compatibility warning", () => {
+    const result = collectDocumentEdits(
+      {
+        type: "doc",
+        content: [
+          {
+            type: "paragraph",
+            attrs: {
+              segmentId: "unknown-seg",
+              fileName: "Contents/section0.xml",
+              textIndex: 99,
+              originalText: "",
+            },
+            content: [{ type: "text", text: "수정 내용" }],
+          },
+        ],
+      },
+      [],
+    );
+
+    expect(result.warnings).toEqual([
+      buildCompatibilityWarning("text.unknown-segment-id", "unknown-seg"),
+    ]);
+  });
+
+  it("maps new tables without a source table id to an explicit compatibility warning", () => {
+    const result = collectDocumentEdits(
+      {
+        type: "doc",
+        content: [
+          {
+            type: "table",
+            content: [
+              {
+                type: "tableRow",
+                content: [
+                  {
+                    type: "tableCell",
+                    content: [{ type: "paragraph", content: [] }],
+                  },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+      [],
+    );
+
+    expect(result.warnings).toEqual([
+      buildCompatibilityWarning("table.new-table-without-id"),
+    ]);
   });
 });
 
