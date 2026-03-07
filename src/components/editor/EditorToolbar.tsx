@@ -266,6 +266,15 @@ export function EditorToolbar({
             >
               DOCX
             </button>
+            <a
+              href="/pilot"
+              target="_blank"
+              rel="noreferrer"
+              className={`${styles.btn} ${styles.linkButton}`}
+              title="파일럿 대시보드"
+            >
+              파일럿
+            </a>
             {downloadUrl && (
               <a
                 href={downloadUrl}

@@ -78,4 +78,27 @@ describe("BatchJobManager", () => {
     expect(failed?.resultCount).toBe(1);
     expect(failed?.error).toBe("chunk failed");
   });
+
+  it("lists recent jobs in reverse updated order", async () => {
+    let tick = 0;
+    const manager = new BatchJobManager({
+      chunkSize: 1,
+      now: () => ++tick,
+      idFactory: (() => {
+        let id = 0;
+        return () => `job-${++id}`;
+      })(),
+      runChunk: async ({ items }) => ({
+        results: items.map((item) => ({ id: item.id, suggestion: item.text, qualityGate: passedGate })),
+      }),
+    });
+
+    const first = manager.createJob({ instruction: "one", items: [{ id: "a", text: "one" }] });
+    const second = manager.createJob({ instruction: "two", items: [{ id: "b", text: "two" }] });
+    await manager.waitForJob(first.id);
+    await manager.waitForJob(second.id);
+
+    const jobs = manager.listJobs();
+    expect(jobs.map((job) => job.id)).toEqual([second.id, first.id]);
+  });
 });

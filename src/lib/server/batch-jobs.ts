@@ -111,6 +111,13 @@ export class BatchJobManager {
     return job ? cloneJob(job) : null;
   }
 
+  listJobs(limit = 20): BatchJobRecord[] {
+    return [...this.jobs.values()]
+      .sort((a, b) => b.updatedAt - a.updatedAt)
+      .slice(0, limit)
+      .map((job) => cloneJob(job));
+  }
+
   async waitForJob(jobId: string): Promise<BatchJobRecord | null> {
     await this.runs.get(jobId);
     return this.getJob(jobId);
