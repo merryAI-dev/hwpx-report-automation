@@ -35,7 +35,6 @@ type EditorToolbarProps = {
   hasDocument: boolean;
   downloadUrl: string;
   downloadName: string;
-  onToggleSidebar: () => void;
   onSetSidebarTab: (tab: SidebarTab) => void;
   onAiCommand: () => void;
   recentSnapshots: RecentFileSnapshotMeta[];
@@ -104,7 +103,6 @@ export function EditorToolbar({
   hasDocument,
   downloadUrl,
   downloadName,
-  onToggleSidebar,
   onSetSidebarTab,
   onAiCommand,
   recentSnapshots,
@@ -250,6 +248,15 @@ export function EditorToolbar({
             >
               DOCX
             </button>
+            <a
+              href="/pilot"
+              target="_blank"
+              rel="noreferrer"
+              className={`${styles.btn} ${styles.linkButton}`}
+              title="파일럿 대시보드"
+            >
+              파일럿
+            </a>
             {downloadUrl && (
               <a
                 href={downloadUrl}

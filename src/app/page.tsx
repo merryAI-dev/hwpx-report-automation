@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Editor, JSONContent } from "@tiptap/core";
-import { Fragment, Schema, type Node as PMNode } from "@tiptap/pm/model";
+import { Fragment, type Node as PMNode } from "@tiptap/pm/model";
 import { useCallback } from "react";
 import { DocumentEditor } from "@/components/editor/DocumentEditor";
 import { EditorToolbar } from "@/components/editor/EditorToolbar";
@@ -32,6 +32,7 @@ import type { DiffHighlightSuggestion } from "@/lib/editor/diff-highlight-extens
 import { INSTRUCTION_PRESETS } from "@/lib/editor/ai-presets";
 import type { PresetKey } from "@/lib/editor/ai-presets";
 import { evaluateQualityGate, type QualityGateResult } from "@/lib/quality-gates";
+import { recordPilotMetricEvent } from "@/lib/pilot-metrics";
 import {
   listRecentFileSnapshots,
   loadRecentFileSnapshot,
@@ -206,16 +207,6 @@ function extractNodeText(node: JSONContent): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function textToInlineNodes(schema: Schema, text: string): PMNode[] {
-  const parts = text.split("\n");
-  const nodes: PMNode[] = [];
-  parts.forEach((part, i) => {
-    if (part) nodes.push(schema.text(part));
-    if (i < parts.length - 1) nodes.push(schema.nodes.hardBreak.create());
-  });
-  return nodes;
 }
 
 function fillTableRows(
@@ -484,7 +475,7 @@ export default function Home() {
 
   // Phase 2: appendTransaction 이후 Zustand 갱신 신호
   const onNewParaCreated = useCallback(
-    (_paraId: string, _fileName: string) => {
+    () => {
       const model = useDocumentStore.getState().hwpxDocumentModel;
       if (model) setHwpxDocumentModel(model);
     },
@@ -589,6 +580,46 @@ export default function Home() {
     }
   };
 
+  /* ── Phase 2-4: Document Analysis ── */
+  const fireDocumentAnalysis = useCallback((segments: Array<{ segmentId: string; text: string }>) => {
+    setAnalysisLoading(true);
+    const items = segments
+      .filter((s) => s.text.trim())
+      .slice(0, 100)
+      .map((s) => ({
+        id: s.segmentId,
+        text: s.text.slice(0, 200),
+      }));
+    if (!items.length) {
+      setAnalysisLoading(false);
+      return;
+    }
+    fetch("/api/analyze-document", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ segments: items }),
+    })
+      .then(async (resp) => {
+        if (!resp.ok) return;
+        const data = await resp.json();
+        setDocumentAnalysis(data);
+        // Auto-select preset if suggested
+        if (data.suggestedPreset) {
+          const preset = INSTRUCTION_PRESETS.find((p) => p.key === data.suggestedPreset);
+          if (preset) {
+            setSelectedPreset(preset.key);
+            if (preset.instruction) {
+              setInstruction(preset.instruction);
+            }
+          }
+        }
+      })
+      .catch(() => {
+        // Analysis is optional
+      })
+      .finally(() => setAnalysisLoading(false));
+  }, [setAnalysisLoading, setDocumentAnalysis, setInstruction, setSelectedPreset]);
+
   /* ── File I/O ── */
   const loadFileIntoEditor = useCallback(
     async (file: File, recentKind: RecentFileKind | null = "opened") => {
@@ -669,6 +700,12 @@ export default function Home() {
             ? `로드 완료: 세그먼트 ${parsed.segments.length}개 (경고 ${parsed.integrityIssues.length}개)`
             : `로드 완료: 세그먼트 ${parsed.segments.length}개`,
         );
+        recordPilotMetricEvent("document_loaded", {
+          format: ext || "unknown",
+          segments: parsed.segments.length,
+          integrityIssues: parsed.integrityIssues.length,
+          source: recentKind ?? "recent",
+        });
 
         // Phase 2-4: Auto-analyze document on upload
         fireDocumentAnalysis(parsed.segments);
@@ -687,6 +724,7 @@ export default function Home() {
       setLoadedDocument,
       setOutline,
       refreshRecentSnapshots,
+      fireDocumentAnalysis,
     ],
   );
 
@@ -716,46 +754,6 @@ export default function Home() {
       const message = error instanceof Error ? error.message : "최근 파일 로드 실패";
       setStatus(message);
     }
-  };
-
-  /* ── Phase 2-4: Document Analysis ── */
-  const fireDocumentAnalysis = (segments: Array<{ segmentId: string; text: string }>) => {
-    setAnalysisLoading(true);
-    const items = segments
-      .filter((s) => s.text.trim())
-      .slice(0, 100)
-      .map((s) => ({
-        id: s.segmentId,
-        text: s.text.slice(0, 200),
-      }));
-    if (!items.length) {
-      setAnalysisLoading(false);
-      return;
-    }
-    fetch("/api/analyze-document", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ segments: items }),
-    })
-      .then(async (resp) => {
-        if (!resp.ok) return;
-        const data = await resp.json();
-        setDocumentAnalysis(data);
-        // Auto-select preset if suggested
-        if (data.suggestedPreset) {
-          const preset = INSTRUCTION_PRESETS.find((p) => p.key === data.suggestedPreset);
-          if (preset) {
-            setSelectedPreset(preset.key);
-            if (preset.instruction) {
-              setInstruction(preset.instruction);
-            }
-          }
-        }
-      })
-      .catch(() => {
-        // Analysis is optional
-      })
-      .finally(() => setAnalysisLoading(false));
   };
 
   const onEditorUpdateDoc = (doc: Parameters<typeof setEditorDoc>[0]) => {
@@ -801,6 +799,19 @@ export default function Home() {
       setAiSuggestion(suggestionText);
       setSingleSuggestionQualityGate(qualityGate);
       setSingleSuggestionApproved(!qualityGate.requiresApproval);
+      recordPilotMetricEvent("single_suggestion_generated", {
+        selectedTextLength: text.length,
+        suggestionLength: suggestionText.length,
+        requiresApproval: qualityGate.requiresApproval,
+        issueCount: qualityGate.issues.length,
+      });
+      if (qualityGate.requiresApproval) {
+        recordPilotMetricEvent("quality_gate_blocked", {
+          source: "single",
+          count: 1,
+          issueCount: qualityGate.issues.length,
+        });
+      }
       setStatus(
         qualityGate.requiresApproval
           ? `AI 제안 생성 완료: 게이트 승인 필요 (${qualityGate.issues.length}건)`
@@ -830,6 +841,11 @@ export default function Home() {
     const hasSelection = editor.state.selection.from !== editor.state.selection.to;
     if (hasSelection) {
       editor.chain().focus().insertContent(aiSuggestion).run();
+      recordPilotMetricEvent("single_suggestion_applied", {
+        mode: "selection",
+        count: 1,
+        textLength: aiSuggestion.length,
+      });
       setStatus("선택 영역에 AI 제안을 적용했습니다.");
       return;
     }
@@ -839,6 +855,13 @@ export default function Home() {
       return;
     }
     const replaced = replaceSegmentText(editor, segmentId, aiSuggestion);
+    if (replaced) {
+      recordPilotMetricEvent("single_suggestion_applied", {
+        mode: "segment",
+        count: 1,
+        textLength: aiSuggestion.length,
+      });
+    }
     setStatus(replaced ? "문단 전체에 AI 제안을 적용했습니다." : "대상 문단을 찾지 못했습니다.");
   };
 
@@ -848,10 +871,13 @@ export default function Home() {
       return;
     }
     setSingleSuggestionApproved(true);
+    recordPilotMetricEvent("quality_gate_approved", {
+      source: "single",
+      count: 1,
+    });
     setStatus("단일 AI 제안이 승인되었습니다.");
   };
 
-  const isHwpxFile = fileName.toLowerCase().endsWith(".hwpx");
   const runHwpxExport = useCallback(
     async (params: {
       kind: Exclude<RecentFileKind, "opened">;
@@ -941,6 +967,10 @@ export default function Home() {
         overrideFileName: customFileName,
       });
       pushHistory(`저장 완료 (${result.edits}건)`, result.edits);
+      recordPilotMetricEvent("manual_save_completed", {
+        count: 1,
+        edits: result.edits,
+      });
       setStatus(`저장 완료: ${result.fileName}`);
     } catch (error) {
       const message = error instanceof Error ? error.message : "저장 실패";
@@ -968,6 +998,10 @@ export default function Home() {
         fileLabel: "autosave",
         triggerDownload: false,
         markClean: false,
+      });
+      recordPilotMetricEvent("autosave_completed", {
+        count: 1,
+        edits: result.edits,
       });
       setStatus(`자동 저장 완료: ${result.fileName}`);
     } catch (error) {
@@ -1015,6 +1049,8 @@ export default function Home() {
     setBatchSuggestions([]);
     setBatchJob(null);
     const requestedBatchItems = [...batchItems];
+    let createdJobId: string | null = null;
+    let batchFailureTracked = false;
 
     try {
       const createResponse = await fetch("/api/batch-jobs", {
@@ -1039,6 +1075,13 @@ export default function Home() {
         resultCount: createdPayload.job.resultCount,
         itemCount: createdPayload.job.itemCount,
         error: createdPayload.job.error,
+      });
+      createdJobId = createdPayload.job.id;
+      recordPilotMetricEvent("batch_job_created", {
+        count: 1,
+        jobId: createdPayload.job.id,
+        itemCount: createdPayload.job.itemCount,
+        totalChunks: createdPayload.job.totalChunks,
       });
       setStatus(`AI 일괄 작업 생성됨... (0/${createdPayload.job.totalChunks})`);
 
@@ -1069,12 +1112,32 @@ export default function Home() {
         setBatchSuggestions(job.results);
 
         if (job.status === "failed") {
+          recordPilotMetricEvent("batch_job_failed", {
+            count: 1,
+            jobId: job.id,
+            error: job.error,
+          });
+          batchFailureTracked = true;
           throw new Error(job.error || "AI 일괄 작업 실패");
         }
         if (job.status === "completed") {
           const nextPlan = buildBatchApplyPlan(requestedBatchItems, job.results);
           const changedCount = nextPlan.filter((row) => row.changed).length;
           const gatedCount = job.results.filter((row) => row.qualityGate.requiresApproval).length;
+          recordPilotMetricEvent("batch_job_completed", {
+            count: 1,
+            jobId: job.id,
+            resultCount: job.results.length,
+            changedCount,
+            gatedCount,
+          });
+          if (gatedCount) {
+            recordPilotMetricEvent("quality_gate_blocked", {
+              source: "batch",
+              count: gatedCount,
+              jobId: job.id,
+            });
+          }
           setStatus(
             gatedCount
               ? `AI 섹션 일괄 제안 완료: 변경 ${changedCount}개 / 승인 필요 ${gatedCount}개`
@@ -1086,6 +1149,13 @@ export default function Home() {
         setStatus(`AI 생성 작업 진행 중... (${job.completedChunks}/${job.totalChunks})`);
       }
     } catch (error) {
+      if (createdJobId && !batchFailureTracked) {
+        recordPilotMetricEvent("batch_job_failed", {
+          count: 1,
+          jobId: createdJobId,
+          error: error instanceof Error ? error.message : "AI 일괄 제안 실패",
+        });
+      }
       const message = error instanceof Error ? error.message : "AI 일괄 제안 실패";
       setStatus(message);
     } finally {
@@ -1114,6 +1184,10 @@ export default function Home() {
       return !gate?.requiresApproval || approvedIds.has(item.id);
     });
     const blockedCount = changedPlan.length - plan.length;
+    const approvedRiskCount = changedPlan.filter((item) => {
+      const gate = gateById.get(item.id);
+      return !!gate?.requiresApproval && approvedIds.has(item.id);
+    }).length;
     if (!plan.length) {
       setStatus("승인되지 않은 위험 항목만 남아 있어 전체 적용할 수 없습니다.");
       return;
@@ -1133,6 +1207,18 @@ export default function Home() {
     clearBatchDecisions();
     setBatchJob(null);
     pushHistory(`AI 섹션 일괄 적용 (${appliedCount}건)`, appliedCount);
+    recordPilotMetricEvent("batch_suggestion_applied", {
+      mode: "all",
+      count: appliedCount,
+      blockedCount,
+      approvedRiskCount,
+    });
+    if (approvedRiskCount) {
+      recordPilotMetricEvent("quality_gate_approved", {
+        source: "batch",
+        count: approvedRiskCount,
+      });
+    }
     setStatus(
       blockedCount
         ? `AI 섹션 일괄 적용 완료: ${appliedCount}건 적용 / ${blockedCount}건은 승인 필요로 보류`
@@ -1157,6 +1243,9 @@ export default function Home() {
     }
     const plan = buildBatchApplyPlan(batchItems, batchSuggestions)
       .filter((item) => item.changed && acceptedIds.has(item.id));
+    const approvedRiskCount = plan.filter((item) =>
+      batchSuggestions.find((suggestion) => suggestion.id === item.id)?.qualityGate.requiresApproval,
+    ).length;
     const appliedCount = applyBatchSegmentTexts(
       editor,
       plan.map((item) => ({
@@ -1172,6 +1261,17 @@ export default function Home() {
     clearBatchDecisions();
     setBatchJob(null);
     pushHistory(`AI 선택 적용 (${appliedCount}건)`, appliedCount);
+    recordPilotMetricEvent("batch_suggestion_applied", {
+      mode: "selected",
+      count: appliedCount,
+      approvedRiskCount,
+    });
+    if (approvedRiskCount) {
+      recordPilotMetricEvent("quality_gate_approved", {
+        source: "batch",
+        count: approvedRiskCount,
+      });
+    }
     setStatus(`AI 선택 적용 완료: ${appliedCount}건`);
   };
 
@@ -1838,7 +1938,6 @@ export default function Home() {
         hasDocument={!!editorDoc}
         downloadUrl={downloadUrl}
         downloadName={download.fileName}
-        onToggleSidebar={toggleSidebar}
         onSetSidebarTab={handleSetSidebarTab}
         onAiCommand={() => {
           setActiveSidebarTab("ai");
@@ -1852,8 +1951,21 @@ export default function Home() {
         onExport={onExport}
         onExportPdf={() => {
           const editorWrap = document.querySelector(".document-editor-wrap");
-          if (editorWrap) exportToPdf(editorWrap as HTMLElement, fileName || "document");
-          else setStatus("에디터를 찾을 수 없습니다.");
+          if (!editorWrap) {
+            setStatus("에디터를 찾을 수 없습니다.");
+            return;
+          }
+          try {
+            exportToPdf(editorWrap as HTMLElement, fileName || "document");
+            recordPilotMetricEvent("pdf_export_completed", {
+              count: 1,
+              fileName: fileName || "document",
+            });
+            setStatus(`PDF 내보내기 창을 열었습니다: ${fileName || "document"}`);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "PDF 내보내기 실패";
+            setStatus(message);
+          }
         }}
         onExportDocx={async () => {
           if (!editorDoc) {
@@ -1865,6 +1977,10 @@ export default function Home() {
           try {
             const result = await exportToDocx(editorDoc, fileName || "document");
             setDownload({ blob: result.blob, fileName: result.fileName });
+            recordPilotMetricEvent("docx_export_completed", {
+              count: 1,
+              fileName: result.fileName,
+            });
             setStatus(`DOCX 내보내기 완료: ${result.fileName}`);
           } catch (error) {
             const message = error instanceof Error ? error.message : "DOCX 내보내기 실패";
