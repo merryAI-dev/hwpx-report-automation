@@ -720,45 +720,6 @@ export default function Home() {
     };
   }, [localDownloadUrl]);
 
-  /* ── Phase 2-4: Document Analysis ── */
-  const fireDocumentAnalysis = useCallback((segments: Array<{ segmentId: string; text: string }>) => {
-    setAnalysisLoading(true);
-    const items = segments
-      .filter((s) => s.text.trim())
-      .slice(0, 100)
-      .map((s) => ({
-        id: s.segmentId,
-        text: s.text.slice(0, 200),
-      }));
-    if (!items.length) {
-      setAnalysisLoading(false);
-      return;
-    }
-    fetch("/api/analyze-document", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ segments: items }),
-    })
-      .then(async (resp) => {
-        if (!resp.ok) return;
-        const data = await resp.json();
-        setDocumentAnalysis(data);
-        if (data.suggestedPreset) {
-          const preset = INSTRUCTION_PRESETS.find((p) => p.key === data.suggestedPreset);
-          if (preset) {
-            setSelectedPreset(preset.key);
-            if (preset.instruction) {
-              setInstruction(preset.instruction);
-            }
-          }
-        }
-      })
-      .catch(() => {
-        // Analysis is optional
-      })
-      .finally(() => setAnalysisLoading(false));
-  }, [setAnalysisLoading, setDocumentAnalysis, setSelectedPreset, setInstruction]);
-
   /* ── Diff highlight sync: React → Editor ── */
   useEffect(() => {
     if (!editor) return;
@@ -2256,6 +2217,7 @@ export default function Home() {
               remoteExpiresAt: null,
               provider: null,
               blobId: null,
+            });
             recordPilotMetricEvent("docx_export_completed", {
               count: 1,
               fileName: result.fileName,
@@ -2447,17 +2409,16 @@ export default function Home() {
             analysis={
               <DocumentAnalysisPanel
                 analysis={documentAnalysis}
-                templateCatalog={templateCatalog}
                 complexObjectReport={complexObjectReport}
                 templateCatalog={templateCatalog}
                 isLoading={analysisLoading}
                 terminologyDict={terminologyDict}
                 onUpdateEntry={updateTerminologyEntry}
-              onRemoveEntry={removeTerminologyEntry}
-              onApplyTerminology={onApplyTerminology}
-              isBusy={isBusy}
-            />
-          }
+                onRemoveEntry={removeTerminologyEntry}
+                onApplyTerminology={onApplyTerminology}
+                isBusy={isBusy}
+              />
+            }
           history={<EditHistoryPanel history={history} />}
         />
       </main>

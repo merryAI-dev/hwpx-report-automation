@@ -14,7 +14,9 @@ const integrationTest = fs.existsSync(REAL_FIXTURE_PATH) ? it : it.skip;
 describe("hancom regression", () => {
   it("uses the Hancom verification env var when configured", () => {
     expect(
-      resolveHancomVerifyCommandTemplate({ HWPX_HANCOM_VERIFY_COMMAND: "verify-hwpx {file}" }),
+      resolveHancomVerifyCommandTemplate(
+        { HWPX_HANCOM_VERIFY_COMMAND: "verify-hwpx {file}" } as unknown as NodeJS.ProcessEnv,
+      ),
     ).toBe("verify-hwpx {file}");
   });
 
