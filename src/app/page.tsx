@@ -32,6 +32,7 @@ import type { DiffHighlightSuggestion } from "@/lib/editor/diff-highlight-extens
 import { INSTRUCTION_PRESETS } from "@/lib/editor/ai-presets";
 import type { PresetKey } from "@/lib/editor/ai-presets";
 import { uploadBlobForSignedDownload } from "@/lib/blob-storage-client";
+import { buildTemplateCatalogFromDoc } from "@/lib/template-catalog";
 import {
   listRecentFileSnapshots,
   loadRecentFileSnapshot,
@@ -379,6 +380,7 @@ export default function Home() {
     selectedPreset,
     // Phase 2-4: Document Intelligence
     documentAnalysis,
+    templateCatalog,
     analysisLoading,
     // Phase 2-5: Terminology
     terminologyDict,
@@ -422,6 +424,7 @@ export default function Home() {
     setSelectedPreset,
     // Phase 2-4
     setDocumentAnalysis,
+    setTemplateCatalog,
     setAnalysisLoading,
     // Phase 2-5
     updateTerminologyEntry,
@@ -521,6 +524,14 @@ export default function Home() {
           after: item.suggestion,
         })),
     [batchPlan],
+  );
+  const templateValidationWarnings = useMemo(
+    () =>
+      (templateCatalog?.issues || []).map(
+        (issue) =>
+          `[TEMPLATE-${issue.severity.toUpperCase()}][${issue.code}] ${issue.message}`,
+      ),
+    [templateCatalog],
   );
 
   useEffect(() => {
@@ -657,6 +668,7 @@ export default function Home() {
           hwpxDocumentModel,
         });
         setOutline(buildOutlineFromDoc(parsed.doc));
+        setTemplateCatalog(buildTemplateCatalogFromDoc(parsed.doc));
         docRevisionRef.current = 0;
         lastAutoSavedRevisionRef.current = -1;
 
@@ -693,6 +705,7 @@ export default function Home() {
       setRenderResult,
       setLoadedDocument,
       setOutline,
+      setTemplateCatalog,
       refreshRecentSnapshots,
       fireDocumentAnalysis,
     ],
@@ -730,6 +743,7 @@ export default function Home() {
     docRevisionRef.current += 1;
     setEditorDoc(doc);
     setOutline(buildOutlineFromDoc(doc));
+    setTemplateCatalog(buildTemplateCatalogFromDoc(doc));
     const next = collectDocumentEdits(doc, sourceSegments, extraSegmentsMap);
     setEditsPreview(next.edits);
     // exportWarnings는 내보내기 시에만 갱신 (편집 중 배너 노출 방지)
@@ -810,7 +824,7 @@ export default function Home() {
 
       const result = await applyProseMirrorDocToHwpx(sourceBuffer, editorDoc, sourceSegments, extraSegmentsMap, hwpxDocumentModel);
       setEditsPreview(result.edits);
-      setExportWarnings(result.warnings);
+      setExportWarnings([...result.warnings, ...templateValidationWarnings]);
       if (result.integrityIssues.length) {
         throw new Error(`무결성 경고 ${result.integrityIssues.join(" | ")}`);
       }
@@ -890,6 +904,7 @@ export default function Home() {
       setDownload,
       setDirty,
       refreshRecentSnapshots,
+      templateValidationWarnings,
     ],
   );
 
@@ -1965,6 +1980,7 @@ export default function Home() {
           analysis={
             <DocumentAnalysisPanel
               analysis={documentAnalysis}
+              templateCatalog={templateCatalog}
               isLoading={analysisLoading}
               terminologyDict={terminologyDict}
               onUpdateEntry={updateTerminologyEntry}
