@@ -13,29 +13,28 @@ import { withApiAuth } from "@/lib/auth/with-api-auth";
 const MAX_CSV_SIZE = 5 * 1024 * 1024;   // 5MB
 const MAX_TEMPLATE_SIZE = 10 * 1024 * 1024; // 10MB
 
-/** GET /api/batch-generate?action=inspect — 양식 필드 미리보기 */
-async function handleGet(req: Request) {
-  // multipart 폼으로 template 파일 받기
-  try {
-    const formData = await req.formData();
-    const templateFile = formData.get("template");
-    if (!templateFile || !(templateFile instanceof File)) {
-      return NextResponse.json({ error: "template 파일이 필요합니다." }, { status: 400 });
-    }
-    const templateBuffer = await templateFile.arrayBuffer();
-    const description = await inspectTemplate(templateBuffer);
-    return NextResponse.json({ fields: description });
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "양식 필드 분석에 실패했습니다." },
-      { status: 500 },
-    );
-  }
+export async function GET() {
+  return NextResponse.json(
+    { error: "multipart inspection은 POST 요청에서 action=inspect로 호출해야 합니다." },
+    { status: 405 },
+  );
 }
 
 async function handlePost(req: Request) {
   try {
     const formData = await req.formData();
+    const action = String(formData.get("action") || "").trim();
+
+    if (action === "inspect") {
+      const templateFile = formData.get("template");
+      if (!templateFile || !(templateFile instanceof File)) {
+        return NextResponse.json({ error: "template 파일이 필요합니다." }, { status: 400 });
+      }
+
+      const templateBuffer = await templateFile.arrayBuffer();
+      const description = await inspectTemplate(templateBuffer);
+      return NextResponse.json({ fields: description });
+    }
 
     // ── 입력 검증 ──
     const csvFile = formData.get("csv");
@@ -134,5 +133,4 @@ async function handlePost(req: Request) {
   }
 }
 
-export const GET = withApiAuth(handleGet);
 export const POST = withApiAuth(handlePost);

@@ -3,6 +3,7 @@ import {
   SESSION_COOKIE_NAME,
   createSessionToken,
   getActiveTenantMembership,
+  getAuthSecret,
   getConfiguredIdentityProviders,
   getConfiguredUsers,
   readCookieValue,
@@ -156,5 +157,9 @@ describe("auth session", () => {
     expect(validateAdminCredentials("ops@example.com", "super-secret")).toBe(true);
     expect(validateAdminCredentials("ops@example.com", "wrong")).toBe(false);
     expect(validateUserCredentials("ops@example.com", "super-secret")?.displayName).toBe("Ops Lead");
+  });
+
+  it("requires AUTH_SECRET in production", () => {
+    expect(() => getAuthSecret({ NODE_ENV: "production" })).toThrow("AUTH_SECRET is required in production.");
   });
 });
