@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import type { JSONContent } from "@tiptap/core";
 import type { Editor } from "@tiptap/core";
 import { EditorContent, useEditor } from "@tiptap/react";
@@ -43,12 +43,15 @@ export function DocumentEditor({
   onNewParaCreated,
   getHwpxDocumentModel,
 }: DocumentEditorProps) {
+  const isLocalUpdateRef = useRef(false);
+
   const editor = useEditor({
     immediatelyRender: false,
     extensions: createEditorExtensions({ onAiCommand, onNewParaCreated, getHwpxDocumentModel }),
     content: content || { type: "doc", content: [{ type: "paragraph" }] },
     editable,
     onUpdate: ({ editor: tiptapEditor }) => {
+      isLocalUpdateRef.current = true;
       onUpdateDoc(tiptapEditor.getJSON());
     },
     onSelectionUpdate: ({ editor: tiptapEditor }) => {
@@ -68,6 +71,10 @@ export function DocumentEditor({
 
   useEffect(() => {
     if (!editor || !content) {
+      return;
+    }
+    if (isLocalUpdateRef.current) {
+      isLocalUpdateRef.current = false;
       return;
     }
     const next = JSON.stringify(content);

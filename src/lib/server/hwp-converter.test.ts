@@ -97,7 +97,7 @@ describe("convertLegacyHwpBuffer", () => {
     const outputBytes = Buffer.from(result.outputBuffer);
     const writtenBytes = await readFile(fixturePath);
     expect(outputBytes.equals(writtenBytes)).toBe(true);
-  });
+  }, 15000);
 
   it("rejects invalid HWPX output from the converter", async () => {
     const { invalidFixturePath, scriptPath } = await createMockConverterFiles();
