@@ -1,5 +1,18 @@
 @import "tippy.js/dist/tippy.css";
 
+:root {
+  --color-notion-accent: #2563eb;
+  --color-notion-accent-light: #eff6ff;
+  --color-notion-border: #dbe3ee;
+  --color-notion-border-strong: #94a3b8;
+  --color-notion-bg-hover: #f8fafc;
+  --color-notion-text: #0f172a;
+  --color-notion-text-secondary: #475569;
+  --color-notion-text-tertiary: #64748b;
+  --color-notion-green: #16a34a;
+  --color-notion-red: #dc2626;
+}
+
 html,
 body {
   max-width: 100vw;
@@ -58,6 +71,27 @@ button {
 
 .btn.primary:hover:not(:disabled) {
   background: #2a6da8;
+}
+
+.btn-primary {
+  border: 1px solid #1d4f80;
+  background: #1d4f80;
+  border-radius: 2px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #2a6da8;
+}
+
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
 }
 
 .btn:disabled {
