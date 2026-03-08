@@ -25,13 +25,13 @@ export function FileUpload({ disabled, onPickFile }: FileUploadProps) {
       <input
         ref={inputRef}
         type="file"
-        accept=".hwpx"
+        accept=".hwp,.hwpx,.docx,.pptx"
         onChange={onChange}
         disabled={disabled}
         style={{ display: "none" }}
       />
       <button type="button" className="btn" disabled={disabled} onClick={() => inputRef.current?.click()}>
-        HWPX 파일 열기
+        문서 파일 열기
       </button>
     </div>
   );

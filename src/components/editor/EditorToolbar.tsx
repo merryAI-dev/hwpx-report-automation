@@ -35,7 +35,6 @@ type EditorToolbarProps = {
   hasDocument: boolean;
   downloadUrl: string;
   downloadName: string;
-  onToggleSidebar: () => void;
   onSetSidebarTab: (tab: SidebarTab) => void;
   onAiCommand: () => void;
   recentSnapshots: RecentFileSnapshotMeta[];
@@ -47,6 +46,20 @@ type EditorToolbarProps = {
   onExportPdf: () => void;
   onExportDocx: () => void;
   onSave: () => void;
+  sessionContext: {
+    email: string;
+    displayName: string;
+    providerDisplayName: string;
+    activeTenantId: string;
+    memberships: Array<{
+      tenantId: string;
+      tenantName: string;
+      role: string;
+    }>;
+  } | null;
+  tenantSwitching: boolean;
+  onSwitchTenant: (tenantId: string) => void;
+  onLogout: () => void;
   formMode: boolean;
   onToggleFormMode: () => void;
 };
@@ -104,7 +117,6 @@ export function EditorToolbar({
   hasDocument,
   downloadUrl,
   downloadName,
-  onToggleSidebar,
   onSetSidebarTab,
   onAiCommand,
   recentSnapshots,
@@ -116,6 +128,10 @@ export function EditorToolbar({
   onExportPdf,
   onExportDocx,
   onSave,
+  sessionContext,
+  tenantSwitching,
+  onSwitchTenant,
+  onLogout,
   formMode,
   onToggleFormMode,
 }: EditorToolbarProps) {
@@ -176,7 +192,7 @@ export function EditorToolbar({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".hwpx,.docx,.pptx"
+          accept=".hwp,.hwpx,.docx,.pptx"
           style={{ display: "none" }}
           onChange={(e) => {
             const file = e.target.files?.[0];
@@ -250,6 +266,15 @@ export function EditorToolbar({
             >
               DOCX
             </button>
+            <a
+              href="/pilot"
+              target="_blank"
+              rel="noreferrer"
+              className={`${styles.btn} ${styles.linkButton}`}
+              title="파일럿 대시보드"
+            >
+              파일럿
+            </a>
             {downloadUrl && (
               <a
                 href={downloadUrl}
@@ -265,12 +290,40 @@ export function EditorToolbar({
           <div className={styles.sep} />
 
           <div className={styles.group}>
+            {sessionContext ? (
+              <>
+                <select
+                  className={styles.tenantSelect}
+                  value={sessionContext.activeTenantId}
+                  disabled={globalDisabled || tenantSwitching || sessionContext.memberships.length <= 1}
+                  title="활성 테넌트"
+                  onChange={(event) => onSwitchTenant(event.target.value)}
+                >
+                  {sessionContext.memberships.map((membership) => (
+                    <option key={membership.tenantId} value={membership.tenantId}>
+                      {`${membership.tenantName} · ${membership.role}`}
+                    </option>
+                  ))}
+                </select>
+                <span className={styles.sessionBadge}>{sessionContext.providerDisplayName}</span>
+                <span className={styles.sessionMeta} title={sessionContext.email}>
+                  {sessionContext.displayName}
+                </span>
+              </>
+            ) : null}
             <Btn
               label="저장"
               title="다른 이름으로 저장 (Ctrl/Cmd+S)"
               active={false}
               disabled={globalDisabled || !hasDocument}
               onClick={onSave}
+            />
+            <Btn
+              label="로그아웃"
+              title="세션 종료"
+              active={false}
+              disabled={globalDisabled}
+              onClick={onLogout}
             />
           </div>
         </div>

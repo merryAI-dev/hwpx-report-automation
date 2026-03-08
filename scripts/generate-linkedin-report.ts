@@ -3,7 +3,8 @@ import path from "node:path";
 import { parseArgs } from "node:util";
 import { JSDOM } from "jsdom";
 import OpenAI from "openai";
-import { applyTextEdits, inspectHwpx, validateHwpxArchive } from "../src/lib/hwpx";
+import { applyTextEdits, inspectHwpx } from "../src/lib/hwpx";
+import { formatHwpxValidationReport, validateHwpxForNode } from "../src/lib/node/hwpx-validator";
 
 const TARGET_LINE_COUNT = 25;
 
@@ -157,9 +158,9 @@ async function main() {
 
   const input = await fs.readFile(inputPath);
   const inputBuffer = input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength);
-  const beforeIssues = await validateHwpxArchive(inputBuffer);
-  if (beforeIssues.length) {
-    throw new Error(`입력 HWPX 무결성 경고: ${beforeIssues.join(" | ")}`);
+  const beforeReport = await validateHwpxForNode(inputBuffer);
+  if (beforeReport.issues.length) {
+    throw new Error(formatHwpxValidationReport("input", beforeReport));
   }
 
   const inspected = await inspectHwpx(inputBuffer);
@@ -191,9 +192,9 @@ async function main() {
 
   const outputBlob = await applyTextEdits(inputBuffer, edits);
   const outputArray = new Uint8Array(await outputBlob.arrayBuffer());
-  const afterIssues = await validateHwpxArchive(outputArray.buffer);
-  if (afterIssues.length) {
-    throw new Error(`출력 HWPX 무결성 경고: ${afterIssues.join(" | ")}`);
+  const afterReport = await validateHwpxForNode(outputArray.buffer);
+  if (afterReport.issues.length) {
+    throw new Error(formatHwpxValidationReport("output", afterReport));
   }
 
   await fs.writeFile(outputPath, outputArray);
@@ -201,6 +202,7 @@ async function main() {
   console.log(`created: ${outputPath}`);
   console.log(`line source: ${result.source}`);
   console.log(`applied edits: ${edits.length}`);
+  console.log(formatHwpxValidationReport("output", afterReport));
   console.log("preview lines:");
   for (const line of lines.slice(0, 8)) {
     console.log(`- ${line}`);

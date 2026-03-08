@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import type { Editor, JSONContent } from "@tiptap/core";
-import { Fragment, Schema, type Node as PMNode } from "@tiptap/pm/model";
+import { Fragment, type Node as PMNode } from "@tiptap/pm/model";
 import { useCallback } from "react";
 import { DocumentEditor } from "@/components/editor/DocumentEditor";
 import { EditorToolbar } from "@/components/editor/EditorToolbar";
@@ -31,6 +31,12 @@ import { triggerDiffHighlightUpdate } from "@/lib/editor/diff-highlight-extensio
 import type { DiffHighlightSuggestion } from "@/lib/editor/diff-highlight-extension";
 import { INSTRUCTION_PRESETS } from "@/lib/editor/ai-presets";
 import type { PresetKey } from "@/lib/editor/ai-presets";
+import { uploadBlobForSignedDownload } from "@/lib/blob-storage-client";
+import { buildTemplateCatalogFromDoc } from "@/lib/template-catalog";
+import type { SessionIdentityProvider, SessionTenantMembership } from "@/lib/auth/session";
+import { evaluateQualityGate, type QualityGateResult } from "@/lib/quality-gates";
+import { recordPilotMetricEvent } from "@/lib/pilot-metrics";
+import { hasComplexObjectSignal } from "@/lib/editor/hwpx-complex-objects";
 import {
   listRecentFileSnapshots,
   loadRecentFileSnapshot,
@@ -87,7 +93,6 @@ type SegmentTextUpdate = {
   text: string;
 };
 
-const BATCH_API_CHUNK_SIZE = 40;
 const AUTOSAVE_INTERVAL_MS = 60_000;
 let uniqueSaveSequence = 0;
 
@@ -206,16 +211,6 @@ function extractNodeText(node: JSONContent): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function textToInlineNodes(schema: Schema, text: string): PMNode[] {
-  const parts = text.split("\n");
-  const nodes: PMNode[] = [];
-  parts.forEach((part, i) => {
-    if (part) nodes.push(schema.text(part));
-    if (i < parts.length - 1) nodes.push(schema.nodes.hardBreak.create());
-  });
-  return nodes;
 }
 
 function fillTableRows(
@@ -345,12 +340,119 @@ type JavaRenderPayload = {
   elementMap?: Record<string, RenderElementInfo>;
 };
 
+type BatchJobPayload = {
+  job?: {
+    id: string;
+    status: "queued" | "running" | "completed" | "failed";
+    completedChunks: number;
+    totalChunks: number;
+    resultCount: number;
+    itemCount: number;
+    error: string | null;
+    results: Array<{
+      id: string;
+      suggestion: string;
+      qualityGate: QualityGateResult;
+    }>;
+  };
+  error?: string;
+};
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
+}
+
+type HwpIntakeErrorPayload = {
+  error?: string;
+  code?: string;
+  details?: string[];
+};
+
+function getFileExtension(fileName: string): string {
+  return fileName.toLowerCase().split(".").pop() || "";
+}
+
+function getFormatLabel(extension: string): string {
+  if (extension === "hwp") return "HWP";
+  if (extension === "docx") return "DOCX";
+  if (extension === "pptx") return "PPTX";
+  return "HWPX";
+}
+
+function parseContentDispositionFileName(headerValue: string | null): string | null {
+  if (!headerValue) {
+    return null;
+  }
+
+  const utfMatch = headerValue.match(/filename\*=UTF-8''([^;]+)/i);
+  if (utfMatch?.[1]) {
+    try {
+      return decodeURIComponent(utfMatch[1]);
+    } catch {
+      return utfMatch[1];
+    }
+  }
+
+  const plainMatch = headerValue.match(/filename=\"?([^\";]+)\"?/i);
+  return plainMatch?.[1] ?? null;
+}
+
+async function readHwpIntakeError(response: Response): Promise<string> {
+  try {
+    const payload = (await response.json()) as HwpIntakeErrorPayload;
+    const details = Array.isArray(payload.details) ? payload.details.filter(Boolean) : [];
+    return [payload.error || `HWP 변환 실패 (${response.status})`, ...details].join(" | ");
+  } catch {
+    return `HWP 변환 실패 (${response.status})`;
+  }
+}
+
+async function convertLegacyHwpForEditor(file: File): Promise<File> {
+  const formData = new FormData();
+  formData.append("file", file);
+
+  const response = await fetch("/api/hwp-intake", {
+    method: "POST",
+    body: formData,
+  });
+
+  if (!response.ok) {
+    throw new Error(await readHwpIntakeError(response));
+  }
+
+  const blob = await response.blob();
+  const headerFileName = parseContentDispositionFileName(response.headers.get("content-disposition"));
+  const convertedFileName =
+    response.headers.get("x-converted-file-name")
+    || headerFileName
+    || `${toFileStem(file.name)}.hwpx`;
+
+  return new File([blob], convertedFileName, {
+    type: blob.type || "application/octet-stream",
+    lastModified: Date.now(),
+  });
+}
+
+type AuthSessionResponse = {
+  authenticated: true;
+  user: {
+    sub: string;
+    email: string;
+    displayName: string;
+  };
+  provider: SessionIdentityProvider;
+  memberships: SessionTenantMembership[];
+  activeTenant: SessionTenantMembership | null;
+  expiresAt: number;
+};
 export default function Home() {
   const [editor, setEditor] = useState<Editor | null>(null);
   const [viewMode, setViewMode] = useState<"editor" | "preview">("editor");
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [recentSnapshots, setRecentSnapshots] = useState<RecentFileSnapshotMeta[]>([]);
   const [selectedRecentSnapshotId, setSelectedRecentSnapshotId] = useState("");
+  const [authSession, setAuthSession] = useState<AuthSessionResponse | null>(null);
+  const [tenantSwitching, setTenantSwitching] = useState(false);
   const autoSaveInFlightRef = useRef(false);
   const docRevisionRef = useRef(0);
   const lastAutoSavedRevisionRef = useRef(-1);
@@ -363,6 +465,7 @@ export default function Home() {
     extraSegmentsMap,
     hwpxDocumentModel,
     integrityIssues,
+    complexObjectReport,
     exportWarnings,
     outline,
     editsPreview,
@@ -388,14 +491,18 @@ export default function Home() {
     selectedPreset,
     // Phase 2-4: Document Intelligence
     documentAnalysis,
+    templateCatalog,
     analysisLoading,
     // Phase 2-5: Terminology
     terminologyDict,
     // Phase 2-6: Verification
     verificationResult,
     verificationLoading,
+    singleSuggestionQualityGate,
+    singleSuggestionApproved,
     // Batch mode
     batchMode,
+    batchJob,
     // Form mode
     formMode,
 
@@ -431,6 +538,7 @@ export default function Home() {
     setSelectedPreset,
     // Phase 2-4
     setDocumentAnalysis,
+    setTemplateCatalog,
     setAnalysisLoading,
     // Phase 2-5
     updateTerminologyEntry,
@@ -438,8 +546,11 @@ export default function Home() {
     // Phase 2-6
     setVerificationResult,
     setVerificationLoading,
+    setSingleSuggestionQualityGate,
+    setSingleSuggestionApproved,
     // Batch mode
     setBatchMode,
+    setBatchJob,
     // Form mode
     setFormMode,
 
@@ -456,7 +567,7 @@ export default function Home() {
 
   // Phase 2: appendTransaction 이후 Zustand 갱신 신호
   const onNewParaCreated = useCallback(
-    (_paraId: string, _fileName: string) => {
+    () => {
       const model = useDocumentStore.getState().hwpxDocumentModel;
       if (model) setHwpxDocumentModel(model);
     },
@@ -493,12 +604,78 @@ export default function Home() {
     void refreshRecentSnapshots();
   }, [refreshRecentSnapshots]);
 
-  const downloadUrl = useMemo(() => {
+  const refreshAuthSession = useCallback(async () => {
+    try {
+      const response = await fetch("/api/auth/session", {
+        method: "GET",
+        cache: "no-store",
+      });
+      if (!response.ok) {
+        setAuthSession(null);
+        return;
+      }
+      const payload = (await response.json()) as AuthSessionResponse;
+      setAuthSession(payload);
+    } catch {
+      setAuthSession(null);
+    }
+  }, []);
+
+  useEffect(() => {
+    void refreshAuthSession();
+  }, [refreshAuthSession]);
+
+  const onSwitchTenant = useCallback(async (tenantId: string) => {
+    if (!authSession?.activeTenant || authSession.activeTenant.tenantId === tenantId) {
+      return;
+    }
+
+    setTenantSwitching(true);
+    try {
+      const response = await fetch("/api/auth/tenant", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ tenantId }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as Partial<AuthSessionResponse> & { error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "테넌트 전환 실패");
+      }
+
+      setAuthSession(payload as AuthSessionResponse);
+      setDownload({
+        ...download,
+        remoteUrl: null,
+        remoteExpiresAt: null,
+        provider: null,
+        blobId: null,
+      });
+      setStatus(
+        `활성 테넌트를 ${(payload as AuthSessionResponse).activeTenant?.tenantName || tenantId}로 전환했습니다. 기존 서명 다운로드 URL은 초기화되었습니다.`,
+      );
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "테넌트 전환 실패";
+      setStatus(message);
+    } finally {
+      setTenantSwitching(false);
+    }
+  }, [authSession, download, setDownload, setStatus]);
+
+  const localDownloadUrl = useMemo(() => {
     if (!download.blob) {
       return "";
     }
     return URL.createObjectURL(download.blob);
   }, [download.blob]);
+  const downloadUrl = useMemo(() => {
+    if (
+      download.remoteUrl &&
+      (!download.remoteExpiresAt || Date.now() < Date.parse(download.remoteExpiresAt))
+    ) {
+      return download.remoteUrl;
+    }
+    return localDownloadUrl;
+  }, [download.remoteUrl, download.remoteExpiresAt, localDownloadUrl]);
 
   const dirtySummary = useMemo(() => buildDirtySummary(editsPreview), [editsPreview]);
   const batchItems = useMemo(
@@ -522,17 +699,26 @@ export default function Home() {
           id: item.id,
           before: item.originalText,
           after: item.suggestion,
+          qualityGate: batchSuggestions.find((row) => row.id === item.id)?.qualityGate,
         })),
-    [batchPlan],
+    [batchPlan, batchSuggestions],
+  );
+  const templateValidationWarnings = useMemo(
+    () =>
+      (templateCatalog?.issues || []).map(
+        (issue) =>
+          `[TEMPLATE-${issue.severity.toUpperCase()}][${issue.code}] ${issue.message}`,
+      ),
+    [templateCatalog],
   );
 
   useEffect(() => {
     return () => {
-      if (downloadUrl) {
-        URL.revokeObjectURL(downloadUrl);
+      if (localDownloadUrl) {
+        URL.revokeObjectURL(localDownloadUrl);
       }
     };
-  }, [downloadUrl]);
+  }, [localDownloadUrl]);
 
   /* ── Diff highlight sync: React → Editor ── */
   useEffect(() => {
@@ -560,137 +746,8 @@ export default function Home() {
     }
   };
 
-  /* ── File I/O ── */
-  const loadFileIntoEditor = useCallback(
-    async (file: File, recentKind: RecentFileKind | null = "opened") => {
-      setBusy(true);
-      setViewMode("editor");
-      const ext = file.name.toLowerCase().split(".").pop() || "";
-      const formatLabel = ext === "docx" ? "DOCX" : ext === "pptx" ? "PPTX" : "HWPX";
-      const isHwpx = ext === "hwpx";
-      setStatus(`${formatLabel}를 분석하고 변환 중입니다...`);
-      try {
-        const buffer = await file.arrayBuffer();
-        let parsePromise;
-        if (ext === "docx") parsePromise = parseDocxToProseMirror(buffer);
-        else if (ext === "pptx") parsePromise = parsePptxToProseMirror(buffer);
-        else parsePromise = parseHwpxToProseMirror(buffer);
-
-        const [parsed] = await Promise.all([
-          parsePromise,
-          !isHwpx
-            ? Promise.resolve()
-            : (async () => {
-                try {
-                  const fd = new FormData();
-                  fd.append("file", file);
-                  const resp = await fetch("/api/hwpx-render", { method: "POST", body: fd });
-                  if (resp.ok) {
-                    const payload = (await resp.json()) as JavaRenderPayload;
-                    if (payload.html && payload.elementMap) {
-                      setRenderResult(payload.html, payload.elementMap);
-                    }
-                  }
-                } catch {
-                  // Java server not running
-                }
-              })(),
-        ]);
-
-        // DOCX/PPTX: base.hwpx 템플릿으로 HwpxDocumentModel 합성 → HWPX 저장 활성화
-        let hwpxDocumentModel = parsed.hwpxDocumentModel ?? null;
-        if ((ext === "docx" || ext === "pptx") && !hwpxDocumentModel) {
-          try {
-            const templateResp = await fetch("/base.hwpx");
-            if (templateResp.ok) {
-              const templateBuffer = await templateResp.arrayBuffer();
-              hwpxDocumentModel = await buildHwpxModelFromDoc(templateBuffer, parsed.doc);
-            }
-          } catch {
-            // base.hwpx 로드 실패 시 null 유지 (HWPX 저장 비활성)
-          }
-        }
-
-        setLoadedDocument({
-          fileName: file.name,
-          buffer,
-          doc: parsed.doc,
-          segments: parsed.segments,
-          extraSegmentsMap: parsed.extraSegmentsMap,
-          integrityIssues: parsed.integrityIssues,
-          hwpxDocumentModel,
-        });
-        setOutline(buildOutlineFromDoc(parsed.doc));
-        docRevisionRef.current = 0;
-        lastAutoSavedRevisionRef.current = -1;
-
-        if (recentKind) {
-          const snapshotMeta = await saveRecentFileSnapshot({
-            name: file.name,
-            blob: file,
-            kind: recentKind,
-          });
-          if (snapshotMeta) {
-            await refreshRecentSnapshots(snapshotMeta.id);
-          }
-        }
-
-        setStatus(
-          parsed.integrityIssues.length
-            ? `로드 완료: 세그먼트 ${parsed.segments.length}개 (경고 ${parsed.integrityIssues.length}개)`
-            : `로드 완료: 세그먼트 ${parsed.segments.length}개`,
-        );
-
-        // Phase 2-4: Auto-analyze document on upload
-        fireDocumentAnalysis(parsed.segments);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "문서 로드 실패";
-        setStatus(message);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [
-      setBusy,
-      setViewMode,
-      setStatus,
-      setRenderResult,
-      setLoadedDocument,
-      setOutline,
-      refreshRecentSnapshots,
-    ],
-  );
-
-  const onPickFile = async (file: File) => {
-    await loadFileIntoEditor(file, "opened");
-  };
-
-  const onLoadRecentSnapshot = async (snapshotId: string) => {
-    if (!snapshotId) {
-      setStatus("최근 파일을 먼저 선택하세요.");
-      return;
-    }
-    setStatus("최근 파일을 불러오는 중입니다...");
-    try {
-      const snapshot = await loadRecentFileSnapshot(snapshotId);
-      if (!snapshot) {
-        setStatus("선택한 최근 파일을 찾지 못했습니다.");
-        await refreshRecentSnapshots();
-        return;
-      }
-      const file = new File([snapshot.blob], snapshot.meta.name, {
-        type: snapshot.meta.mimeType || "application/octet-stream",
-      });
-      await loadFileIntoEditor(file, null);
-      setSelectedRecentSnapshotId(snapshotId);
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "최근 파일 로드 실패";
-      setStatus(message);
-    }
-  };
-
   /* ── Phase 2-4: Document Analysis ── */
-  const fireDocumentAnalysis = (segments: Array<{ segmentId: string; text: string }>) => {
+  const fireDocumentAnalysis = useCallback((segments: Array<{ segmentId: string; text: string }>) => {
     setAnalysisLoading(true);
     const items = segments
       .filter((s) => s.text.trim())
@@ -727,12 +784,168 @@ export default function Home() {
         // Analysis is optional
       })
       .finally(() => setAnalysisLoading(false));
+  }, [setAnalysisLoading, setDocumentAnalysis, setInstruction, setSelectedPreset]);
+
+  /* ── File I/O ── */
+  const loadFileIntoEditor = useCallback(
+    async (file: File, recentKind: RecentFileKind | null = "opened") => {
+      setBusy(true);
+      setViewMode("editor");
+      try {
+        const sourceExt = getFileExtension(file.name);
+        let workingFile = file;
+        let ext = sourceExt;
+
+        if (sourceExt === "hwp") {
+          setStatus("HWP를 HWPX로 변환 중입니다...");
+          workingFile = await convertLegacyHwpForEditor(file);
+          ext = "hwpx";
+        }
+
+        const formatLabel = getFormatLabel(ext);
+        const isHwpx = ext === "hwpx";
+        setStatus(
+          sourceExt === "hwp"
+            ? "HWP를 HWPX로 변환한 뒤 문서를 분석 중입니다..."
+            : `${formatLabel}를 분석하고 변환 중입니다...`,
+        );
+
+        const buffer = await workingFile.arrayBuffer();
+        let parsePromise;
+        if (ext === "docx") parsePromise = parseDocxToProseMirror(buffer);
+        else if (ext === "pptx") parsePromise = parsePptxToProseMirror(buffer);
+        else parsePromise = parseHwpxToProseMirror(buffer);
+
+        const [parsed] = await Promise.all([
+          parsePromise,
+          !isHwpx
+            ? Promise.resolve()
+            : (async () => {
+                try {
+                  const fd = new FormData();
+                  fd.append("file", workingFile);
+                  const resp = await fetch("/api/hwpx-render", { method: "POST", body: fd });
+                  if (resp.ok) {
+                    const payload = (await resp.json()) as JavaRenderPayload;
+                    if (payload.html && payload.elementMap) {
+                      setRenderResult(payload.html, payload.elementMap);
+                    }
+                  }
+                } catch {
+                  // Java server not running
+                }
+              })(),
+        ]);
+
+        // DOCX/PPTX: base.hwpx 템플릿으로 HwpxDocumentModel 합성 → HWPX 저장 활성화
+        let hwpxDocumentModel = parsed.hwpxDocumentModel ?? null;
+        if ((ext === "docx" || ext === "pptx") && !hwpxDocumentModel) {
+          try {
+            const templateResp = await fetch("/base.hwpx");
+            if (templateResp.ok) {
+              const templateBuffer = await templateResp.arrayBuffer();
+              hwpxDocumentModel = await buildHwpxModelFromDoc(templateBuffer, parsed.doc);
+            }
+          } catch {
+            // base.hwpx 로드 실패 시 null 유지 (HWPX 저장 비활성)
+          }
+        }
+
+        setLoadedDocument({
+          fileName: workingFile.name,
+          buffer,
+          doc: parsed.doc,
+          segments: parsed.segments,
+          extraSegmentsMap: parsed.extraSegmentsMap,
+          integrityIssues: parsed.integrityIssues,
+          complexObjectReport: parsed.complexObjectReport,
+          hwpxDocumentModel,
+        });
+        setOutline(buildOutlineFromDoc(parsed.doc));
+        setTemplateCatalog(buildTemplateCatalogFromDoc(parsed.doc));
+        docRevisionRef.current = 0;
+        lastAutoSavedRevisionRef.current = -1;
+
+        if (recentKind) {
+          const snapshotMeta = await saveRecentFileSnapshot({
+            name: workingFile.name,
+            blob: workingFile,
+            kind: recentKind,
+          });
+          if (snapshotMeta) {
+            await refreshRecentSnapshots(snapshotMeta.id);
+          }
+        }
+
+        setStatus(
+          parsed.integrityIssues.length
+            ? `${
+              sourceExt === "hwp" ? "HWP 변환 후 로드 완료" : "로드 완료"
+            }: 세그먼트 ${parsed.segments.length}개 (경고 ${parsed.integrityIssues.length}개)`
+            : `${sourceExt === "hwp" ? "HWP 변환 후 로드 완료" : "로드 완료"}: 세그먼트 ${parsed.segments.length}개`,
+        );
+        recordPilotMetricEvent("document_loaded", {
+          format: ext || "unknown",
+          segments: parsed.segments.length,
+          integrityIssues: parsed.integrityIssues.length,
+          source: recentKind ?? "recent",
+        });
+
+        // Phase 2-4: Auto-analyze document on upload
+        fireDocumentAnalysis(parsed.segments);
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "문서 로드 실패";
+        setStatus(message);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      setBusy,
+      setViewMode,
+      setStatus,
+      setRenderResult,
+      setLoadedDocument,
+      setOutline,
+      setTemplateCatalog,
+      refreshRecentSnapshots,
+      fireDocumentAnalysis,
+    ],
+  );
+
+  const onPickFile = async (file: File) => {
+    await loadFileIntoEditor(file, "opened");
+  };
+
+  const onLoadRecentSnapshot = async (snapshotId: string) => {
+    if (!snapshotId) {
+      setStatus("최근 파일을 먼저 선택하세요.");
+      return;
+    }
+    setStatus("최근 파일을 불러오는 중입니다...");
+    try {
+      const snapshot = await loadRecentFileSnapshot(snapshotId);
+      if (!snapshot) {
+        setStatus("선택한 최근 파일을 찾지 못했습니다.");
+        await refreshRecentSnapshots();
+        return;
+      }
+      const file = new File([snapshot.blob], snapshot.meta.name, {
+        type: snapshot.meta.mimeType || "application/octet-stream",
+      });
+      await loadFileIntoEditor(file, null);
+      setSelectedRecentSnapshotId(snapshotId);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "최근 파일 로드 실패";
+      setStatus(message);
+    }
   };
 
   const onEditorUpdateDoc = (doc: Parameters<typeof setEditorDoc>[0]) => {
     docRevisionRef.current += 1;
     setEditorDoc(doc);
     setOutline(buildOutlineFromDoc(doc));
+    setTemplateCatalog(buildTemplateCatalogFromDoc(doc));
     const next = collectDocumentEdits(doc, sourceSegments, extraSegmentsMap);
     setEditsPreview(next.edits);
     // exportWarnings는 내보내기 시에만 갱신 (편집 중 배너 노출 방지)
@@ -747,6 +960,8 @@ export default function Home() {
     setAiBusy(true);
     setActiveSidebarTab("ai");
     setVerificationResult(null);
+    setSingleSuggestionQualityGate(null);
+    setSingleSuggestionApproved(false);
     setStatus("AI 제안을 생성 중입니다...");
     try {
       const response = await fetch("/api/suggest", {
@@ -762,8 +977,32 @@ export default function Home() {
       if (!response.ok) {
         throw new Error(payload.error || "AI 제안 생성 실패");
       }
-      setAiSuggestion(payload.suggestion || "");
-      setStatus("AI 제안이 생성되었습니다.");
+      const suggestionText = payload.suggestion || "";
+      const qualityGate = evaluateQualityGate({
+        originalText: text,
+        suggestion: suggestionText,
+      });
+      setAiSuggestion(suggestionText);
+      setSingleSuggestionQualityGate(qualityGate);
+      setSingleSuggestionApproved(!qualityGate.requiresApproval);
+      recordPilotMetricEvent("single_suggestion_generated", {
+        selectedTextLength: text.length,
+        suggestionLength: suggestionText.length,
+        requiresApproval: qualityGate.requiresApproval,
+        issueCount: qualityGate.issues.length,
+      });
+      if (qualityGate.requiresApproval) {
+        recordPilotMetricEvent("quality_gate_blocked", {
+          source: "single",
+          count: 1,
+          issueCount: qualityGate.issues.length,
+        });
+      }
+      setStatus(
+        qualityGate.requiresApproval
+          ? `AI 제안 생성 완료: 게이트 승인 필요 (${qualityGate.issues.length}건)`
+          : "AI 제안이 생성되었습니다.",
+      );
     } catch (error) {
       const message = error instanceof Error ? error.message : "AI 제안 실패";
       setStatus(message);
@@ -781,9 +1020,18 @@ export default function Home() {
       setStatus("적용할 AI 제안이 없습니다.");
       return;
     }
+    if (singleSuggestionQualityGate?.requiresApproval && !singleSuggestionApproved) {
+      setStatus("품질 게이트 승인 후에만 적용할 수 있습니다.");
+      return;
+    }
     const hasSelection = editor.state.selection.from !== editor.state.selection.to;
     if (hasSelection) {
       editor.chain().focus().insertContent(aiSuggestion).run();
+      recordPilotMetricEvent("single_suggestion_applied", {
+        mode: "selection",
+        count: 1,
+        textLength: aiSuggestion.length,
+      });
       setStatus("선택 영역에 AI 제안을 적용했습니다.");
       return;
     }
@@ -793,10 +1041,29 @@ export default function Home() {
       return;
     }
     const replaced = replaceSegmentText(editor, segmentId, aiSuggestion);
+    if (replaced) {
+      recordPilotMetricEvent("single_suggestion_applied", {
+        mode: "segment",
+        count: 1,
+        textLength: aiSuggestion.length,
+      });
+    }
     setStatus(replaced ? "문단 전체에 AI 제안을 적용했습니다." : "대상 문단을 찾지 못했습니다.");
   };
 
-  const isHwpxFile = fileName.toLowerCase().endsWith(".hwpx");
+  const onApproveSingleSuggestion = () => {
+    if (!singleSuggestionQualityGate?.requiresApproval) {
+      setStatus("승인이 필요한 제안이 아닙니다.");
+      return;
+    }
+    setSingleSuggestionApproved(true);
+    recordPilotMetricEvent("quality_gate_approved", {
+      source: "single",
+      count: 1,
+    });
+    setStatus("단일 AI 제안이 승인되었습니다.");
+  };
+
   const runHwpxExport = useCallback(
     async (params: {
       kind: Exclude<RecentFileKind, "opened">;
@@ -813,16 +1080,46 @@ export default function Home() {
       }
 
       const result = await applyProseMirrorDocToHwpx(sourceBuffer, editorDoc, sourceSegments, extraSegmentsMap, hwpxDocumentModel);
+      const combinedWarnings = Array.from(
+        new Set([...(complexObjectReport?.warnings ?? []), ...result.warnings]),
+      );
       setEditsPreview(result.edits);
-      setExportWarnings(result.warnings);
+      setExportWarnings(Array.from(new Set([...combinedWarnings, ...templateValidationWarnings])));
       if (result.integrityIssues.length) {
         throw new Error(`무결성 경고 ${result.integrityIssues.join(" | ")}`);
       }
 
       const nextName = params.overrideFileName ?? createUniqueHwpxFileName(fileName || "document.hwpx", params.fileLabel);
+      let remoteDownload:
+        | {
+            blobId: string;
+            provider: string;
+            downloadUrl: string;
+            expiresAt: string;
+          }
+        | null = null;
+      let remoteUploadWarning: string | null = null;
+
+      try {
+        const uploaded = await uploadBlobForSignedDownload(result.blob, nextName);
+        remoteDownload = {
+          blobId: uploaded.blobId,
+          provider: uploaded.provider,
+          downloadUrl: uploaded.downloadUrl,
+          expiresAt: uploaded.expiresAt,
+        };
+      } catch (error) {
+        remoteUploadWarning =
+          error instanceof Error ? error.message : "외부 저장소 업로드에 실패했습니다.";
+      }
+
       setDownload({
         blob: result.blob,
         fileName: nextName,
+        remoteUrl: remoteDownload?.downloadUrl ?? null,
+        remoteExpiresAt: remoteDownload?.expiresAt ?? null,
+        provider: remoteDownload?.provider ?? null,
+        blobId: remoteDownload?.blobId ?? null,
       });
 
       if (params.triggerDownload) {
@@ -851,6 +1148,8 @@ export default function Home() {
       return {
         edits: result.edits.length,
         fileName: nextName,
+        storage: remoteDownload,
+        storageWarning: remoteUploadWarning,
       };
     },
     [
@@ -859,12 +1158,14 @@ export default function Home() {
       sourceSegments,
       extraSegmentsMap,
       hwpxDocumentModel,
+      complexObjectReport,
       fileName,
       setEditsPreview,
       setExportWarnings,
       setDownload,
       setDirty,
       refreshRecentSnapshots,
+      templateValidationWarnings,
     ],
   );
 
@@ -886,7 +1187,19 @@ export default function Home() {
         overrideFileName: customFileName,
       });
       pushHistory(`저장 완료 (${result.edits}건)`, result.edits);
-      setStatus(`저장 완료: ${result.fileName}`);
+      if (result.storage) {
+        setStatus(
+          `저장 완료: ${result.fileName} (외부저장 ${result.storage.provider}, 서명 URL 만료 ${new Date(result.storage.expiresAt).toLocaleTimeString("ko-KR")})`,
+        );
+      } else if (result.storageWarning) {
+        setStatus(`저장 완료: ${result.fileName} (${result.storageWarning})`);
+      } else {
+        setStatus(`저장 완료: ${result.fileName}`);
+      }
+      recordPilotMetricEvent("manual_save_completed", {
+        count: 1,
+        edits: result.edits,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "저장 실패";
       setStatus(message);
@@ -914,7 +1227,17 @@ export default function Home() {
         triggerDownload: false,
         markClean: false,
       });
-      setStatus(`자동 저장 완료: ${result.fileName}`);
+      if (result.storage) {
+        setStatus(`자동 저장 완료: ${result.fileName} (외부저장 ${result.storage.provider})`);
+      } else if (result.storageWarning) {
+        setStatus(`자동 저장 완료: ${result.fileName} (${result.storageWarning})`);
+      } else {
+        setStatus(`자동 저장 완료: ${result.fileName}`);
+      }
+      recordPilotMetricEvent("autosave_completed", {
+        count: 1,
+        edits: result.edits,
+      });
     } catch (error) {
       const message = error instanceof Error ? error.message : "자동 저장 실패";
       setStatus(`자동 저장 실패: ${message}`);
@@ -946,7 +1269,7 @@ export default function Home() {
   /* ── Phase 2-7: Progressive batch suggestions ── */
   const onGenerateBatchSuggestions = async () => {
     if (!editorDoc) {
-      setStatus("먼저 HWPX 파일을 업로드하세요.");
+      setStatus("먼저 문서를 업로드하세요.");
       return;
     }
     if (!batchItems.length) {
@@ -958,47 +1281,115 @@ export default function Home() {
     setActiveSidebarTab("ai");
     clearBatchDecisions();
     setBatchSuggestions([]);
-
-    const chunks: Array<typeof batchItems> = [];
-    for (let index = 0; index < batchItems.length; index += BATCH_API_CHUNK_SIZE) {
-      chunks.push(batchItems.slice(index, index + BATCH_API_CHUNK_SIZE));
-    }
-
-    let accumulated: Array<{ id: string; suggestion: string }> = [];
+    setBatchJob(null);
+    const requestedBatchItems = [...batchItems];
+    let createdJobId: string | null = null;
+    let batchFailureTracked = false;
 
     try {
-      for (let ci = 0; ci < chunks.length; ci++) {
-        setStatus(`AI 생성 중... (${ci + 1}/${chunks.length})`);
-        const chunk = chunks[ci];
-        const response = await fetch("/api/suggest-batch", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({
-            items: chunk,
-            instruction,
-            model: undefined,
-          }),
-        });
-        const payload = (await response.json()) as {
-          results?: Array<{ id?: string; suggestion?: string }>;
-          error?: string;
-        };
-        if (!response.ok) {
-          throw new Error(payload.error || "AI 일괄 제안 생성 실패");
-        }
-        const chunkResults = (payload.results || [])
-          .map((row) => ({
-            id: String(row.id || "").trim(),
-            suggestion: String(row.suggestion || "").trim(),
-          }))
-          .filter((row) => row.id && row.suggestion);
-        accumulated = [...accumulated, ...chunkResults];
-        setBatchSuggestions([...accumulated]); // progressive UI update
+      const createResponse = await fetch("/api/batch-jobs", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          items: requestedBatchItems,
+          instruction,
+          model: undefined,
+        }),
+      });
+      const createdPayload = (await createResponse.json()) as BatchJobPayload;
+      if (!createResponse.ok || !createdPayload.job) {
+        throw new Error(createdPayload.error || "AI 일괄 작업 생성 실패");
       }
-      const nextPlan = buildBatchApplyPlan(batchItems, accumulated);
-      const changedCount = nextPlan.filter((row) => row.changed).length;
-      setStatus(`AI 섹션 일괄 제안 완료: 대상 ${nextPlan.length}개 중 변경 ${changedCount}개`);
+
+      setBatchJob({
+        id: createdPayload.job.id,
+        status: createdPayload.job.status,
+        completedChunks: createdPayload.job.completedChunks,
+        totalChunks: createdPayload.job.totalChunks,
+        resultCount: createdPayload.job.resultCount,
+        itemCount: createdPayload.job.itemCount,
+        error: createdPayload.job.error,
+      });
+      createdJobId = createdPayload.job.id;
+      recordPilotMetricEvent("batch_job_created", {
+        count: 1,
+        jobId: createdPayload.job.id,
+        itemCount: createdPayload.job.itemCount,
+        totalChunks: createdPayload.job.totalChunks,
+      });
+      setStatus(`AI 일괄 작업 생성됨... (0/${createdPayload.job.totalChunks})`);
+
+      while (true) {
+        await sleep(800);
+        const response = await fetch(`/api/batch-jobs/${createdPayload.job.id}`, {
+          method: "GET",
+          cache: "no-store",
+        });
+        const payload = (await response.json()) as BatchJobPayload;
+        if (!response.ok) {
+          throw new Error(payload.error || "AI 일괄 작업 조회 실패");
+        }
+        const job = payload.job;
+        if (!job) {
+          throw new Error("배치 작업 상태가 비어 있습니다.");
+        }
+
+        setBatchJob({
+          id: job.id,
+          status: job.status,
+          completedChunks: job.completedChunks,
+          totalChunks: job.totalChunks,
+          resultCount: job.resultCount,
+          itemCount: job.itemCount,
+          error: job.error,
+        });
+        setBatchSuggestions(job.results);
+
+        if (job.status === "failed") {
+          recordPilotMetricEvent("batch_job_failed", {
+            count: 1,
+            jobId: job.id,
+            error: job.error,
+          });
+          batchFailureTracked = true;
+          throw new Error(job.error || "AI 일괄 작업 실패");
+        }
+        if (job.status === "completed") {
+          const nextPlan = buildBatchApplyPlan(requestedBatchItems, job.results);
+          const changedCount = nextPlan.filter((row) => row.changed).length;
+          const gatedCount = job.results.filter((row) => row.qualityGate.requiresApproval).length;
+          recordPilotMetricEvent("batch_job_completed", {
+            count: 1,
+            jobId: job.id,
+            resultCount: job.results.length,
+            changedCount,
+            gatedCount,
+          });
+          if (gatedCount) {
+            recordPilotMetricEvent("quality_gate_blocked", {
+              source: "batch",
+              count: gatedCount,
+              jobId: job.id,
+            });
+          }
+          setStatus(
+            gatedCount
+              ? `AI 섹션 일괄 제안 완료: 변경 ${changedCount}개 / 승인 필요 ${gatedCount}개`
+              : `AI 섹션 일괄 제안 완료: 대상 ${nextPlan.length}개 중 변경 ${changedCount}개`,
+          );
+          break;
+        }
+
+        setStatus(`AI 생성 작업 진행 중... (${job.completedChunks}/${job.totalChunks})`);
+      }
     } catch (error) {
+      if (createdJobId && !batchFailureTracked) {
+        recordPilotMetricEvent("batch_job_failed", {
+          count: 1,
+          jobId: createdJobId,
+          error: error instanceof Error ? error.message : "AI 일괄 제안 실패",
+        });
+      }
       const message = error instanceof Error ? error.message : "AI 일괄 제안 실패";
       setStatus(message);
     } finally {
@@ -1015,7 +1406,26 @@ export default function Home() {
       setStatus("적용할 일괄 AI 제안이 없습니다.");
       return;
     }
-    const plan = buildBatchApplyPlan(batchItems, batchSuggestions).filter((item) => item.changed);
+    const gateById = new Map(batchSuggestions.map((item) => [item.id, item.qualityGate]));
+    const approvedIds = new Set(
+      Object.entries(batchDecisions)
+        .filter(([, decision]) => decision === "accepted")
+        .map(([id]) => id),
+    );
+    const changedPlan = buildBatchApplyPlan(batchItems, batchSuggestions).filter((item) => item.changed);
+    const plan = changedPlan.filter((item) => {
+      const gate = gateById.get(item.id);
+      return !gate?.requiresApproval || approvedIds.has(item.id);
+    });
+    const blockedCount = changedPlan.length - plan.length;
+    const approvedRiskCount = changedPlan.filter((item) => {
+      const gate = gateById.get(item.id);
+      return !!gate?.requiresApproval && approvedIds.has(item.id);
+    }).length;
+    if (!plan.length) {
+      setStatus("승인되지 않은 위험 항목만 남아 있어 전체 적용할 수 없습니다.");
+      return;
+    }
     const appliedCount = applyBatchSegmentTexts(
       editor,
       plan.map((item) => ({
@@ -1029,8 +1439,25 @@ export default function Home() {
     }
     setBatchSuggestions([]);
     clearBatchDecisions();
+    setBatchJob(null);
     pushHistory(`AI 섹션 일괄 적용 (${appliedCount}건)`, appliedCount);
-    setStatus(`AI 섹션 일괄 적용 완료: ${appliedCount}건`);
+    recordPilotMetricEvent("batch_suggestion_applied", {
+      mode: "all",
+      count: appliedCount,
+      blockedCount,
+      approvedRiskCount,
+    });
+    if (approvedRiskCount) {
+      recordPilotMetricEvent("quality_gate_approved", {
+        source: "batch",
+        count: approvedRiskCount,
+      });
+    }
+    setStatus(
+      blockedCount
+        ? `AI 섹션 일괄 적용 완료: ${appliedCount}건 적용 / ${blockedCount}건은 승인 필요로 보류`
+        : `AI 섹션 일괄 적용 완료: ${appliedCount}건`,
+    );
   };
 
   /* ── Phase 2-1: Apply only accepted batch suggestions ── */
@@ -1050,6 +1477,9 @@ export default function Home() {
     }
     const plan = buildBatchApplyPlan(batchItems, batchSuggestions)
       .filter((item) => item.changed && acceptedIds.has(item.id));
+    const approvedRiskCount = plan.filter((item) =>
+      batchSuggestions.find((suggestion) => suggestion.id === item.id)?.qualityGate.requiresApproval,
+    ).length;
     const appliedCount = applyBatchSegmentTexts(
       editor,
       plan.map((item) => ({
@@ -1063,7 +1493,19 @@ export default function Home() {
     }
     setBatchSuggestions([]);
     clearBatchDecisions();
+    setBatchJob(null);
     pushHistory(`AI 선택 적용 (${appliedCount}건)`, appliedCount);
+    recordPilotMetricEvent("batch_suggestion_applied", {
+      mode: "selected",
+      count: appliedCount,
+      approvedRiskCount,
+    });
+    if (approvedRiskCount) {
+      recordPilotMetricEvent("quality_gate_approved", {
+        source: "batch",
+        count: approvedRiskCount,
+      });
+    }
     setStatus(`AI 선택 적용 완료: ${appliedCount}건`);
   };
 
@@ -1730,7 +2172,6 @@ export default function Home() {
         hasDocument={!!editorDoc}
         downloadUrl={downloadUrl}
         downloadName={download.fileName}
-        onToggleSidebar={toggleSidebar}
         onSetSidebarTab={handleSetSidebarTab}
         onAiCommand={() => {
           setActiveSidebarTab("ai");
@@ -1744,8 +2185,21 @@ export default function Home() {
         onExport={onExport}
         onExportPdf={() => {
           const editorWrap = document.querySelector(".document-editor-wrap");
-          if (editorWrap) exportToPdf(editorWrap as HTMLElement, fileName || "document");
-          else setStatus("에디터를 찾을 수 없습니다.");
+          if (!editorWrap) {
+            setStatus("에디터를 찾을 수 없습니다.");
+            return;
+          }
+          try {
+            exportToPdf(editorWrap as HTMLElement, fileName || "document");
+            recordPilotMetricEvent("pdf_export_completed", {
+              count: 1,
+              fileName: fileName || "document",
+            });
+            setStatus(`PDF 내보내기 창을 열었습니다: ${fileName || "document"}`);
+          } catch (error) {
+            const message = error instanceof Error ? error.message : "PDF 내보내기 실패";
+            setStatus(message);
+          }
         }}
         onExportDocx={async () => {
           if (!editorDoc) {
@@ -1756,7 +2210,18 @@ export default function Home() {
           setStatus("DOCX 파일을 생성하고 있습니다...");
           try {
             const result = await exportToDocx(editorDoc, fileName || "document");
-            setDownload({ blob: result.blob, fileName: result.fileName });
+            setDownload({
+              blob: result.blob,
+              fileName: result.fileName,
+              remoteUrl: null,
+              remoteExpiresAt: null,
+              provider: null,
+              blobId: null,
+            });
+            recordPilotMetricEvent("docx_export_completed", {
+              count: 1,
+              fileName: result.fileName,
+            });
             setStatus(`DOCX 내보내기 완료: ${result.fileName}`);
           } catch (error) {
             const message = error instanceof Error ? error.message : "DOCX 내보내기 실패";
@@ -1766,6 +2231,24 @@ export default function Home() {
           }
         }}
         onSave={onSave}
+        sessionContext={
+          authSession
+            ? {
+                email: authSession.user.email,
+                displayName: authSession.user.displayName,
+                providerDisplayName: authSession.provider.displayName,
+                activeTenantId: authSession.activeTenant?.tenantId || "",
+                memberships: authSession.memberships,
+              }
+            : null
+        }
+        tenantSwitching={tenantSwitching}
+        onSwitchTenant={onSwitchTenant}
+        onLogout={() => {
+          void fetch("/api/auth/logout", { method: "POST" }).finally(() => {
+            window.location.assign("/login");
+          });
+        }}
         formMode={formMode}
         onToggleFormMode={() => setFormMode(!formMode)}
       />
@@ -1776,6 +2259,14 @@ export default function Home() {
           <strong>무결성 경고</strong>
           {integrityIssues.map((issue) => (
             <p key={issue}>{issue}</p>
+          ))}
+        </div>
+      ) : null}
+      {hasComplexObjectSignal(complexObjectReport) ? (
+        <div className={styles.warningSoft}>
+          <strong>복합 객체 주의</strong>
+          {complexObjectReport?.warnings.map((warning) => (
+            <p key={warning}>{warning}</p>
           ))}
         </div>
       ) : null}
@@ -1877,13 +2368,17 @@ export default function Home() {
               instruction={instruction}
               suggestion={aiSuggestion}
               selectedText={selection.selectedText}
+              singleQualityGate={singleSuggestionQualityGate}
+              singleSuggestionApproved={singleSuggestionApproved}
               batchTargetCount={batchItems.length}
               batchSuggestionCount={batchSuggestionCount}
               batchDiffItems={batchDiffItems}
+              batchJob={batchJob}
               isBusy={isBusy || aiBusy}
               onChangeInstruction={setInstruction}
               onRequestSuggestion={() => void onGenerateSuggestion()}
               onApplySuggestion={onApplySuggestion}
+              onApproveSuggestion={onApproveSingleSuggestion}
               onRequestBatchSuggestion={() => void onGenerateBatchSuggestions()}
               onApplyBatchSuggestion={onApplyBatchSuggestions}
               batchDecisions={batchDecisions}
@@ -1911,17 +2406,19 @@ export default function Home() {
               onClearChat={clearChat}
             />
           }
-          analysis={
-            <DocumentAnalysisPanel
-              analysis={documentAnalysis}
-              isLoading={analysisLoading}
-              terminologyDict={terminologyDict}
-              onUpdateEntry={updateTerminologyEntry}
-              onRemoveEntry={removeTerminologyEntry}
-              onApplyTerminology={onApplyTerminology}
-              isBusy={isBusy}
-            />
-          }
+            analysis={
+              <DocumentAnalysisPanel
+                analysis={documentAnalysis}
+                complexObjectReport={complexObjectReport}
+                templateCatalog={templateCatalog}
+                isLoading={analysisLoading}
+                terminologyDict={terminologyDict}
+                onUpdateEntry={updateTerminologyEntry}
+                onRemoveEntry={removeTerminologyEntry}
+                onApplyTerminology={onApplyTerminology}
+                isBusy={isBusy}
+              />
+            }
           history={<EditHistoryPanel history={history} />}
         />
       </main>

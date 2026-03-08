@@ -1,7 +1,8 @@
 import fs from "node:fs/promises";
 import path from "node:path";
 import { JSDOM } from "jsdom";
-import { applyTextEdits, inspectHwpx, validateHwpxArchive } from "../src/lib/hwpx";
+import { applyTextEdits, inspectHwpx } from "../src/lib/hwpx";
+import { formatHwpxValidationReport, validateHwpxForNode } from "../src/lib/node/hwpx-validator";
 
 async function main() {
   const dom = new JSDOM("");
@@ -42,9 +43,9 @@ async function main() {
 
   const input = await fs.readFile(inputPath);
   const inputBuffer = input.buffer.slice(input.byteOffset, input.byteOffset + input.byteLength);
-  const beforeIssues = await validateHwpxArchive(inputBuffer);
-  if (beforeIssues.length) {
-    throw new Error(`입력 HWPX 무결성 경고: ${beforeIssues.join(" | ")}`);
+  const beforeReport = await validateHwpxForNode(inputBuffer);
+  if (beforeReport.issues.length) {
+    throw new Error(formatHwpxValidationReport("input", beforeReport));
   }
 
   const inspected = await inspectHwpx(inputBuffer);
@@ -70,14 +71,15 @@ async function main() {
 
   const outputBlob = await applyTextEdits(inputBuffer, edits);
   const outputArray = new Uint8Array(await outputBlob.arrayBuffer());
-  const afterIssues = await validateHwpxArchive(outputArray.buffer);
-  if (afterIssues.length) {
-    throw new Error(`출력 HWPX 무결성 경고: ${afterIssues.join(" | ")}`);
+  const afterReport = await validateHwpxForNode(outputArray.buffer);
+  if (afterReport.issues.length) {
+    throw new Error(formatHwpxValidationReport("output", afterReport));
   }
 
   await fs.writeFile(outputPath, outputArray);
   console.log(`created: ${outputPath}`);
   console.log(`applied edits: ${edits.length}`);
+  console.log(formatHwpxValidationReport("output", afterReport));
 }
 
 main().catch((error) => {

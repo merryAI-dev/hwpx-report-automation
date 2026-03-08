@@ -69,6 +69,39 @@
   cursor: pointer;
 }
 
+.tenantSelect {
+  border: none;
+  background: transparent;
+  padding: 4px 8px;
+  font-size: 13px;
+  color: #374151;
+  outline: none;
+  cursor: pointer;
+  min-width: 180px;
+}
+
+.sessionBadge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-radius: 999px;
+  background: rgba(37, 99, 235, 0.1);
+  color: #1d4ed8;
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
+.sessionMeta {
+  max-width: 140px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  color: #374151;
+  padding: 0 6px;
+}
+
 .panelToggles {
   margin-left: auto;
   display: flex;
@@ -80,4 +113,11 @@
   color: #2563eb;
   padding: 0 8px;
   font-weight: bold;
+}
+
+.linkButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  text-decoration: none;
 }
