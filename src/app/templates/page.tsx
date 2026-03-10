@@ -157,6 +157,9 @@ export default function TemplatesPage() {
                   <div className={styles.muted}>업데이트 {new Date(template.updatedAt).toLocaleString("ko-KR")}</div>
                   <div className={styles.nav}>
                     <Link className={styles.navLink} href={`/templates/${template.id}`}>세부정보</Link>
+                    {template.status === "approved" && (
+                      <Link className={styles.primaryLink} href={`/generate?templateId=${template.id}`}>문서 생성</Link>
+                    )}
                   </div>
                 </article>
               ))}

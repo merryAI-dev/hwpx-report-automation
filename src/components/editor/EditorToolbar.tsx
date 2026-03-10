@@ -336,6 +336,12 @@ export function EditorToolbar({
               </>
             ) : null}
             <div className={styles.navShortcuts}>
+              <Link className={styles.navShortcut} href="/dashboard">
+                홈
+              </Link>
+              <Link className={styles.navShortcut} href="/search" title="전체 검색">
+                🔍
+              </Link>
               <Link className={styles.navShortcut} href="/documents">
                 문서함
               </Link>

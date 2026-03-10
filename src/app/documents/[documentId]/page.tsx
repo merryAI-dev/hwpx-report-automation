@@ -9,8 +9,17 @@ import type {
   WorkspaceDocumentVersionSummary,
   WorkspacePermissionEntry,
 } from "@/lib/workspace-types";
+import type { WorkspaceComment } from "@/lib/server/comment-store";
 import VersionDiffView from "@/components/editor/VersionDiffView";
 import styles from "../../workspace.module.css";
+
+function relativeTime(isoString: string): string {
+  const diff = Date.now() - new Date(isoString).getTime();
+  if (diff < 60000) return "방금 전";
+  if (diff < 3600000) return `${Math.floor(diff / 60000)}분 전`;
+  if (diff < 86400000) return `${Math.floor(diff / 3600000)}시간 전`;
+  return `${Math.floor(diff / 86400000)}일 전`;
+}
 
 function badgeClass(status: WorkspaceDocumentDetail["status"]): string {
   if (status === "ready") return `${styles.badge} ${styles.badgeReady}`;
@@ -38,6 +47,23 @@ export default function DocumentDetailPage() {
   });
   const [previewBlobId, setPreviewBlobId] = useState<string | null>(null);
   const [diffPair, setDiffPair] = useState<[WorkspaceDocumentVersionSummary, WorkspaceDocumentVersionSummary] | null>(null);
+  const [comments, setComments] = useState<WorkspaceComment[]>([]);
+  const [showResolved, setShowResolved] = useState(false);
+  const [commentBody, setCommentBody] = useState("");
+  const [commentSegmentId, setCommentSegmentId] = useState("");
+  const [showSegmentInput, setShowSegmentInput] = useState(false);
+  const [commentError, setCommentError] = useState("");
+  const [commentSaving, setCommentSaving] = useState(false);
+
+  const loadComments = useCallback(async (includeResolved = false) => {
+    try {
+      const res = await fetch(`/api/documents/${documentId}/comments?includeResolved=${includeResolved}`, { cache: "no-store" });
+      const payload = (await res.json().catch(() => ({}))) as { comments?: WorkspaceComment[] };
+      setComments(payload.comments || []);
+    } catch {
+      setComments([]);
+    }
+  }, [documentId]);
 
   const loadDocument = useCallback(async () => {
     setLoading(true);
@@ -69,8 +95,9 @@ export default function DocumentDetailPage() {
   useEffect(() => {
     if (documentId) {
       void loadDocument();
+      void loadComments(false);
     }
-  }, [documentId, loadDocument]);
+  }, [documentId, loadDocument, loadComments]);
 
   const onSaveMetadata = async () => {
     setSaving(true);
@@ -161,6 +188,63 @@ export default function DocumentDetailPage() {
     } finally {
       setSaving(false);
     }
+  };
+
+  const onCreateComment = async () => {
+    if (!commentBody.trim()) return;
+    setCommentSaving(true);
+    setCommentError("");
+    try {
+      const response = await fetch(`/api/documents/${documentId}/comments`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ body: commentBody.trim(), segmentId: commentSegmentId.trim() || null }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { comment?: WorkspaceComment; error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "댓글 작성 실패");
+      }
+      setCommentBody("");
+      setCommentSegmentId("");
+      setShowSegmentInput(false);
+      await loadComments(showResolved);
+    } catch (err) {
+      setCommentError(err instanceof Error ? err.message : "댓글 작성 실패");
+    } finally {
+      setCommentSaving(false);
+    }
+  };
+
+  const onResolveComment = async (commentId: string) => {
+    try {
+      const response = await fetch(`/api/documents/${documentId}/comments/${commentId}`, { method: "PATCH" });
+      const payload = (await response.json().catch(() => ({}))) as { comment?: WorkspaceComment; error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "댓글 해결 실패");
+      }
+      await loadComments(showResolved);
+    } catch (err) {
+      setCommentError(err instanceof Error ? err.message : "댓글 해결 실패");
+    }
+  };
+
+  const onDeleteComment = async (commentId: string) => {
+    try {
+      const response = await fetch(`/api/documents/${documentId}/comments/${commentId}`, { method: "DELETE" });
+      const payload = (await response.json().catch(() => ({}))) as { ok?: boolean; error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "댓글 삭제 실패");
+      }
+      await loadComments(showResolved);
+    } catch (err) {
+      setCommentError(err instanceof Error ? err.message : "댓글 삭제 실패");
+    }
+  };
+
+  const onToggleShowResolved = async () => {
+    const next = !showResolved;
+    setShowResolved(next);
+    await loadComments(next);
   };
 
   return (
@@ -358,6 +442,114 @@ export default function DocumentDetailPage() {
                   </tbody>
                 </table>
               )}
+            </section>
+
+            <section className={styles.panel}>
+              <div className={styles.row}>
+                <h2 className={styles.cardTitle}>댓글 {comments.length}개</h2>
+                <button
+                  type="button"
+                  className={styles.inlineButton}
+                  onClick={() => void onToggleShowResolved()}
+                >
+                  {showResolved ? "해결됨 숨기기" : "해결됨 보기"}
+                </button>
+              </div>
+              {commentError ? <div className={styles.error}>{commentError}</div> : null}
+              {!comments.length ? (
+                <div className={styles.empty}>댓글이 없습니다.</div>
+              ) : (
+                <div className={styles.list}>
+                  {comments.map((comment) => (
+                    <div key={comment.id} className={styles.listItem}>
+                      <div className={styles.row}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          <span
+                            style={{
+                              display: "inline-flex",
+                              alignItems: "center",
+                              justifyContent: "center",
+                              width: "28px",
+                              height: "28px",
+                              borderRadius: "50%",
+                              background: "#6366f1",
+                              color: "#fff",
+                              fontSize: "12px",
+                              fontWeight: 700,
+                              flexShrink: 0,
+                            }}
+                          >
+                            {comment.createdByDisplayName.charAt(0).toUpperCase()}
+                          </span>
+                          <strong>{comment.createdByDisplayName}</strong>
+                          {comment.resolved ? (
+                            <span className={`${styles.badge} ${styles.badgeReady}`}>해결됨</span>
+                          ) : null}
+                        </div>
+                        <span className={styles.muted}>{relativeTime(comment.createdAt)}</span>
+                      </div>
+                      {comment.segmentId ? (
+                        <span className={styles.code}>{comment.segmentId}</span>
+                      ) : null}
+                      <div style={{ fontSize: "14px", lineHeight: 1.6, textDecoration: comment.resolved ? "line-through" : "none", color: comment.resolved ? "#94a3b8" : "inherit" }}>
+                        {comment.body}
+                      </div>
+                      <div className={styles.nav}>
+                        {!comment.resolved ? (
+                          <button
+                            type="button"
+                            className={styles.inlineButton}
+                            onClick={() => void onResolveComment(comment.id)}
+                          >
+                            해결
+                          </button>
+                        ) : null}
+                        <button
+                          type="button"
+                          className={styles.inlineButton}
+                          onClick={() => void onDeleteComment(comment.id)}
+                        >
+                          삭제
+                        </button>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
+              <div className={styles.form}>
+                <textarea
+                  className={styles.textarea}
+                  placeholder="댓글을 입력하세요..."
+                  value={commentBody}
+                  onChange={(e) => setCommentBody(e.target.value)}
+                  rows={3}
+                />
+                <div>
+                  <button
+                    type="button"
+                    className={styles.inlineButton}
+                    onClick={() => setShowSegmentInput((prev) => !prev)}
+                  >
+                    {showSegmentInput ? "▲ 세그먼트 ID 숨기기" : "▼ 세그먼트 ID 입력 (선택)"}
+                  </button>
+                </div>
+                {showSegmentInput ? (
+                  <input
+                    className={styles.input}
+                    placeholder="세그먼트 ID (선택)"
+                    value={commentSegmentId}
+                    onChange={(e) => setCommentSegmentId(e.target.value)}
+                  />
+                ) : null}
+                <button
+                  type="button"
+                  className={styles.primaryButton}
+                  onClick={() => void onCreateComment()}
+                  disabled={commentSaving || !commentBody.trim()}
+                >
+                  댓글 작성
+                </button>
+              </div>
             </section>
           </>
         ) : null}
