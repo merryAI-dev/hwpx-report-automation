@@ -15,6 +15,7 @@ import type {
   WorkspaceTemplateDetail,
   WorkspaceTemplateSummary,
   WorkspaceTemplateVersionSummary,
+  TemplateVersionReview,
 } from "@/lib/workspace-types";
 import { resolveBlobStorageRoot } from "@/lib/server/blob-store";
 
@@ -34,7 +35,7 @@ const ROLE_RANK: Record<WorkspaceAccessRole, number> = {
   owner: 4,
 };
 
-type WorkspaceEnv = NodeJS.ProcessEnv | Partial<Pick<NodeJS.ProcessEnv, "BLOB_STORAGE_FS_ROOT">>;
+export type WorkspaceEnv = NodeJS.ProcessEnv | Partial<Pick<NodeJS.ProcessEnv, "BLOB_STORAGE_FS_ROOT">>;
 
 export type WorkspaceActor = {
   userId: string;
@@ -1075,4 +1076,50 @@ export async function duplicateWorkspaceDocument(params: {
   );
 
   return newDocument;
+}
+
+// ── Template Version Review ───────────────────────────────────────────────────
+
+function templateVersionReviewPath(
+  tenantId: string,
+  templateId: string,
+  versionId: string,
+  env?: WorkspaceEnv,
+): string {
+  return path.join(
+    templateRoot(tenantId, templateId, env),
+    VERSIONS_DIR,
+    `${sanitizeId(versionId, "versionId")}.review.json`,
+  );
+}
+
+export async function saveTemplateVersionReview(params: {
+  tenantId: string;
+  templateId: string;
+  versionId: string;
+  review: TemplateVersionReview;
+  env?: WorkspaceEnv;
+}): Promise<void> {
+  const filePath = templateVersionReviewPath(
+    params.tenantId,
+    params.templateId,
+    params.versionId,
+    params.env,
+  );
+  await writeJsonFile(filePath, params.review);
+}
+
+export async function getTemplateVersionReview(params: {
+  tenantId: string;
+  templateId: string;
+  versionId: string;
+  env?: WorkspaceEnv;
+}): Promise<TemplateVersionReview | null> {
+  const filePath = templateVersionReviewPath(
+    params.tenantId,
+    params.templateId,
+    params.versionId,
+    params.env,
+  );
+  return readJsonFile<TemplateVersionReview>(filePath);
 }

@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useCallback, useEffect, useState } from "react";
-import type { WorkspaceTemplateDetail, WorkspaceTemplateVersionSummary } from "@/lib/workspace-types";
+import type { WorkspaceTemplateDetail, WorkspaceTemplateVersionSummary, TemplateVersionReview } from "@/lib/workspace-types";
 import type { TemplateCatalogDiff } from "@/lib/server/template-diff";
 import styles from "../../workspace.module.css";
 
@@ -28,6 +28,8 @@ export default function TemplateDetailPage() {
   const [diffToVersion, setDiffToVersion] = useState("");
   const [diff, setDiff] = useState<TemplateCatalogDiff | null>(null);
   const [diffError, setDiffError] = useState("");
+  const [reviews, setReviews] = useState<Record<string, TemplateVersionReview>>({});
+  const [reviewingVersionId, setReviewingVersionId] = useState<string | null>(null);
 
   const loadTemplate = useCallback(async () => {
     setLoading(true);
@@ -96,6 +98,27 @@ export default function TemplateDetailPage() {
       setDiff(payload.diff || null);
     } catch (err) {
       setDiffError(err instanceof Error ? err.message : "버전 비교 실패");
+    }
+  };
+
+  const onRequestReview = async (versionId: string) => {
+    setReviewingVersionId(versionId);
+    try {
+      const response = await fetch(
+        `/api/templates/${templateId}/versions/${versionId}/review`,
+        { method: "POST" },
+      );
+      const payload = (await response.json().catch(() => ({}))) as { review?: TemplateVersionReview; error?: string };
+      if (!response.ok) {
+        throw new Error(payload.error || "AI 검토 요청 실패");
+      }
+      if (payload.review) {
+        setReviews((prev) => ({ ...prev, [versionId]: payload.review! }));
+      }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "AI 검토 요청 실패");
+    } finally {
+      setReviewingVersionId(null);
     }
   };
 
@@ -221,6 +244,23 @@ export default function TemplateDetailPage() {
             </section>
 
             <section className={styles.panel}>
+              <div className={styles.row}><h2 className={styles.cardTitle}>커버리지 현황</h2></div>
+              {(() => {
+                const blocking = template.blockingIssueCount;
+                const healthLabel = blocking === 0 ? "정상" : blocking <= 2 ? "주의" : "위험";
+                const healthColor = blocking === 0 ? "#22c55e" : blocking <= 2 ? "#f59e0b" : "#ef4444";
+                return (
+                  <div className={styles.badgeRow}>
+                    <span className={styles.badge}>필드 {template.fieldCount}</span>
+                    <span className={styles.badge}>이슈 {template.issueCount}</span>
+                    <span className={styles.badge}>차단 {template.blockingIssueCount}</span>
+                    <span className={styles.badge} style={{ backgroundColor: healthColor, color: "#fff" }}>{healthLabel}</span>
+                  </div>
+                );
+              })()}
+            </section>
+
+            <section className={styles.panel}>
               <div className={styles.row}><h2 className={styles.cardTitle}>새 버전 업로드</h2></div>
               <form className={styles.form} onSubmit={onUploadVersion}>
                 <div className={styles.formRow}>
@@ -236,23 +276,55 @@ export default function TemplateDetailPage() {
               <div className={styles.row}><h2 className={styles.cardTitle}>버전 이력</h2></div>
               {!versions.length ? <div className={styles.empty}>버전 이력이 없습니다.</div> : (
                 <div className={styles.list}>
-                  {versions.map((version) => (
-                    <div key={version.id} className={styles.listItem}>
-                      <div className={styles.row}>
-                        <strong>v{version.versionNumber}</strong>
-                        <span className={styles.muted}>{new Date(version.createdAt).toLocaleString("ko-KR")}</span>
+                  {versions.map((version) => {
+                    const review = reviews[version.id];
+                    const isReviewing = reviewingVersionId === version.id;
+                    const verdictColor = review?.verdict === "approve"
+                      ? "#22c55e"
+                      : review?.verdict === "reject"
+                        ? "#ef4444"
+                        : "#f59e0b";
+                    const verdictLabel = review?.verdict === "approve"
+                      ? "승인"
+                      : review?.verdict === "reject"
+                        ? "거절"
+                        : "수정 필요";
+                    return (
+                      <div key={version.id} className={styles.listItem}>
+                        <div className={styles.row}>
+                          <strong>v{version.versionNumber}</strong>
+                          <span className={styles.muted}>{new Date(version.createdAt).toLocaleString("ko-KR")}</span>
+                          <button
+                            type="button"
+                            className={styles.secondaryButton}
+                            onClick={() => void onRequestReview(version.id)}
+                            disabled={isReviewing}
+                          >
+                            {isReviewing ? "검토 중..." : "AI 검토 요청"}
+                          </button>
+                        </div>
+                        <div className={styles.badgeRow}>
+                          <span className={styles.badge}>필드 {version.fieldCount}</span>
+                          <span className={styles.badge}>이슈 {version.issueCount}</span>
+                          <span className={styles.badge}>차단 {version.blockingIssueCount}</span>
+                          {review ? (
+                            <span className={styles.badge} style={{ backgroundColor: verdictColor, color: "#fff" }}>
+                              {verdictLabel}
+                            </span>
+                          ) : null}
+                        </div>
+                        {review ? (
+                          <div className={styles.muted} style={{ marginTop: "0.25rem" }}>
+                            {review.summary}
+                          </div>
+                        ) : null}
+                        <div className={styles.row}>
+                          <span className={styles.code}>{version.fileName}</span>
+                          {version.download ? <a className={styles.navLink} href={version.download.downloadUrl}>다운로드</a> : null}
+                        </div>
                       </div>
-                      <div className={styles.badgeRow}>
-                        <span className={styles.badge}>필드 {version.fieldCount}</span>
-                        <span className={styles.badge}>이슈 {version.issueCount}</span>
-                        <span className={styles.badge}>차단 {version.blockingIssueCount}</span>
-                      </div>
-                      <div className={styles.row}>
-                        <span className={styles.code}>{version.fileName}</span>
-                        {version.download ? <a className={styles.navLink} href={version.download.downloadUrl}>다운로드</a> : null}
-                      </div>
-                    </div>
-                  ))}
+                    );
+                  })}
                 </div>
               )}
             </section>

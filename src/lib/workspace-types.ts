@@ -158,3 +158,21 @@ export type CreateWorkspaceTemplatePayload = {
   blob: WorkspaceBlobReference;
   catalog: TemplateCatalog;
 };
+
+// ── AI Template Review ────────────────────────────────────────────────────────
+
+export type TemplateReviewVerdict = "approve" | "needs-work" | "reject";
+
+export type TemplateVersionReview = {
+  id: string;
+  templateId: string;
+  versionId: string;
+  verdict: TemplateReviewVerdict;
+  summary: string;
+  concerns: string[];
+  suggestions: string[];
+  createdAt: string;
+  createdBy: string;
+  createdByDisplayName: string;
+  model: string;
+};
