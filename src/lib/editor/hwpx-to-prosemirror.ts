@@ -2,6 +2,8 @@ import JSZip from "jszip";
 import type { JSONContent } from "@tiptap/core";
 import { inspectHwpx, scanTopLevelBlocks } from "../hwpx";
 import type { HwpxDocumentModel, HwpxSectionModel, HwpxParaNode, HwpxBlockSlot, HwpxRun } from "../../types/hwpx-model";
+import type { ComplexObjectReport } from "./hwpx-complex-objects";
+import { collectComplexObjectReport } from "./hwpx-complex-objects";
 
 export type EditorSegment = {
   segmentId: string;
@@ -19,6 +21,7 @@ export type ParsedProseMirrorDocument = {
   /** Maps primary segmentId → extra segmentIds merged into the same paragraph */
   extraSegmentsMap: Record<string, string[]>;
   integrityIssues: string[];
+  complexObjectReport: ComplexObjectReport;
   /** OWPML in-memory model for lossless para-snapshot round-trip. Null for non-HWPX. */
   hwpxDocumentModel: HwpxDocumentModel | null;
 };
@@ -1335,6 +1338,7 @@ export async function parseHwpxToProseMirror(fileBuffer: ArrayBuffer): Promise<P
   const usedSegments: EditorSegment[] = [];
   const content: JSONContent[] = [];
   const extraSegmentsMap: Record<string, string[]> = {};
+  const sectionDocs: Array<{ fileName: string; doc: Document }> = [];
 
   // OWPML in-memory model
   const paraStore = new Map<string, HwpxParaNode>();
@@ -1347,6 +1351,7 @@ export async function parseHwpxToProseMirror(fileBuffer: ArrayBuffer): Promise<P
     if (parseError || !doc.documentElement) {
       continue;
     }
+    sectionDocs.push({ fileName, doc });
 
     const pool = segmentsByFile.get(fileName) || [];
     // Build a direct Element→EditorSegment map by traversing the DOM in
@@ -1404,6 +1409,7 @@ export async function parseHwpxToProseMirror(fileBuffer: ArrayBuffer): Promise<P
     hwpxSections.length > 0
       ? { sections: hwpxSections, paraStore, headerXml: headerXmlText, baseBuffer: fileBuffer }
       : { sections: [], paraStore: new Map(), headerXml: "", baseBuffer: fileBuffer };
+  const complexObjectReport = collectComplexObjectReport(sectionDocs);
 
   return {
     doc: {
@@ -1413,6 +1419,7 @@ export async function parseHwpxToProseMirror(fileBuffer: ArrayBuffer): Promise<P
     segments: usedSegments,
     extraSegmentsMap,
     integrityIssues: inspected.integrityIssues,
+    complexObjectReport,
     hwpxDocumentModel: hwpxSections.length > 0 ? hwpxDocumentModel : null,
   };
 }

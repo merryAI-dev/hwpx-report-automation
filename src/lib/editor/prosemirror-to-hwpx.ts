@@ -5,6 +5,7 @@ import type { TextEdit } from "../hwpx";
 import type { EditorSegment } from "./hwpx-to-prosemirror";
 import type { HwpxDocumentModel, HwpxRun } from "../../types/hwpx-model";
 import { markFingerprint, ensureCharPrForMarks, clearCharPrCaches } from "./marks-to-charpr";
+import { buildCompatibilityWarning } from "./hwpx-compatibility";
 
 type MetadataAttrs = {
   segmentId?: string;
@@ -833,6 +834,7 @@ function collectTablePatches(doc: JSONContent): TablePatchCollectResult {
     const tableAttrs = (node.attrs || {}) as TableMetadataAttrs;
     const tableId = String(tableAttrs.tableId || "").trim();
     if (!tableId) {
+      warnings.push(buildCompatibilityWarning("table.new-table-without-id"));
       // New table created in the editor — collect for insertion
       const rows = getRowNodes(node);
       const rowPatches: TableRowPatch[] = [];
@@ -857,7 +859,7 @@ function collectTablePatches(doc: JSONContent): TablePatchCollectResult {
     }
     const target = parseTableId(tableId);
     if (!target) {
-      warnings.push(`tableId 형식이 올바르지 않아 표 반영을 건너뜁니다: ${tableId}`);
+      warnings.push(buildCompatibilityWarning("table.invalid-table-id", tableId));
       return;
     }
 
@@ -1530,7 +1532,7 @@ function collectLetterSpacingEdits(
   const registerEdit = (segment: EditorSegment, nextSpacing: number): void => {
     const sourceCharPrIDRef = readSegmentCharPrIDRef(segment);
     if (!sourceCharPrIDRef) {
-      warnings.push(`segment(${segment.segmentId})의 charPrIDRef를 찾지 못해 자간 반영을 건너뜁니다.`);
+      warnings.push(buildCompatibilityWarning("paragraph-style.letter-spacing-without-charpr", segment.segmentId));
       return;
     }
     if (readSegmentLetterSpacing(segment) === nextSpacing) {
@@ -2483,7 +2485,7 @@ export function collectDocumentEdits(
     const segmentId = attrs.segmentId;
     if (!segmentId) {
       if (text.trim()) {
-        warnings.push("metadata 없는 새 텍스트 블록은 현재 HWPX 내보내기에 반영되지 않습니다.");
+        warnings.push(buildCompatibilityWarning("text.new-block-without-metadata"));
       }
       return;
     }
@@ -2491,7 +2493,7 @@ export function collectDocumentEdits(
     const source = bySegmentId.get(segmentId);
     if (!source) {
       if (text.trim()) {
-        warnings.push(`알 수 없는 segmentId(${segmentId}) 텍스트는 건너뜁니다.`);
+        warnings.push(buildCompatibilityWarning("text.unknown-segment-id", segmentId));
       }
       return;
     }

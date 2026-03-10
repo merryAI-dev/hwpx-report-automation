@@ -4,6 +4,7 @@ import type {
   DocumentContext,
   DocumentContextSegment,
 } from "@/types/chat";
+import { withApiAuth } from "@/lib/auth/with-api-auth";
 import { requireApiKey } from "@/lib/api-utils";
 import { extractErrorMessage } from "@/lib/errors";
 import { log } from "@/lib/logger";
@@ -236,7 +237,7 @@ function sendSSE(
 
 /* ── Route handler ── */
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   // ── Rate limiting ──
   const rateLimitResp = checkRateLimit(getClientIp(request));
   if (rateLimitResp) return rateLimitResp;
@@ -354,6 +355,8 @@ export async function POST(request: Request) {
     },
   });
 }
+
+export const POST = withApiAuth(handlePost);
 
 /* ── Agent loop: streaming + correct multi-tool handling ── */
 

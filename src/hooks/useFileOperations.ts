@@ -249,6 +249,7 @@ export function useFileOperations(editor: Editor | null) {
           segments: parsed.segments,
           extraSegmentsMap: parsed.extraSegmentsMap,
           integrityIssues: parsed.integrityIssues,
+          complexObjectReport: parsed.complexObjectReport ?? null,
           hwpxDocumentModel: hwpxModel,
         });
         setOutline(buildOutlineFromDoc(parsed.doc));
@@ -630,6 +631,7 @@ export function useFileOperations(editor: Editor | null) {
           segments,
           extraSegmentsMap: parsedExtraMap,
           integrityIssues: [],
+          complexObjectReport: null,
           hwpxDocumentModel: null,
         });
         setOutline(buildOutlineFromDoc(doc));

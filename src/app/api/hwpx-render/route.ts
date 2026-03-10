@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { withApiAuth } from "@/lib/auth/with-api-auth";
 import { ValidationError, ApiError } from "@/lib/errors";
 import { handleApiError, withTimeout } from "@/lib/api-utils";
 import { log } from "@/lib/logger";
@@ -16,10 +17,11 @@ const RENDER_TIMEOUT_MS = 30_000;
  */
 const MAX_FILE_SIZE_BYTES = 10 * 1024 * 1024; // 10 MB
 
-export async function POST(req: NextRequest) {
+async function handlePost(req: NextRequest) {
   // ── Rate limiting ──
   const rateLimitResp = checkRateLimit(getClientIp(req));
   if (rateLimitResp) return rateLimitResp;
+
 
   try {
     const formData = await req.formData();
@@ -69,3 +71,5 @@ export async function POST(req: NextRequest) {
     return handleApiError(error, "/api/hwpx-render");
   }
 }
+
+export const POST = withApiAuth(handlePost);

@@ -1,176 +1,230 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+// @vitest-environment node
+
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { NextRequest } from "next/server";
+import { SESSION_COOKIE_NAME, createSessionToken } from "@/lib/auth/session";
 
 const {
-  mockFindMany,
-  mockCreate,
+  listWorkspaceDocumentsMock,
+  createWorkspaceDocumentMock,
+  getWorkspaceDocumentMock,
+  createWorkspaceDocumentVersionMock,
 } = vi.hoisted(() => ({
-  mockFindMany: vi.fn(),
-  mockCreate: vi.fn(),
+  listWorkspaceDocumentsMock: vi.fn(),
+  createWorkspaceDocumentMock: vi.fn(),
+  getWorkspaceDocumentMock: vi.fn(),
+  createWorkspaceDocumentVersionMock: vi.fn(),
 }));
 
-vi.mock("@/lib/persistence/client", () => ({
-  prisma: {
-    document: {
-      findMany: mockFindMany,
-      create: mockCreate,
-    },
-  },
+vi.mock("@/lib/server/workspace-store", () => ({
+  listWorkspaceDocuments: listWorkspaceDocumentsMock,
+  createWorkspaceDocument: createWorkspaceDocumentMock,
+  getWorkspaceDocument: getWorkspaceDocumentMock,
+  createWorkspaceDocumentVersion: createWorkspaceDocumentVersionMock,
 }));
 
-vi.mock("@/lib/logger", () => ({
-  log: {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-  },
-}));
+const { GET, POST } = await import("@/app/api/documents/route");
+const { GET: GET_DETAIL } = await import("@/app/api/documents/[documentId]/route");
+const { POST: POST_VERSION } = await import("@/app/api/documents/[documentId]/versions/route");
 
-vi.mock("@/lib/api-validation", () => ({
-  checkRateLimit: vi.fn(() => null),
-  getClientIp: vi.fn(() => "127.0.0.1"),
-}));
+const ORIGINAL_ENV = { ...process.env };
 
-import { GET, POST } from "./route";
+afterEach(() => {
+  process.env = { ...ORIGINAL_ENV };
+  listWorkspaceDocumentsMock.mockReset();
+  createWorkspaceDocumentMock.mockReset();
+  getWorkspaceDocumentMock.mockReset();
+  createWorkspaceDocumentVersionMock.mockReset();
+});
 
-describe("/api/documents", () => {
-  beforeEach(() => {
-    mockFindMany.mockReset();
-    mockCreate.mockReset();
+describe("documents routes", () => {
+  it("lists tenant documents for an authenticated session", async () => {
+    process.env.AUTH_SECRET = "test-secret";
+    const token = await createSessionToken({
+      sub: "user-1",
+      email: "admin@example.com",
+      displayName: "Admin",
+      memberships: [{ tenantId: "alpha", tenantName: "Alpha", role: "owner" }],
+      activeTenantId: "alpha",
+      provider: { id: "password", type: "password", displayName: "Password" },
+    });
+    listWorkspaceDocumentsMock.mockResolvedValue([{ id: "doc-1", title: "주간", status: "draft" }]);
+
+    const response = await GET(new NextRequest("http://localhost/api/documents?q=%EC%A3%BC", {
+      method: "GET",
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}` },
+    }) as never);
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toEqual({ documents: [{ id: "doc-1", title: "주간", status: "draft" }] });
+    expect(listWorkspaceDocumentsMock).toHaveBeenCalledWith(expect.objectContaining({ tenantId: "alpha", query: "주" }));
   });
 
-  describe("GET — list documents", () => {
-    it("returns a list of documents", async () => {
-      const now = new Date();
-      mockFindMany.mockResolvedValue([
-        { id: "doc1", name: "Test.hwpx", sizeBytes: 1024, createdAt: now, updatedAt: now },
-      ]);
-
-      const res = await GET(new Request("http://localhost/api/documents"));
-      expect(res.status).toBe(200);
-
-      const json = await res.json();
-      expect(json.documents).toHaveLength(1);
-      expect(json.documents[0].id).toBe("doc1");
-      expect(json.documents[0].name).toBe("Test.hwpx");
+  it("creates a document and returns the current version download metadata", async () => {
+    process.env.AUTH_SECRET = "test-secret";
+    const token = await createSessionToken("admin@example.com");
+    createWorkspaceDocumentMock.mockResolvedValue({
+      id: "doc-1",
+      tenantId: "default",
+      title: "보고서",
+      status: "draft",
+      sourceFormat: "hwpx",
+      currentVersionId: "ver-1",
+      currentVersionNumber: 1,
+      templateCatalogVersion: null,
+      templateFieldCount: 0,
+      validationSummary: null,
+      createdAt: "2026-03-10T00:00:00.000Z",
+      updatedAt: "2026-03-10T00:00:00.000Z",
+      createdBy: "dev:admin@example.com",
+      createdByDisplayName: "admin",
+      updatedBy: "dev:admin@example.com",
+      updatedByDisplayName: "admin",
+      permissions: [],
+      currentVersion: {
+        id: "ver-1",
+        documentId: "doc-1",
+        versionNumber: 1,
+        label: "manual-save",
+        fileName: "report.hwpx",
+        blob: {
+          blobId: "blob-1",
+          provider: "fs",
+          fileName: "report.hwpx",
+          contentType: "application/zip",
+          byteLength: 12,
+          createdAt: "2026-03-10T00:00:00.000Z",
+        },
+        templateCatalogVersion: null,
+        templateFieldCount: 0,
+        validationSummary: null,
+        createdAt: "2026-03-10T00:00:00.000Z",
+        createdBy: "dev:admin@example.com",
+        createdByDisplayName: "admin",
+      },
     });
 
-    it("returns empty list when no documents", async () => {
-      mockFindMany.mockResolvedValue([]);
+    const response = await POST(new Request("http://localhost/api/documents", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+      },
+      body: JSON.stringify({
+        title: "보고서",
+        label: "manual-save",
+        fileName: "report.hwpx",
+        sourceFormat: "hwpx",
+        blob: {
+          blobId: "blob-1",
+          provider: "fs",
+          fileName: "report.hwpx",
+          contentType: "application/zip",
+          byteLength: 12,
+          createdAt: "2026-03-10T00:00:00.000Z",
+        },
+      }),
+    }) as never);
 
-      const res = await GET(new Request("http://localhost/api/documents"));
-      expect(res.status).toBe(200);
-
-      const json = await res.json();
-      expect(json.documents).toEqual([]);
-    });
-
-    it("returns 500 on database error", async () => {
-      mockFindMany.mockRejectedValue(new Error("DB error"));
-
-      const res = await GET(new Request("http://localhost/api/documents"));
-      expect(res.status).toBe(500);
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      document: {
+        id: "doc-1",
+        currentVersion: {
+          download: {
+            downloadUrl: expect.stringContaining("/api/blob/download/blob-1?"),
+          },
+        },
+      },
     });
   });
 
-  describe("POST — create document", () => {
-    it("creates a document with valid input", async () => {
-      const now = new Date();
-      mockCreate.mockResolvedValue({
-        id: "new-doc",
-        name: "New.hwpx",
-        sizeBytes: 0,
-        createdAt: now,
-        updatedAt: now,
-      });
-
-      const res = await POST(new Request("http://localhost/api/documents", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "New.hwpx",
-          docJson: '{"type":"doc","content":[]}',
-        }),
-      }));
-
-      expect(res.status).toBe(201);
-      const json = await res.json();
-      expect(json.id).toBe("new-doc");
-      expect(json.name).toBe("New.hwpx");
+  it("returns document detail for dynamic routes", async () => {
+    process.env.AUTH_SECRET = "test-secret";
+    const token = await createSessionToken("admin@example.com");
+    getWorkspaceDocumentMock.mockResolvedValue({
+      id: "doc-1",
+      tenantId: "default",
+      title: "문서",
+      status: "draft",
+      sourceFormat: "hwpx",
+      currentVersionId: "ver-1",
+      currentVersionNumber: 1,
+      templateCatalogVersion: null,
+      templateFieldCount: 0,
+      validationSummary: null,
+      createdAt: "2026-03-10T00:00:00.000Z",
+      updatedAt: "2026-03-10T00:00:00.000Z",
+      createdBy: "dev:admin@example.com",
+      createdByDisplayName: "admin",
+      updatedBy: "dev:admin@example.com",
+      updatedByDisplayName: "admin",
+      permissions: [],
+      currentVersion: null,
     });
 
-    it("returns 400 when name is missing", async () => {
-      const res = await POST(new Request("http://localhost/api/documents", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ docJson: '{}' }),
-      }));
+    const response = await GET_DETAIL(new Request("http://localhost/api/documents/doc-1", {
+      method: "GET",
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}` },
+    }) as never, { params: Promise.resolve({ documentId: "doc-1" }) });
 
-      expect(res.status).toBe(400);
+    expect(response.status).toBe(200);
+  });
+
+  it("creates a new document version", async () => {
+    process.env.AUTH_SECRET = "test-secret";
+    const token = await createSessionToken("admin@example.com");
+    createWorkspaceDocumentVersionMock.mockResolvedValue({
+      id: "ver-2",
+      documentId: "doc-1",
+      versionNumber: 2,
+      label: "auto-save",
+      fileName: "report-v2.hwpx",
+      blob: {
+        blobId: "blob-2",
+        provider: "fs",
+        fileName: "report-v2.hwpx",
+        contentType: "application/zip",
+        byteLength: 16,
+        createdAt: "2026-03-10T01:00:00.000Z",
+      },
+      templateCatalogVersion: null,
+      templateFieldCount: 0,
+      validationSummary: null,
+      createdAt: "2026-03-10T01:00:00.000Z",
+      createdBy: "dev:admin@example.com",
+      createdByDisplayName: "admin",
     });
 
-    it("returns 400 when docJson is missing", async () => {
-      const res = await POST(new Request("http://localhost/api/documents", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ name: "Test.hwpx" }),
-      }));
+    const response = await POST_VERSION(new Request("http://localhost/api/documents/doc-1/versions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+      },
+      body: JSON.stringify({
+        label: "auto-save",
+        fileName: "report-v2.hwpx",
+        sourceFormat: "hwpx",
+        blob: {
+          blobId: "blob-2",
+          provider: "fs",
+          fileName: "report-v2.hwpx",
+          contentType: "application/zip",
+          byteLength: 16,
+          createdAt: "2026-03-10T01:00:00.000Z",
+        },
+      }),
+    }) as never, { params: Promise.resolve({ documentId: "doc-1" }) });
 
-      expect(res.status).toBe(400);
-    });
-
-    it("returns 400 when name exceeds 255 characters", async () => {
-      const res = await POST(new Request("http://localhost/api/documents", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "a".repeat(256) + ".hwpx",
-          docJson: '{}',
-        }),
-      }));
-
-      expect(res.status).toBe(400);
-    });
-
-    it("returns 400 when name contains path traversal", async () => {
-      const res = await POST(new Request("http://localhost/api/documents", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "../etc/passwd",
-          docJson: '{}',
-        }),
-      }));
-
-      expect(res.status).toBe(400);
-    });
-
-    it("returns 400 when name contains invalid characters", async () => {
-      const res = await POST(new Request("http://localhost/api/documents", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "test<script>.hwpx",
-          docJson: '{}',
-        }),
-      }));
-
-      expect(res.status).toBe(400);
-    });
-
-    it("returns 500 on database error", async () => {
-      mockCreate.mockRejectedValue(new Error("DB error"));
-
-      const res = await POST(new Request("http://localhost/api/documents", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          name: "Test.hwpx",
-          docJson: '{}',
-        }),
-      }));
-
-      expect(res.status).toBe(500);
+    expect(response.status).toBe(201);
+    await expect(response.json()).resolves.toMatchObject({
+      version: {
+        id: "ver-2",
+        download: {
+          downloadUrl: expect.stringContaining("/api/blob/download/blob-2?"),
+        },
+      },
     });
   });
 });

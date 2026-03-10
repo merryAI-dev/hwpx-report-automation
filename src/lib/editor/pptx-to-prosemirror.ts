@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import type { JSONContent } from "@tiptap/core";
 import type { EditorSegment, ParsedProseMirrorDocument } from "./hwpx-to-prosemirror";
+import { createEmptyComplexObjectReport } from "./hwpx-complex-objects";
 
 const SOURCE_NAME = "pptx";
 
@@ -39,6 +40,7 @@ export async function parsePptxToProseMirror(
       segments: [],
       extraSegmentsMap: {},
       integrityIssues: warnings,
+      complexObjectReport: createEmptyComplexObjectReport(),
       hwpxDocumentModel: null,
     };
   }
@@ -282,6 +284,7 @@ function slidesToDocument(
     segments,
     extraSegmentsMap: {},
     integrityIssues: warnings,
+    complexObjectReport: createEmptyComplexObjectReport(),
     hwpxDocumentModel: null,
   };
 }

@@ -12,6 +12,7 @@ import {
   applyBatchSegmentTexts,
 } from "@/lib/editor/editor-operations";
 import { getPreferredModel, checkCostLimit, getCostLimit } from "@/lib/preferences";
+import type { QualityGateIssue } from "@/lib/quality-gates";
 
 const BATCH_API_CHUNK_SIZE = 40;
 
@@ -130,7 +131,7 @@ export function useAiSuggestions(editor: Editor | null) {
       chunks.push(batchItems.slice(index, index + BATCH_API_CHUNK_SIZE));
     }
 
-    let accumulated: Array<{ id: string; suggestion: string }> = [];
+    let accumulated: Array<{ id: string; suggestion: string; qualityGate: { passed: boolean; requiresApproval: boolean; issues: QualityGateIssue[] } }> = [];
 
     try {
       const costError = await checkCostLimit();
@@ -163,6 +164,7 @@ export function useAiSuggestions(editor: Editor | null) {
           .map((row) => ({
             id: String(row.id || "").trim(),
             suggestion: String(row.suggestion || "").trim(),
+            qualityGate: { passed: true, requiresApproval: false, issues: [] },
           }))
           .filter((row) => row.id && row.suggestion);
         accumulated = [...accumulated, ...chunkResults];

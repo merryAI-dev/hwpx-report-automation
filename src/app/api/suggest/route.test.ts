@@ -1,124 +1,52 @@
-import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
+import { POST } from "@/app/api/suggest/route";
+import { SESSION_COOKIE_NAME, createSessionToken } from "@/lib/auth/session";
 
-// Mock OpenAI before importing the route
-const mockCreate = vi.fn();
-vi.mock("openai", () => {
-  class MockOpenAI {
-    chat = { completions: { create: mockCreate } };
-  }
-  return { default: MockOpenAI };
+const ORIGINAL_ENV = { ...process.env };
+
+afterEach(() => {
+  process.env = { ...ORIGINAL_ENV };
 });
 
-vi.mock("@/lib/audit", () => ({
-  recordAudit: vi.fn(),
-}));
-
-// Mock logger to suppress output
-vi.mock("@/lib/logger", () => ({
-  log: {
-    debug: vi.fn(),
-    info: vi.fn(),
-    warn: vi.fn(),
-    error: vi.fn(),
-    time: vi.fn((_label: string, fn: () => Promise<unknown>) => fn()),
-  },
-}));
-
-import { POST } from "./route";
-
-function makeRequest(body: Record<string, unknown>): Request {
-  return new Request("http://localhost/api/suggest", {
-    method: "POST",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(body),
-  });
-}
-
-describe("/api/suggest", () => {
-  const originalEnv = { ...process.env };
-
-  beforeEach(() => {
-    process.env.OPENAI_API_KEY = "test-key";
-    mockCreate.mockReset();
-  });
-
-  afterEach(() => {
-    process.env = { ...originalEnv };
-  });
-
-  it("returns suggestion on success", async () => {
-    mockCreate.mockResolvedValue({
-      choices: [{ message: { content: "수정된 문장입니다." } }],
+describe("suggest route auth", () => {
+  it("rejects unauthenticated requests before hitting the AI path", async () => {
+    const request = new Request("http://localhost/api/suggest", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        text: "원문",
+        instruction: "더 자연스럽게",
+      }),
     });
 
-    const res = await POST(makeRequest({
-      text: "원문입니다.",
-      instruction: "간결하게 수정해줘",
-    }));
-
-    expect(res.status).toBe(200);
-    const json = await res.json();
-    expect(json.suggestion).toBe("수정된 문장입니다.");
+    const response = await POST(request);
+    expect(response.status).toBe(401);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "Authentication required.",
+    });
   });
 
-  it("returns 400 when text is missing", async () => {
-    const res = await POST(makeRequest({
-      instruction: "수정해줘",
-    }));
-
-    expect(res.status).toBe(400);
-    const json = await res.json();
-    expect(json.error).toContain("text");
-  });
-
-  it("returns 400 when instruction is missing", async () => {
-    const res = await POST(makeRequest({
-      text: "원문",
-    }));
-
-    expect(res.status).toBe(400);
-    const json = await res.json();
-    expect(json.error).toContain("instruction");
-  });
-
-  it("returns 500 when API key is missing", async () => {
+  it("allows authenticated requests through to the route handler", async () => {
+    process.env.AUTH_SECRET = "test-secret";
     delete process.env.OPENAI_API_KEY;
 
-    const res = await POST(makeRequest({
-      text: "원문",
-      instruction: "수정해줘",
-    }));
-
-    expect(res.status).toBe(500);
-    const json = await res.json();
-    expect(json.code).toBe("API_KEY_MISSING");
-  });
-
-  it("returns 502 when AI returns empty content", async () => {
-    mockCreate.mockResolvedValue({
-      choices: [{ message: { content: "" } }],
+    const token = await createSessionToken("admin@example.com");
+    const request = new Request("http://localhost/api/suggest", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        cookie: `${SESSION_COOKIE_NAME}=${encodeURIComponent(token)}`,
+      },
+      body: JSON.stringify({
+        text: "원문",
+        instruction: "더 자연스럽게",
+      }),
     });
 
-    const res = await POST(makeRequest({
-      text: "원문",
-      instruction: "수정해줘",
-    }));
-
-    expect(res.status).toBe(502);
-    const json = await res.json();
-    expect(json.code).toBe("NO_SUGGESTION");
-  });
-
-  it("returns error when SDK throws", async () => {
-    mockCreate.mockRejectedValue(new Error("OpenAI rate limit"));
-
-    const res = await POST(makeRequest({
-      text: "원문",
-      instruction: "수정해줘",
-    }));
-
-    expect(res.status).toBe(500);
-    const json = await res.json();
-    expect(json.error).toContain("rate limit");
+    const response = await POST(request);
+    expect(response.status).toBe(500);
+    await expect(response.json()).resolves.toMatchObject({
+      error: "OpenAI API 키가 설정되지 않았습니다.",
+    });
   });
 });

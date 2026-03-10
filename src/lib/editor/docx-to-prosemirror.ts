@@ -1,6 +1,7 @@
 import mammoth from "mammoth";
 import type { JSONContent } from "@tiptap/core";
 import type { EditorSegment, ParsedProseMirrorDocument } from "./hwpx-to-prosemirror";
+import { createEmptyComplexObjectReport } from "./hwpx-complex-objects";
 
 const SOURCE_NAME = "docx";
 
@@ -116,6 +117,7 @@ export async function parseDocxToProseMirror(
     segments,
     extraSegmentsMap: {},
     integrityIssues: warnings,
+    complexObjectReport: createEmptyComplexObjectReport(),
     hwpxDocumentModel: null,
   };
 }

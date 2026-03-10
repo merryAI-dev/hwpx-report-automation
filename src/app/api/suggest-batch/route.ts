@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import { withApiAuth } from "@/lib/auth/with-api-auth";
 import {
   requireString,
   requireApiKey,
@@ -34,7 +35,7 @@ type BatchResponse = {
 
 const MAX_ITEMS = 40;
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   // ── Rate limiting ──
   const rateLimitResp = checkRateLimit(getClientIp(request));
   if (rateLimitResp) return rateLimitResp;
@@ -142,3 +143,5 @@ export async function POST(request: Request) {
     return handleApiError(error, "/api/suggest-batch");
   }
 }
+
+export const POST = withApiAuth(handlePost);

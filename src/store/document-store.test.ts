@@ -35,6 +35,7 @@ describe("document-store", () => {
         segments: [],
         extraSegmentsMap: {},
         integrityIssues: [],
+        complexObjectReport: null,
         hwpxDocumentModel: null,
       });
 
@@ -56,6 +57,7 @@ describe("document-store", () => {
         segments: [],
         extraSegmentsMap: {},
         integrityIssues: ["issue1", "issue2"],
+        complexObjectReport: null,
         hwpxDocumentModel: null,
       });
 
@@ -70,6 +72,7 @@ describe("document-store", () => {
         segments: [],
         extraSegmentsMap: {},
         integrityIssues: [],
+        complexObjectReport: null,
         hwpxDocumentModel: null,
       });
 
@@ -170,10 +173,12 @@ describe("document-store", () => {
 
   describe("chat messages", () => {
     it("adds messages", () => {
-      getState().addChatMessage({ role: "user", content: "안녕" });
+      getState().addChatMessage({ id: "1", role: "user", content: "안녕", timestamp: 0 });
       getState().addChatMessage({
+        id: "2",
         role: "assistant",
         content: "안녕하세요",
+        timestamp: 0,
         isStreaming: true,
       });
 
@@ -184,22 +189,22 @@ describe("document-store", () => {
     });
 
     it("updates last assistant message content", () => {
-      getState().addChatMessage({ role: "user", content: "질문" });
-      getState().addChatMessage({ role: "assistant", content: "응", isStreaming: true });
+      getState().addChatMessage({ id: "1", role: "user", content: "질문", timestamp: 0 });
+      getState().addChatMessage({ id: "2", role: "assistant", content: "응", timestamp: 0, isStreaming: true });
 
       getState().updateLastAssistantMessage((prev) => prev + "답");
       expect(getState().chatMessages[1].content).toBe("응답");
     });
 
     it("finalizes last assistant message", () => {
-      getState().addChatMessage({ role: "assistant", content: "완료", isStreaming: true });
+      getState().addChatMessage({ id: "1", role: "assistant", content: "완료", timestamp: 0, isStreaming: true });
       getState().finalizeLastAssistantMessage();
 
       expect(getState().chatMessages[0].isStreaming).toBe(false);
     });
 
     it("clears chat", () => {
-      getState().addChatMessage({ role: "user", content: "test" });
+      getState().addChatMessage({ id: "1", role: "user", content: "test", timestamp: 0 });
       getState().setChatBusy(true);
       getState().clearChat();
 
@@ -209,7 +214,7 @@ describe("document-store", () => {
     });
 
     it("appends tool calls and results", () => {
-      getState().addChatMessage({ role: "assistant", content: "", isStreaming: true });
+      getState().addChatMessage({ id: "1", role: "assistant", content: "", timestamp: 0, isStreaming: true });
 
       getState().appendToolCallToLastMessage({
         id: "tc-1",
@@ -223,7 +228,9 @@ describe("document-store", () => {
 
       getState().appendToolResultToLastMessage({
         toolCallId: "tc-1",
+        name: "replace_text",
         result: "success",
+        isAutoExecuted: false,
       });
 
       const updated = getState().chatMessages[0];
@@ -269,7 +276,7 @@ describe("document-store", () => {
       getState().setEditorDoc({ type: "doc", content: [] });
       getState().setStatus("loaded");
       getState().setBatchDecision("x", "accepted");
-      getState().addChatMessage({ role: "user", content: "test" });
+      getState().addChatMessage({ id: "1", role: "user", content: "test", timestamp: 0 });
       getState().setDocumentId("doc-123");
 
       // Reset

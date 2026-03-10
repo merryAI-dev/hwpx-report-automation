@@ -1,98 +1,114 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/persistence/client";
-import { log } from "@/lib/logger";
-import { checkRateLimit, getClientIp } from "@/lib/api-validation";
-import type { DocumentRecord, CreateDocumentInput } from "@/lib/persistence/types";
+import { NextRequest, NextResponse } from "next/server";
+import { withApiAuth } from "@/lib/auth/with-api-auth";
+import {
+  createWorkspaceDocument,
+  listWorkspaceDocuments,
+} from "@/lib/server/workspace-store";
+import { buildWorkspaceActorFromSession, attachWorkspaceDocumentDownloads } from "@/lib/server/workspace-route-utils";
+import { isRecord, workspaceErrorResponse } from "@/lib/server/workspace-api";
+import { assertDocumentQuota } from "@/lib/server/quota-store";
+import type {
+  CreateWorkspaceDocumentPayload,
+  WorkspaceBlobReference,
+  WorkspacePermissionEntry,
+  WorkspaceSourceFormat,
+  WorkspaceValidationSummary,
+} from "@/lib/workspace-types";
+import type { TemplateCatalog } from "@/lib/template-catalog";
+import type { JSONContent } from "@tiptap/core";
 
-/** GET /api/documents — list all documents (most recent first) */
-export async function GET(request: Request) {
-  const rateLimited = checkRateLimit(getClientIp(request));
-  if (rateLimited) return rateLimited;
-
-  try {
-    const docs = await prisma.document.findMany({
-      select: {
-        id: true,
-        name: true,
-        sizeBytes: true,
-        createdAt: true,
-        updatedAt: true,
-      },
-      orderBy: { updatedAt: "desc" },
-      take: 100,
-    });
-
-    const records: DocumentRecord[] = docs.map((d) => ({
-      id: d.id,
-      name: d.name,
-      sizeBytes: d.sizeBytes,
-      createdAt: d.createdAt.toISOString(),
-      updatedAt: d.updatedAt.toISOString(),
-    }));
-
-    return NextResponse.json({ documents: records });
-  } catch (err) {
-    log.error("Failed to list documents", err);
-    return NextResponse.json({ error: "문서 목록을 불러오지 못했습니다." }, { status: 500 });
+function parseBlob(value: unknown): WorkspaceBlobReference {
+  if (!isRecord(value)) {
+    throw new Error("blob is required.");
   }
+  const blobId = String(value.blobId || "").trim();
+  const fileName = String(value.fileName || "").trim();
+  if (!blobId || !fileName) {
+    throw new Error("blob.blobId and blob.fileName are required.");
+  }
+  return {
+    blobId,
+    provider: String(value.provider || "fs").trim() || "fs",
+    fileName,
+    contentType: String(value.contentType || "application/octet-stream").trim() || "application/octet-stream",
+    byteLength: Number(value.byteLength || 0),
+    createdAt: String(value.createdAt || new Date().toISOString()),
+  };
 }
 
-/** POST /api/documents — create a new document */
-export async function POST(request: Request) {
-  const rateLimited = checkRateLimit(getClientIp(request));
-  if (rateLimited) return rateLimited;
-
-  try {
-    const body = (await request.json()) as CreateDocumentInput;
-    if (!body.name || !body.docJson) {
-      return NextResponse.json(
-        { error: "name과 docJson은 필수입니다." },
-        { status: 400 },
-      );
-    }
-
-    // Validate document name
-    const name = body.name.trim();
-    if (name.length < 1 || name.length > 255) {
-      return NextResponse.json(
-        { error: "문서 이름은 1~255자여야 합니다." },
-        { status: 400 },
-      );
-    }
-    if (/[/\\<>:"|?*\x00-\x1f]/.test(name) || name.includes("..")) {
-      return NextResponse.json(
-        { error: "문서 이름에 허용되지 않는 문자가 포함되어 있습니다." },
-        { status: 400 },
-      );
-    }
-
-    // Accept hwpxBlob as base64 string
-    const hwpxBuffer = body.hwpxBlob
-      ? Buffer.from(body.hwpxBlob as unknown as string, "base64")
-      : Buffer.alloc(0);
-
-    const doc = await prisma.document.create({
-      data: {
-        name,
-        hwpxBlob: hwpxBuffer,
-        docJson: body.docJson,
-        segments: body.segments || "[]",
-        extraSegmentsMap: body.extraSegmentsMap || "{}",
-        sizeBytes: hwpxBuffer.byteLength,
-      },
-    });
-
-    log.info("Document created", { id: doc.id, name: doc.name, sizeBytes: doc.sizeBytes });
-
-    return NextResponse.json({
-      id: doc.id,
-      name: doc.name,
-      sizeBytes: doc.sizeBytes,
-      createdAt: doc.createdAt.toISOString(),
-      updatedAt: doc.updatedAt.toISOString(),
-    }, { status: 201 });
-  } catch (err) {
-    log.error("Failed to create document", err);
-    return NextResponse.json({ error: "문서 저장에 실패했습니다." }, { status: 500 });
+function parsePermissions(value: unknown): WorkspacePermissionEntry[] | undefined {
+  if (value == null) {
+    return undefined;
   }
+  if (!Array.isArray(value)) {
+    throw new Error("permissions must be an array.");
+  }
+  return value.map((entry) => {
+    if (!isRecord(entry)) {
+      throw new Error("permission entry is invalid.");
+    }
+    return {
+      subjectType: "user" as const,
+      subjectId: String(entry.subjectId || "").trim(),
+      displayName: String(entry.displayName || entry.subjectId || "").trim(),
+      role: String(entry.role || "viewer") as WorkspacePermissionEntry["role"],
+    };
+  });
 }
+
+function parsePayload(body: unknown): CreateWorkspaceDocumentPayload {
+  if (!isRecord(body)) {
+    throw new Error("Invalid JSON body.");
+  }
+  const title = String(body.title || "").trim();
+  const fileName = String(body.fileName || "").trim();
+  if (!title || !fileName) {
+    throw new Error("title and fileName are required.");
+  }
+  const sourceFormat = String(body.sourceFormat || "hwpx") as WorkspaceSourceFormat;
+  const blob = parseBlob(body.blob);
+  return {
+    title,
+    label: String(body.label || "manual-save").trim() || "manual-save",
+    fileName,
+    sourceFormat,
+    editorDoc: (body.editorDoc as JSONContent | null | undefined) ?? null,
+    templateCatalog: (body.templateCatalog as TemplateCatalog | null | undefined) ?? null,
+    validationSummary: (body.validationSummary as WorkspaceValidationSummary | null | undefined) ?? null,
+    blob,
+    permissions: parsePermissions(body.permissions),
+  };
+}
+
+export const runtime = "nodejs";
+
+export const GET = withApiAuth(async (request: NextRequest, session) => {
+  try {
+    const actor = buildWorkspaceActorFromSession(session);
+    const query = request.nextUrl.searchParams.get("q") || "";
+    const documents = await listWorkspaceDocuments({
+      tenantId: actor.tenantId,
+      actor,
+      query,
+    });
+    return NextResponse.json({ documents });
+  } catch (error) {
+    return workspaceErrorResponse(error, "Failed to list documents.");
+  }
+}, { requireTenant: true });
+
+export const POST = withApiAuth(async (request: NextRequest, session) => {
+  try {
+    const actor = buildWorkspaceActorFromSession(session);
+    await assertDocumentQuota(actor.tenantId);
+    const payload = parsePayload(await request.json());
+    const document = await createWorkspaceDocument({
+      tenantId: actor.tenantId,
+      actor,
+      payload,
+    });
+    return NextResponse.json({ document: attachWorkspaceDocumentDownloads(actor.tenantId, document) }, { status: 201 });
+  } catch (error) {
+    return workspaceErrorResponse(error, "Failed to create document.");
+  }
+}, { requireTenant: true });

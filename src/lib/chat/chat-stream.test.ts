@@ -57,7 +57,7 @@ describe("streamChat", () => {
     );
 
     const cb = makeCallbacks();
-    await streamChat({ messages: [], segments: [] }, cb);
+    await streamChat({ messages: [], documentContext: { segments: [], fileName: "" } }, cb);
 
     expect(cb.onTextDelta).toHaveBeenCalledTimes(2);
     expect(cb.onTextDelta).toHaveBeenCalledWith("안녕");
@@ -78,7 +78,7 @@ describe("streamChat", () => {
     );
 
     const cb = makeCallbacks();
-    await streamChat({ messages: [], segments: [] }, cb);
+    await streamChat({ messages: [], documentContext: { segments: [], fileName: "" } }, cb);
 
     expect(cb.onToolCall).toHaveBeenCalledWith(toolCall);
     expect(cb.onToolResult).toHaveBeenCalledWith(toolResult);
@@ -95,7 +95,7 @@ describe("streamChat", () => {
     );
 
     const cb = makeCallbacks();
-    await streamChat({ messages: [], segments: [] }, cb);
+    await streamChat({ messages: [], documentContext: { segments: [], fileName: "" } }, cb);
 
     expect(cb.onToolPending).toHaveBeenCalledWith(toolCall);
   });
@@ -106,7 +106,7 @@ describe("streamChat", () => {
     );
 
     const cb = makeCallbacks();
-    await streamChat({ messages: [], segments: [] }, cb);
+    await streamChat({ messages: [], documentContext: { segments: [], fileName: "" } }, cb);
 
     expect(cb.onError).toHaveBeenCalledWith("Rate limited");
   });
@@ -117,7 +117,7 @@ describe("streamChat", () => {
     );
 
     const cb = makeCallbacks();
-    await streamChat({ messages: [], segments: [] }, cb);
+    await streamChat({ messages: [], documentContext: { segments: [], fileName: "" } }, cb);
 
     expect(cb.onError).toHaveBeenCalledWith("API error: 500");
   });
@@ -128,7 +128,7 @@ describe("streamChat", () => {
     );
 
     const cb = makeCallbacks();
-    await streamChat({ messages: [], segments: [] }, cb);
+    await streamChat({ messages: [], documentContext: { segments: [], fileName: "" } }, cb);
 
     expect(cb.onError).toHaveBeenCalledWith("No response body");
   });
@@ -148,7 +148,7 @@ describe("streamChat", () => {
     fetchSpy.mockResolvedValue(new Response(stream, { status: 200 }));
 
     const cb = makeCallbacks();
-    await streamChat({ messages: [], segments: [] }, cb);
+    await streamChat({ messages: [], documentContext: { segments: [], fileName: "" } }, cb);
 
     expect(cb.onTextDelta).toHaveBeenCalledWith("chunk");
     expect(cb.onDone).toHaveBeenCalled();
@@ -167,7 +167,7 @@ describe("streamChat", () => {
     fetchSpy.mockResolvedValue(new Response(stream, { status: 200 }));
 
     const cb = makeCallbacks();
-    await streamChat({ messages: [], segments: [] }, cb);
+    await streamChat({ messages: [], documentContext: { segments: [], fileName: "" } }, cb);
 
     // Malformed data skipped, done still fires
     expect(cb.onTextDelta).not.toHaveBeenCalled();
@@ -182,7 +182,7 @@ describe("streamChat", () => {
     );
 
     const cb = makeCallbacks();
-    await streamChat({ messages: [], segments: [] }, cb);
+    await streamChat({ messages: [], documentContext: { segments: [], fileName: "" } }, cb);
 
     expect(cb.onError).toHaveBeenCalledWith("Token limit exceeded");
   });

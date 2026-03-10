@@ -7,6 +7,11 @@ const { mockFetch } = vi.hoisted(() => ({
 
 vi.stubGlobal("fetch", mockFetch);
 
+vi.mock("@/lib/auth/with-api-auth", () => ({
+  withApiAuth: (handler: (...args: unknown[]) => unknown) =>
+    (req: unknown) => handler(req, { sub: "test-user", email: "test@example.com", activeTenant: null }),
+}));
+
 vi.mock("@/lib/logger", () => ({
   log: {
     debug: vi.fn(),
@@ -40,7 +45,7 @@ import { POST } from "./route";
 import { NextRequest } from "next/server";
 
 function makeFormDataRequest(fileContent: Uint8Array, fileName = "test.hwpx"): NextRequest {
-  const file = new File([fileContent], fileName, {
+  const file = new File([fileContent.buffer as ArrayBuffer], fileName, {
     type: "application/octet-stream",
   });
   const formData = new FormData();

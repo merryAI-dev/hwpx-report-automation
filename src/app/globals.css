@@ -73,6 +73,27 @@ a {
   background: var(--color-notion-accent-hover, #0b6bcb);
 }
 
+.btn-primary {
+  border: 1px solid #1d4f80;
+  background: #1d4f80;
+  border-radius: 2px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+  cursor: pointer;
+  white-space: nowrap;
+  color: #fff;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: #2a6da8;
+}
+
+.btn-primary:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
 .btn:disabled {
   opacity: 0.4;
   cursor: not-allowed;

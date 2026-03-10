@@ -67,6 +67,64 @@ function baseCommands(): Omit<SlashCommandItem, "run">[] {
       description: "현재 문단을 '본문' 필드로 지정합니다.",
       keywords: ["field", "body", "본문"],
     },
+    // Heading levels
+    {
+      id: "heading1",
+      title: "제목1",
+      description: "큰 제목(H1)을 삽입합니다.",
+      keywords: ["제목1", "heading", "h1", "큰제목"],
+    },
+    {
+      id: "heading2",
+      title: "제목2",
+      description: "중간 제목(H2)을 삽입합니다.",
+      keywords: ["제목2", "heading", "h2", "중간제목"],
+    },
+    {
+      id: "heading3",
+      title: "제목3",
+      description: "작은 제목(H3)을 삽입합니다.",
+      keywords: ["제목3", "heading", "h3", "작은제목"],
+    },
+    // Block elements
+    {
+      id: "blockquote",
+      title: "인용",
+      description: "인용구(blockquote)를 삽입합니다.",
+      keywords: ["인용", "blockquote", "quote"],
+    },
+    {
+      id: "codeblock",
+      title: "코드블록",
+      description: "코드 블록을 삽입합니다.",
+      keywords: ["코드블록", "code", "코드"],
+    },
+    {
+      id: "checklist",
+      title: "체크리스트",
+      description: "체크박스 목록을 삽입합니다.",
+      keywords: ["체크리스트", "checklist", "todo", "할일"],
+    },
+    // Utility
+    {
+      id: "date",
+      title: "날짜",
+      description: "오늘 날짜를 삽입합니다.",
+      keywords: ["날짜", "date", "오늘"],
+    },
+    // AI helpers
+    {
+      id: "ai-summarize",
+      title: "AI 요약",
+      description: "현재 문단을 AI로 요약합니다.",
+      keywords: ["ai", "요약", "summarize", "summary"],
+    },
+    {
+      id: "ai-translate",
+      title: "AI 번역",
+      description: "현재 문단을 AI로 영어 번역합니다.",
+      keywords: ["ai", "번역", "translate", "translation"],
+    },
   ];
 }
 
@@ -92,6 +150,55 @@ export function getSlashCommandItems(query: string, context: SlashCommandContext
       if (command.id.startsWith("set-field-")) {
         const fieldType = command.id.replace("set-field-", "");
         editor.chain().focus().deleteRange(range).updateAttributes("paragraph", { fieldType }).updateAttributes("heading", { fieldType }).run();
+        return;
+      }
+      if (command.id === "heading1") {
+        editor.chain().focus().deleteRange(range).toggleHeading({ level: 1 }).run();
+        return;
+      }
+      if (command.id === "heading2") {
+        editor.chain().focus().deleteRange(range).toggleHeading({ level: 2 }).run();
+        return;
+      }
+      if (command.id === "heading3") {
+        editor.chain().focus().deleteRange(range).toggleHeading({ level: 3 }).run();
+        return;
+      }
+      if (command.id === "blockquote") {
+        editor.chain().focus().deleteRange(range).toggleBlockquote().run();
+        return;
+      }
+      if (command.id === "codeblock") {
+        editor.chain().focus().deleteRange(range).toggleCodeBlock().run();
+        return;
+      }
+      if (command.id === "checklist") {
+        editor.chain().focus().deleteRange(range).toggleBulletList().run();
+        return;
+      }
+      if (command.id === "date") {
+        const today = new Date().toLocaleDateString("ko-KR");
+        editor.chain().focus().deleteRange(range).insertContent(today).run();
+        return;
+      }
+      if (command.id === "ai-summarize") {
+        editor.chain().focus().deleteRange(range).run();
+        const { selection } = editor.state;
+        const currentNode = selection.$from.node();
+        const paragraphText = currentNode.textContent;
+        const aiHandler = onAiCommand || context.onAiCommand;
+        if (paragraphText.trim()) {
+          // Pass text as context through the AI command — onAiCommand triggers with current selection
+          aiHandler?.();
+        } else {
+          aiHandler?.();
+        }
+        return;
+      }
+      if (command.id === "ai-translate") {
+        editor.chain().focus().deleteRange(range).run();
+        const aiHandler = onAiCommand || context.onAiCommand;
+        aiHandler?.();
         return;
       }
       // Trigger toolbar image file picker

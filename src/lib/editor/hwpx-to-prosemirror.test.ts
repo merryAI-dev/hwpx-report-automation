@@ -112,6 +112,37 @@ async function makeLetterSpacingFixtureHwpx(): Promise<ArrayBuffer> {
   return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
 }
 
+async function makeComplexObjectFixtureHwpx(): Promise<ArrayBuffer> {
+  const zip = new JSZip();
+  zip.file("mimetype", "application/hwp+zip", { compression: "STORE" });
+  zip.file("version.xml", `<?xml version="1.0" encoding="UTF-8"?><version app="test"/>`);
+  zip.file(
+    "Contents/content.hpf",
+    `<?xml version="1.0" encoding="UTF-8"?><opf:package xmlns:opf="http://www.idpf.org/2007/opf"></opf:package>`,
+  );
+  zip.file(
+    "Contents/section0.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hp:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">
+  <hp:p><hp:run><hp:t>본문</hp:t></hp:run></hp:p>
+  <hp:p><hp:run><hp:pic id="img-1"/><hp:t/></hp:run></hp:p>
+  <hp:p><hp:run><hp:ctrl><hp:pageNum pos="BOTTOM_CENTER"/></hp:ctrl><hp:t/></hp:run></hp:p>
+  <hp:p>
+    <hp:bookmarkStart id="bm-1" name="main"/>
+    <hp:run><hp:fieldBegin id="field-1"/><hp:t>필드 텍스트</hp:t></hp:run>
+  </hp:p>
+</hp:sec>`,
+  );
+  zip.file(
+    "Contents/section1.xml",
+    `<?xml version="1.0" encoding="UTF-8"?>
+<hp:sec xmlns:hp="http://www.hancom.co.kr/hwpml/2011/paragraph">
+  <hp:p><hp:run><hp:t>두번째 섹션</hp:t></hp:run></hp:p>
+</hp:sec>`,
+  );
+  return zip.generateAsync({ type: "arraybuffer", compression: "DEFLATE" });
+}
+
 async function makeCharStyleFixtureHwpx(): Promise<ArrayBuffer> {
   const zip = new JSZip();
   zip.file("mimetype", "application/hwp+zip", { compression: "STORE" });
@@ -294,6 +325,30 @@ describe("parseHwpxToProseMirror", () => {
 
     const paragraph = (parsed.doc.content || []).find((node) => node.type === "paragraph");
     expect((paragraph?.attrs || {}) as { letterSpacing?: number }).toMatchObject({ letterSpacing: -10 });
+  });
+
+  it("reports complex objects and multi-section documents for compatibility warnings", async () => {
+    const dom = new JSDOM("");
+    (globalThis as unknown as { DOMParser: typeof DOMParser }).DOMParser = dom.window.DOMParser;
+    (globalThis as unknown as { NodeFilter: typeof NodeFilter }).NodeFilter = dom.window.NodeFilter;
+
+    const input = await makeComplexObjectFixtureHwpx();
+    const parsed = await parseHwpxToProseMirror(input);
+
+    expect(parsed.complexObjectReport.sectionCount).toBe(2);
+    expect(parsed.complexObjectReport.counts.image).toBe(1);
+    expect(parsed.complexObjectReport.counts.bookmark).toBe(1);
+    expect(parsed.complexObjectReport.counts.field).toBe(1);
+    expect(parsed.complexObjectReport.counts.pageControl).toBe(1);
+    expect(parsed.complexObjectReport.warnings).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("멀티 섹션 문서"),
+        expect.stringContaining("이미지 1건"),
+        expect.stringContaining("북마크 1건"),
+        expect.stringContaining("필드 1건"),
+        expect.stringContaining("페이지 제어 1건"),
+      ]),
+    );
   });
 
   it("reads run charPr font/highlight/superscript into marks", async () => {

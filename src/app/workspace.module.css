@@ -1,0 +1,280 @@
+.page {
+  min-height: 100vh;
+  background: linear-gradient(180deg, #f8fafc 0%, #eef2ff 100%);
+  color: #0f172a;
+  padding: 32px;
+}
+
+.container {
+  max-width: 1200px;
+  margin: 0 auto;
+  display: grid;
+  gap: 24px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 16px;
+  flex-wrap: wrap;
+}
+
+.titleBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.kicker {
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #475569;
+}
+
+.title {
+  font-size: 32px;
+  line-height: 1.1;
+  font-weight: 800;
+}
+
+.subtitle {
+  font-size: 14px;
+  color: #475569;
+  max-width: 760px;
+}
+
+.nav {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.navLink,
+.primaryLink,
+.secondaryButton,
+.primaryButton,
+.inlineButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border-radius: 999px;
+  text-decoration: none;
+  cursor: pointer;
+  transition: transform 120ms ease, opacity 120ms ease;
+}
+
+.navLink,
+.secondaryButton,
+.inlineButton {
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  color: #0f172a;
+}
+
+.primaryLink,
+.primaryButton {
+  border: 1px solid #0f172a;
+  background: #0f172a;
+  color: #fff;
+}
+
+.navLink,
+.primaryLink,
+.secondaryButton,
+.primaryButton {
+  padding: 10px 16px;
+  font-size: 14px;
+  font-weight: 700;
+}
+
+.inlineButton {
+  padding: 6px 10px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.navLink:hover,
+.primaryLink:hover,
+.secondaryButton:hover,
+.primaryButton:hover,
+.inlineButton:hover {
+  transform: translateY(-1px);
+}
+
+.grid {
+  display: grid;
+  gap: 16px;
+}
+
+.cards {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 16px;
+}
+
+.card,
+.panel {
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(148, 163, 184, 0.26);
+  border-radius: 20px;
+  box-shadow: 0 18px 48px rgba(15, 23, 42, 0.08);
+}
+
+.card {
+  padding: 20px;
+  display: grid;
+  gap: 14px;
+}
+
+.panel {
+  padding: 24px;
+  display: grid;
+  gap: 16px;
+}
+
+.cardHeader,
+.row,
+.metaRow {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.cardTitle {
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.badgeRow {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 4px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  background: #e2e8f0;
+  color: #334155;
+}
+
+.badgeDraft { background: #dbeafe; color: #1d4ed8; }
+.badgeApproved, .badgeReady { background: #dcfce7; color: #15803d; }
+.badgeDeprecated, .badgeArchived { background: #fee2e2; color: #b91c1c; }
+
+.muted {
+  color: #64748b;
+  font-size: 13px;
+}
+
+.form,
+.formRow {
+  display: grid;
+  gap: 12px;
+}
+
+.formRow {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.input,
+.select,
+.textarea {
+  width: 100%;
+  border-radius: 12px;
+  border: 1px solid #cbd5e1;
+  background: #fff;
+  padding: 12px 14px;
+  font-size: 14px;
+  color: #0f172a;
+}
+
+.textarea {
+  min-height: 120px;
+  resize: vertical;
+}
+
+.field {
+  display: grid;
+  gap: 6px;
+}
+
+.label {
+  font-size: 12px;
+  font-weight: 700;
+  color: #475569;
+}
+
+.list {
+  display: grid;
+  gap: 12px;
+}
+
+.listItem {
+  border: 1px solid #e2e8f0;
+  border-radius: 14px;
+  padding: 14px;
+  background: #fff;
+  display: grid;
+  gap: 8px;
+}
+
+.table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.table th,
+.table td {
+  text-align: left;
+  padding: 12px 10px;
+  border-bottom: 1px solid #e2e8f0;
+  font-size: 14px;
+  vertical-align: top;
+}
+
+.empty {
+  padding: 18px;
+  border: 1px dashed #cbd5e1;
+  border-radius: 16px;
+  color: #64748b;
+  background: rgba(255, 255, 255, 0.62);
+}
+
+.error {
+  color: #b91c1c;
+  font-size: 13px;
+}
+
+.success {
+  color: #15803d;
+  font-size: 13px;
+}
+
+.code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: #f8fafc;
+  border: 1px solid #e2e8f0;
+  border-radius: 8px;
+  padding: 2px 6px;
+}
+
+@media (max-width: 720px) {
+  .page {
+    padding: 20px;
+  }
+
+  .title {
+    font-size: 26px;
+  }
+}

@@ -8,6 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "test": "vitest run",
+    "validate:hwpx": "tsx scripts/validate-hwpx.ts",
+    "regression:hancom": "tsx scripts/hancom-regression.ts",
     "test:hancom": "vitest run hancom-verify",
     "verify:hwpx": "bash ../scripts/hancom-verify/verify-hwpx.sh",
     "verify:all": "bash ../scripts/hancom-verify/verify-all.sh",

@@ -1,5 +1,10 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 
+vi.mock("@/lib/auth/with-api-auth", () => ({
+  withApiAuth: (handler: (...args: unknown[]) => unknown) =>
+    (req: unknown) => handler(req, { sub: "test-user", email: "test@example.com", activeTenant: null }),
+}));
+
 const mockCreate = vi.fn();
 vi.mock("openai", () => {
   class MockOpenAI {

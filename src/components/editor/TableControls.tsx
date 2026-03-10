@@ -40,6 +40,14 @@ export function TableControls({ editor, groupClassName, buttonClassName }: Table
       <button
         type="button"
         className={buttonClassName}
+        disabled={disabled || !editor?.can().deleteRow()}
+        onClick={() => editor?.chain().focus().deleteRow().run()}
+      >
+        행 삭제
+      </button>
+      <button
+        type="button"
+        className={buttonClassName}
         disabled={disabled || !editor?.can().deleteTable()}
         onClick={() => editor?.chain().focus().deleteTable().run()}
       >

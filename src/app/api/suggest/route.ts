@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
+import { withApiAuth } from "@/lib/auth/with-api-auth";
 import {
   requireString,
   requireApiKey,
@@ -23,10 +24,11 @@ type RequestBody = {
   monthlyCostLimitUsd?: number;
 };
 
-export async function POST(request: Request) {
+async function handlePost(request: Request) {
   // ── Rate limiting ──
   const rateLimitResp = checkRateLimit(getClientIp(request));
   if (rateLimitResp) return rateLimitResp;
+
 
   try {
     const apiKey = requireApiKey("OPENAI_API_KEY", "OpenAI");
@@ -106,3 +108,5 @@ export async function POST(request: Request) {
     return handleApiError(error, "/api/suggest");
   }
 }
+
+export const POST = withApiAuth(handlePost);

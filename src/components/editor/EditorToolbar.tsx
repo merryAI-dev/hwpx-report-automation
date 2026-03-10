@@ -1,6 +1,7 @@
 "use client";
 
 import { memo, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import type { Editor } from "@tiptap/core";
 import type { SidebarTab } from "@/store/document-store";
 import type { RecentFileSnapshotMeta } from "@/lib/recent-files";
@@ -8,6 +9,8 @@ import { log } from "@/lib/logger";
 import { TableControls } from "./TableControls";
 import { ParagraphStyleModal } from "./ParagraphStyleModal";
 import { CharStyleModal } from "./CharStyleModal";
+import { ExportModal } from "./ExportModal";
+import type { ExportFormat, ExportOptions } from "./ExportModal";
 import styles from "./EditorToolbar.module.css";
 
 const HWP_FONTS = [
@@ -36,7 +39,6 @@ type EditorToolbarProps = {
   hasDocument: boolean;
   downloadUrl: string;
   downloadName: string;
-  onToggleSidebar: () => void;
   onSetSidebarTab: (tab: SidebarTab) => void;
   onAiCommand: () => void;
   recentSnapshots: RecentFileSnapshotMeta[];
@@ -47,9 +49,28 @@ type EditorToolbarProps = {
   onExport: () => void;
   onExportPdf: () => void;
   onExportDocx: () => void;
+  /** Optional: called when user exports from the ExportModal with format + options */
+  onExportWithOptions?: (format: ExportFormat, options: ExportOptions) => void;
+  /** Current document file name (used as default in ExportModal) */
+  currentFileName?: string;
   onSave: () => void;
+  sessionContext: {
+    email: string;
+    displayName: string;
+    providerDisplayName: string;
+    activeTenantId: string;
+    memberships: Array<{
+      tenantId: string;
+      tenantName: string;
+      role: string;
+    }>;
+  } | null;
+  tenantSwitching: boolean;
+  onSwitchTenant: (tenantId: string) => void;
+  onLogout: () => void;
   formMode: boolean;
   onToggleFormMode: () => void;
+  onToggleSidebar?: () => void;
 };
 
 function getCurrentFontFamily(editor: Editor | null): string {
@@ -134,7 +155,6 @@ export const EditorToolbar = memo(function EditorToolbar({
   hasDocument,
   downloadUrl,
   downloadName,
-  onToggleSidebar,
   onSetSidebarTab,
   onAiCommand,
   recentSnapshots,
@@ -145,15 +165,23 @@ export const EditorToolbar = memo(function EditorToolbar({
   onExport,
   onExportPdf,
   onExportDocx,
+  onExportWithOptions,
+  currentFileName,
   onSave,
+  sessionContext,
+  tenantSwitching,
+  onSwitchTenant,
+  onLogout,
   formMode,
   onToggleFormMode,
+  onToggleSidebar,
 }: EditorToolbarProps) {
   const editorDisabled = !editor;
   const fileInputRef = useRef<HTMLInputElement>(null);
   const imageInputRef = useRef<HTMLInputElement>(null);
   const [paraModalOpen, setParaModalOpen] = useState(false);
   const [charModalOpen, setCharModalOpen] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
   const [imageUploading, setImageUploading] = useState(false);
 
   const currentFont = getCurrentFontFamily(editor);
@@ -232,7 +260,7 @@ export const EditorToolbar = memo(function EditorToolbar({
         <input
           ref={fileInputRef}
           type="file"
-          accept=".hwpx,.docx,.pptx"
+          accept=".hwp,.hwpx,.docx,.pptx"
           style={{ display: "none" }}
           onChange={(e) => {
             const file = e.target.files?.[0];
@@ -293,33 +321,56 @@ export const EditorToolbar = memo(function EditorToolbar({
                 최근열기
               </button>
             </div>
-            <button
-              type="button"
-              className={styles.btn}
-              disabled={globalDisabled || !hasDocument}
-              onClick={onExport}
-              title="내보내기"
+            {onExportWithOptions ? (
+              <button
+                type="button"
+                className={styles.btn}
+                disabled={globalDisabled || !hasDocument}
+                onClick={() => setExportModalOpen(true)}
+                title="내보내기 옵션"
+              >
+                내보내기
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className={styles.btn}
+                  disabled={globalDisabled || !hasDocument}
+                  onClick={onExport}
+                  title="내보내기"
+                >
+                  내보내기
+                </button>
+                <button
+                  type="button"
+                  className={styles.btn}
+                  disabled={globalDisabled || !hasDocument}
+                  onClick={onExportPdf}
+                  title="PDF 내보내기"
+                >
+                  PDF
+                </button>
+                <button
+                  type="button"
+                  className={styles.btn}
+                  disabled={globalDisabled || !hasDocument}
+                  onClick={onExportDocx}
+                  title="DOCX 내보내기"
+                >
+                  DOCX
+                </button>
+              </>
+            )}
+            <a
+              href="/pilot"
+              target="_blank"
+              rel="noreferrer"
+              className={`${styles.btn} ${styles.linkButton}`}
+              title="파일럿 대시보드"
             >
-              내보내기
-            </button>
-            <button
-              type="button"
-              className={styles.btn}
-              disabled={globalDisabled || !hasDocument}
-              onClick={onExportPdf}
-              title="PDF 내보내기"
-            >
-              PDF
-            </button>
-            <button
-              type="button"
-              className={styles.btn}
-              disabled={globalDisabled || !hasDocument}
-              onClick={onExportDocx}
-              title="DOCX 내보내기"
-            >
-              DOCX
-            </button>
+              파일럿
+            </a>
             {downloadUrl && (
               <a
                 href={downloadUrl}
@@ -335,12 +386,63 @@ export const EditorToolbar = memo(function EditorToolbar({
           <div className={styles.sep} />
 
           <div className={styles.group}>
+            {sessionContext ? (
+              <>
+                <select
+                  className={styles.tenantSelect}
+                  value={sessionContext.activeTenantId}
+                  disabled={globalDisabled || tenantSwitching || sessionContext.memberships.length <= 1}
+                  title="활성 테넌트"
+                  onChange={(event) => onSwitchTenant(event.target.value)}
+                >
+                  {sessionContext.memberships.map((membership) => (
+                    <option key={membership.tenantId} value={membership.tenantId}>
+                      {`${membership.tenantName} · ${membership.role}`}
+                    </option>
+                  ))}
+                </select>
+                <span className={styles.sessionBadge}>{sessionContext.providerDisplayName}</span>
+                <span className={styles.sessionMeta} title={sessionContext.email}>
+                  {sessionContext.displayName}
+                </span>
+              </>
+            ) : null}
+            <div className={styles.navShortcuts}>
+              <Link className={styles.navShortcut} href="/dashboard">
+                홈
+              </Link>
+              <Link className={styles.navShortcut} href="/search" title="전체 검색">
+                🔍
+              </Link>
+              <Link className={styles.navShortcut} href="/documents">
+                문서함
+              </Link>
+              <Link className={styles.navShortcut} href="/templates">
+                템플릿함
+              </Link>
+              <Link className={styles.navShortcut} href="/pilot">
+                KPI
+              </Link>
+              <Link className={styles.navShortcut} href="/onboarding" title="기능 안내">
+                ?
+              </Link>
+              <Link className={styles.navShortcut} href="/batch/jobs" title="배치 작업 관리">
+                배치
+              </Link>
+            </div>
             <Btn
               label="저장"
               title="다른 이름으로 저장 (Ctrl/Cmd+S)"
               active={false}
               disabled={globalDisabled || !hasDocument}
               onClick={onSave}
+            />
+            <Btn
+              label="로그아웃"
+              title="세션 종료"
+              active={false}
+              disabled={globalDisabled}
+              onClick={onLogout}
             />
           </div>
 
@@ -351,7 +453,7 @@ export const EditorToolbar = memo(function EditorToolbar({
               title="사이드 패널 토글"
               active={!sidebarCollapsed}
               disabled={false}
-              onClick={onToggleSidebar}
+              onClick={() => onToggleSidebar?.()}
             />
             <Btn
               label="개요"
@@ -633,6 +735,46 @@ export const EditorToolbar = memo(function EditorToolbar({
           </div>
 
         </div>
+
+        <div className={styles.panelToggleRow}>
+          <div className={`${styles.group} ${styles.panelToggleGroup}`}>
+            <Btn
+              label="개요"
+              title="문서 개요"
+              active={isTabActive("outline")}
+              disabled={false}
+              onClick={() => onSetSidebarTab("outline")}
+            />
+            <Btn
+              label="AI"
+              title="AI 제안"
+              active={isTabActive("ai")}
+              disabled={false}
+              onClick={() => onSetSidebarTab("ai")}
+            />
+            <Btn
+              label="채팅"
+              title="AI 채팅"
+              active={isTabActive("chat")}
+              disabled={false}
+              onClick={() => onSetSidebarTab("chat")}
+            />
+            <Btn
+              label="분석"
+              title="문서 분석"
+              active={isTabActive("analysis")}
+              disabled={false}
+              onClick={() => onSetSidebarTab("analysis")}
+            />
+            <Btn
+              label="이력"
+              title="수정 이력"
+              active={isTabActive("history")}
+              disabled={false}
+              onClick={() => onSetSidebarTab("history")}
+            />
+          </div>
+        </div>
       </div>
 
       {paraModalOpen && editor && (
@@ -640,6 +782,16 @@ export const EditorToolbar = memo(function EditorToolbar({
       )}
       {charModalOpen && editor && (
         <CharStyleModal editor={editor} onClose={() => setCharModalOpen(false)} />
+      )}
+      {exportModalOpen && onExportWithOptions && (
+        <ExportModal
+          isOpen={exportModalOpen}
+          onClose={() => setExportModalOpen(false)}
+          defaultFileName={currentFileName ?? "document"}
+          onExport={(format: ExportFormat, options: ExportOptions) => {
+            onExportWithOptions(format, options);
+          }}
+        />
       )}
     </>
   );
