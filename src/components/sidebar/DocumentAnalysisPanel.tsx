@@ -19,6 +19,20 @@ type DocumentAnalysisPanelProps = {
   onRemoveEntry: (variant: string) => void;
   onApplyTerminology: () => void;
   isBusy: boolean;
+  compatibilityWarnings: string[];
+  collaborationStats: {
+    historyCount: number;
+    aiActionCount: number;
+  };
+  performanceStats: {
+    segmentCount: number;
+    complexity: "low" | "medium" | "high";
+  };
+  qaStats: {
+    integrityIssueCount: number;
+    exportWarningCount: number;
+    compatibilityWarningCount: number;
+  };
 };
 
 function ScoreBar({ score }: { score: number }) {
@@ -60,6 +74,10 @@ export function DocumentAnalysisPanel({
   onRemoveEntry,
   onApplyTerminology,
   isBusy,
+  compatibilityWarnings,
+  collaborationStats,
+  performanceStats,
+  qaStats,
 }: DocumentAnalysisPanelProps) {
   const [expandTerms, setExpandTerms] = useState(true);
   const [expandTemplateFields, setExpandTemplateFields] = useState(true);
@@ -84,6 +102,62 @@ export function DocumentAnalysisPanel({
 
   return (
     <div className="ai-panel">
+      {/* Polaris readiness 1~5 */}
+      <div>
+        <label className="sidebar-label">1. 호환성 진단</label>
+        {compatibilityWarnings.length ? (
+          <ul style={{ listStyle: "none", display: "grid", gap: 4 }}>
+            {compatibilityWarnings.slice(0, 6).map((warning) => (
+              <li
+                key={warning}
+                style={{
+                  fontSize: 12,
+                  padding: "4px 8px",
+                  background: "#fff7ed",
+                  border: "1px solid #fdba74",
+                  borderRadius: 2,
+                  color: "#7c2d12",
+                }}
+              >
+                {warning}
+              </li>
+            ))}
+          </ul>
+        ) : (
+          <div className="sidebar-box">내보내기 호환성 경고 없음</div>
+        )}
+      </div>
+
+      <div>
+        <label className="sidebar-label">2. 객체 커버리지</label>
+        <div className="sidebar-box">
+          {compatibilityWarnings.some((w) => w.includes("객체 노드") || w.includes("개체"))
+            ? "일부 개체가 HWPX에 완전히 반영되지 않을 수 있습니다."
+            : "현재 문서 기준 개체/표 반영 경고 없음"}
+        </div>
+      </div>
+
+      <div>
+        <label className="sidebar-label">3. 협업 추적</label>
+        <div className="sidebar-box">
+          이력 {collaborationStats.historyCount}건 / AI 작업 {collaborationStats.aiActionCount}건
+        </div>
+      </div>
+
+      <div>
+        <label className="sidebar-label">4. 성능 상태</label>
+        <div className="sidebar-box">
+          문단 {performanceStats.segmentCount}개 / 복잡도 {performanceStats.complexity}
+        </div>
+      </div>
+
+      <div>
+        <label className="sidebar-label">5. QA 게이트</label>
+        <div className="sidebar-box">
+          무결성 경고 {qaStats.integrityIssueCount}건 · 내보내기 경고 {qaStats.exportWarningCount}건 · 호환성 경고 {qaStats.compatibilityWarningCount}건
+        </div>
+      </div>
+
       {hasComplexObjects && complexObjectReport ? (
         <div>
           <label className="sidebar-label">복합 객체</label>

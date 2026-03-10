@@ -5,6 +5,19 @@ import type {
   DocumentContextSegment,
 } from "@/types/chat";
 import { withApiAuth } from "@/lib/auth/with-api-auth";
+import { requireApiKey } from "@/lib/api-utils";
+import { extractErrorMessage } from "@/lib/errors";
+import { log } from "@/lib/logger";
+import {
+  validateBodySize,
+  validateMessageCount,
+  validateSegmentCount,
+  checkRateLimit,
+  checkMonthlyCostLimit,
+  getClientIp,
+} from "@/lib/api-validation";
+import { recordAudit } from "@/lib/audit";
+import { estimateCost } from "@/lib/ai-cost-tracker";
 
 const SYSTEM_PROMPT = `너는 한국어 문서 편집 전문 AI 어시스턴트다.
 사용자의 자연어 지시에 따라 문서를 분석하고 수정한다.
@@ -225,27 +238,61 @@ function sendSSE(
 /* ── Route handler ── */
 
 async function handlePost(request: Request) {
-  const apiKey = process.env.ANTHROPIC_API_KEY;
-  if (!apiKey) {
-    return new Response(JSON.stringify({ error: "ANTHROPIC_API_KEY is not set." }), {
-      status: 500,
-      headers: { "Content-Type": "application/json" },
-    });
+  // ── Rate limiting ──
+  const rateLimitResp = checkRateLimit(getClientIp(request));
+  if (rateLimitResp) return rateLimitResp;
+
+  let apiKey: string;
+  try {
+    apiKey = requireApiKey("ANTHROPIC_API_KEY", "Anthropic");
+  } catch (err) {
+    return new Response(
+      JSON.stringify({ error: extractErrorMessage(err), code: "API_KEY_MISSING" }),
+      { status: 500, headers: { "Content-Type": "application/json" } },
+    );
   }
+
+  // ── Body size validation (read raw text first, then parse) ──
+  let rawBody: string;
+  try {
+    rawBody = await request.text();
+  } catch {
+    return new Response(
+      JSON.stringify({ error: "요청 본문을 읽을 수 없습니다.", code: "VALIDATION_FAILED" }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
+  const bodySizeResp = validateBodySize(rawBody);
+  if (bodySizeResp) return bodySizeResp;
 
   let body: ChatRequest;
   try {
-    body = (await request.json()) as ChatRequest;
+    body = JSON.parse(rawBody) as ChatRequest;
   } catch {
-    return new Response(JSON.stringify({ error: "Invalid JSON body" }), {
-      status: 400,
-      headers: { "Content-Type": "application/json" },
-    });
+    return new Response(
+      JSON.stringify({ error: "요청 본문이 올바른 JSON이 아닙니다.", code: "VALIDATION_FAILED" }),
+      { status: 400, headers: { "Content-Type": "application/json" } },
+    );
   }
+
+  // ── Message & segment count validation ──
+  if (body.messages) {
+    const msgResp = validateMessageCount(body.messages);
+    if (msgResp) return msgResp;
+  }
+  if (body.documentContext?.segments) {
+    const segResp = validateSegmentCount(body.documentContext.segments);
+    if (segResp) return segResp;
+  }
+
+  // ── Monthly cost limit check ──
+  const costLimitResp = await checkMonthlyCostLimit(body.monthlyCostLimitUsd ?? 0);
+  if (costLimitResp) return costLimitResp;
 
   const { messages, documentContext, approvedToolCall } = body;
   const client = new Anthropic({ apiKey });
-  const model = process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
+  const model = body.model || process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514";
 
   // Convert ChatMessageAPI[] → Anthropic MessageParam[]
   const anthropicMessages: Anthropic.MessageParam[] = [];
@@ -275,15 +322,26 @@ async function handlePost(request: Request) {
   }
 
   const encoder = new TextEncoder();
+  const usage = { inputTokens: 0, outputTokens: 0, iterations: 0 };
 
   const stream = new ReadableStream({
     async start(controller) {
       try {
-        await runAgentLoop(client, model, anthropicMessages, documentContext, controller, encoder);
+        await runAgentLoop(client, model, anthropicMessages, documentContext, controller, encoder, usage);
       } catch (err) {
-        const message = err instanceof Error ? err.message : "Unknown error";
+        const message = extractErrorMessage(err);
+        log.error("Chat agent loop error", err);
         sendSSE(controller, encoder, "error", { type: "error", message });
       } finally {
+        const cost = estimateCost(model, usage.inputTokens, usage.outputTokens);
+        recordAudit("system", "ai-chat", "/api/chat", {
+          messageCount: messages.length,
+          model,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          iterations: usage.iterations,
+          costUsd: cost.estimatedCostUsd,
+        });
         controller.close();
       }
     },
@@ -309,6 +367,7 @@ async function runAgentLoop(
   docCtx: DocumentContext,
   controller: ReadableStreamDefaultController,
   encoder: TextEncoder,
+  usage: { inputTokens: number; outputTokens: number; iterations: number },
 ) {
   const MAX_ITERATIONS = 10;
 
@@ -322,11 +381,7 @@ async function runAgentLoop(
       messages,
     });
 
-    // Accumulate streamed text for later message reconstruction
-    let accumulatedText = "";
-
     stream.on("text", (textDelta) => {
-      accumulatedText += textDelta;
       sendSSE(controller, encoder, "text_delta", {
         type: "text_delta",
         content: textDelta,
@@ -335,6 +390,11 @@ async function runAgentLoop(
 
     // Wait for the full response
     const response = await stream.finalMessage();
+
+    // Accumulate token usage across iterations
+    usage.inputTokens += response.usage.input_tokens;
+    usage.outputTokens += response.usage.output_tokens;
+    usage.iterations += 1;
 
     // Collect all tool_use blocks from the response
     const toolUseBlocks = response.content.filter(

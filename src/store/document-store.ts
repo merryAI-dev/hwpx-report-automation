@@ -24,6 +24,8 @@ export type EditHistoryItem = {
   timestamp: number;
   summary: string;
   editCount: number;
+  actor: "system" | "ai" | "user";
+  snapshotDoc: JSONContent | null;
 };
 
 export type BatchSuggestionItem = {
@@ -130,6 +132,12 @@ type DocumentState = {
   chatBusy: boolean;
   pendingToolCall: PendingToolCall | null;
 
+  // Tool call rollback (Task 2.2)
+  lastToolCallSnapshot: JSONContent | null;
+
+  // Server persistence (Sprint 5)
+  documentId: string | null;
+
   resetDocument: () => void;
   setLoadedDocument: (params: {
     fileName: string;
@@ -158,7 +166,14 @@ type DocumentState = {
   setAiBusy: (aiBusy: boolean) => void;
   setDownload: (download: DownloadState) => void;
   setRenderResult: (html: string, elementMap: Record<string, RenderElementInfo>) => void;
-  pushHistory: (summary: string, editCount: number) => void;
+  pushHistory: (
+    summary: string,
+    editCount: number,
+    options?: {
+      actor?: "system" | "ai" | "user";
+      snapshotDoc?: JSONContent | null;
+    },
+  ) => void;
 
   // Phase 2-1
   setBatchDecision: (id: string, decision: "accepted" | "rejected") => void;
@@ -193,6 +208,13 @@ type DocumentState = {
   clearChat: () => void;
   appendToolCallToLastMessage: (tc: import("@/types/chat").ToolCallInfo) => void;
   appendToolResultToLastMessage: (tr: import("@/types/chat").ToolResultInfo) => void;
+
+  // Tool call rollback (Task 2.2)
+  saveToolCallSnapshot: () => void;
+  undoLastToolCall: () => JSONContent | null;
+
+  // Server persistence (Sprint 5)
+  setDocumentId: (id: string | null) => void;
 };
 
 const INITIAL_INSTRUCTION = "문장을 간결하게 다듬고 기술 문서 톤으로 수정해줘.";
@@ -255,6 +277,10 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   chatBusy: false,
   pendingToolCall: null,
 
+  lastToolCallSnapshot: null,
+
+  documentId: null,
+
   resetDocument: () =>
     set({
       fileName: "",
@@ -286,6 +312,8 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       chatMessages: [],
       chatBusy: false,
       pendingToolCall: null,
+      lastToolCallSnapshot: null,
+      documentId: null,
       download: initialDownload,
       renderHtml: null,
       renderElementMap: null,
@@ -354,18 +382,31 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   setAiBusy: (aiBusy) => set({ aiBusy }),
   setDownload: (download) => set({ download }),
   setRenderResult: (renderHtml, renderElementMap) => set({ renderHtml, renderElementMap }),
-  pushHistory: (summary, editCount) =>
-    set((state) => ({
-      history: [
-        {
-          id: `history-${state.history.length}-${Date.now()}`,
-          timestamp: Date.now(),
-          summary,
-          editCount,
-        },
-        ...state.history,
-      ].slice(0, 100),
-    })),
+  pushHistory: (summary, editCount, options) =>
+    set((state) => {
+      const historyIndex = state.history.length;
+      // Snapshot every 5th entry to reduce memory usage (Task 2.4)
+      const shouldSnapshot = historyIndex % 5 === 0;
+      const snapshotDoc =
+        options?.snapshotDoc !== undefined
+          ? options.snapshotDoc
+          : shouldSnapshot && state.editorDoc
+            ? structuredClone(state.editorDoc)
+            : null;
+      return {
+        history: [
+          {
+            id: `history-${historyIndex}-${Date.now()}`,
+            timestamp: Date.now(),
+            summary,
+            editCount,
+            actor: options?.actor ?? "system",
+            snapshotDoc,
+          },
+          ...state.history,
+        ].slice(0, 100),
+      };
+    }),
 
   // Phase 2-1: Accept/Reject
   setBatchDecision: (id, decision) =>
@@ -463,4 +504,21 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       }
       return { chatMessages: msgs };
     }),
+
+  // Tool call rollback (Task 2.2)
+  saveToolCallSnapshot: () =>
+    set((state) => ({
+      lastToolCallSnapshot: state.editorDoc
+        ? structuredClone(state.editorDoc)
+        : null,
+    })),
+
+  undoLastToolCall: () => {
+    const { lastToolCallSnapshot } = get();
+    if (!lastToolCallSnapshot) return null;
+    set({ lastToolCallSnapshot: null });
+    return lastToolCallSnapshot;
+  },
+
+  setDocumentId: (id) => set({ documentId: id }),
 }));

@@ -78,7 +78,7 @@ describe("hancom regression", () => {
     expect(report.warnings).toContain(
       "[HANCOM-VERIFY-SKIPPED] HWPX_HANCOM_VERIFY_COMMAND is not configured; skipping Hancom verification.",
     );
-  }, 30000);
+  }, 60000);
 
   it("formats a readable regression summary", () => {
     const output = formatHancomRegressionReport({

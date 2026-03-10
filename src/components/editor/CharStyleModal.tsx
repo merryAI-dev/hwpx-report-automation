@@ -100,11 +100,17 @@ export function CharStyleModal({ editor, onClose }: CharStyleModalProps) {
   };
 
   return (
-    <div className={styles.backdrop} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+    <div className={styles.backdrop} onClick={onClose} role="presentation">
+      <div
+        className={styles.modal}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="char-style-title"
+      >
         <div className={styles.titleBar}>
-          <span>글자 모양</span>
-          <button type="button" className={styles.closeBtn} onClick={onClose}>✕</button>
+          <span id="char-style-title">글자 모양</span>
+          <button type="button" className={styles.closeBtn} onClick={onClose} aria-label="닫기">✕</button>
         </div>
 
         <div className={styles.body}>

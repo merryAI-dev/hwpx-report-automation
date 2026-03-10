@@ -113,7 +113,7 @@ function sanitizeInputFileName(fileName: string): string {
 }
 
 async function ensureDomParser(): Promise<void> {
-  if (typeof DOMParser !== "undefined") {
+  if (typeof DOMParser !== "undefined" && typeof NodeFilter !== "undefined") {
     return;
   }
 
@@ -122,6 +122,8 @@ async function ensureDomParser(): Promise<void> {
     const dom = new JSDOM("");
     (globalThis as typeof globalThis & { DOMParser?: typeof DOMParser }).DOMParser =
       dom.window.DOMParser as unknown as typeof DOMParser;
+    (globalThis as typeof globalThis & { NodeFilter?: typeof NodeFilter }).NodeFilter =
+      dom.window.NodeFilter as unknown as typeof NodeFilter;
   } catch (error) {
     throw new HwpIntakeError("Node 런타임에서 XML 검증기를 초기화하지 못했습니다.", {
       code: "xml_validator_unavailable",

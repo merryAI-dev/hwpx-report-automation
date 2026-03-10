@@ -1,12 +1,16 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { memo, useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import type { Editor } from "@tiptap/core";
 import type { SidebarTab } from "@/store/document-store";
 import type { RecentFileSnapshotMeta } from "@/lib/recent-files";
+import { log } from "@/lib/logger";
 import { TableControls } from "./TableControls";
 import { ParagraphStyleModal } from "./ParagraphStyleModal";
 import { CharStyleModal } from "./CharStyleModal";
+import { ExportModal } from "./ExportModal";
+import type { ExportFormat, ExportOptions } from "./ExportModal";
 import styles from "./EditorToolbar.module.css";
 
 const HWP_FONTS = [
@@ -45,6 +49,10 @@ type EditorToolbarProps = {
   onExport: () => void;
   onExportPdf: () => void;
   onExportDocx: () => void;
+  /** Optional: called when user exports from the ExportModal with format + options */
+  onExportWithOptions?: (format: ExportFormat, options: ExportOptions) => void;
+  /** Current document file name (used as default in ExportModal) */
+  currentFileName?: string;
   onSave: () => void;
   sessionContext: {
     email: string;
@@ -62,6 +70,7 @@ type EditorToolbarProps = {
   onLogout: () => void;
   formMode: boolean;
   onToggleFormMode: () => void;
+  onToggleSidebar?: () => void;
 };
 
 function getCurrentFontFamily(editor: Editor | null): string {
@@ -109,7 +118,36 @@ function formatRecentSnapshotLabel(snapshot: RecentFileSnapshotMeta): string {
   return `${getRecentKindLabel(snapshot.kind)} | ${time} | ${snapshot.name}`;
 }
 
-export function EditorToolbar({
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") {
+        resolve(result);
+        return;
+      }
+      reject(new Error("이미지 데이터를 읽지 못했습니다."));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("이미지 로드 실패"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function readImageSize(src: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve) => {
+    const image = new window.Image();
+    image.onload = () => {
+      const width = Number.isFinite(image.naturalWidth) && image.naturalWidth > 0 ? image.naturalWidth : 320;
+      const height = Number.isFinite(image.naturalHeight) && image.naturalHeight > 0 ? image.naturalHeight : 180;
+      resolve({ width, height });
+    };
+    image.onerror = () => resolve({ width: 320, height: 180 });
+    image.src = src;
+  });
+}
+
+export const EditorToolbar = memo(function EditorToolbar({
   editor,
   sidebarCollapsed,
   activeSidebarTab,
@@ -127,6 +165,8 @@ export function EditorToolbar({
   onExport,
   onExportPdf,
   onExportDocx,
+  onExportWithOptions,
+  currentFileName,
   onSave,
   sessionContext,
   tenantSwitching,
@@ -134,11 +174,15 @@ export function EditorToolbar({
   onLogout,
   formMode,
   onToggleFormMode,
+  onToggleSidebar,
 }: EditorToolbarProps) {
   const editorDisabled = !editor;
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const imageInputRef = useRef<HTMLInputElement>(null);
   const [paraModalOpen, setParaModalOpen] = useState(false);
   const [charModalOpen, setCharModalOpen] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
+  const [imageUploading, setImageUploading] = useState(false);
 
   const currentFont = getCurrentFontFamily(editor);
   const currentSize = getCurrentFontSize(editor);
@@ -186,6 +230,30 @@ export function EditorToolbar({
     editor.chain().focus().updateAttributes("paragraph", attrs).run();
   };
 
+  const onPickImage = async (file: File) => {
+    if (!editor) {
+      return;
+    }
+    setImageUploading(true);
+    try {
+      const src = await readFileAsDataUrl(file);
+      const { width, height } = await readImageSize(src);
+      editor.chain().focus().setImage({
+        src,
+        alt: file.name,
+        title: file.name,
+        width,
+        height,
+        fileName: file.name,
+        mimeType: file.type || "image/png",
+      } as never).run();
+    } catch (error) {
+      log.error("이미지 삽입 실패", error instanceof Error ? { message: error.message } : undefined);
+    } finally {
+      setImageUploading(false);
+    }
+  };
+
   return (
     <>
       <div className={styles.toolbar}>
@@ -200,7 +268,21 @@ export function EditorToolbar({
             e.target.value = "";
           }}
         />
-        {/* ── 1행: 열기~저장 ── */}
+        <input
+          ref={imageInputRef}
+          type="file"
+          accept="image/*"
+          data-image-input=""
+          style={{ display: "none" }}
+          onChange={(e) => {
+            const file = e.target.files?.[0];
+            if (file) {
+              void onPickImage(file);
+            }
+            e.target.value = "";
+          }}
+        />
+        {/* ── 1행: 열기~저장 + 패널 토글 ── */}
         <div className={styles.toolbarRow}>
           <div className={styles.group}>
             <button
@@ -239,33 +321,47 @@ export function EditorToolbar({
                 최근열기
               </button>
             </div>
-            <button
-              type="button"
-              className={styles.btn}
-              disabled={globalDisabled || !hasDocument}
-              onClick={onExport}
-              title="내보내기"
-            >
-              내보내기
-            </button>
-            <button
-              type="button"
-              className={styles.btn}
-              disabled={globalDisabled || !hasDocument}
-              onClick={onExportPdf}
-              title="PDF 내보내기"
-            >
-              PDF
-            </button>
-            <button
-              type="button"
-              className={styles.btn}
-              disabled={globalDisabled || !hasDocument}
-              onClick={onExportDocx}
-              title="DOCX 내보내기"
-            >
-              DOCX
-            </button>
+            {onExportWithOptions ? (
+              <button
+                type="button"
+                className={styles.btn}
+                disabled={globalDisabled || !hasDocument}
+                onClick={() => setExportModalOpen(true)}
+                title="내보내기 옵션"
+              >
+                내보내기
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className={styles.btn}
+                  disabled={globalDisabled || !hasDocument}
+                  onClick={onExport}
+                  title="내보내기"
+                >
+                  내보내기
+                </button>
+                <button
+                  type="button"
+                  className={styles.btn}
+                  disabled={globalDisabled || !hasDocument}
+                  onClick={onExportPdf}
+                  title="PDF 내보내기"
+                >
+                  PDF
+                </button>
+                <button
+                  type="button"
+                  className={styles.btn}
+                  disabled={globalDisabled || !hasDocument}
+                  onClick={onExportDocx}
+                  title="DOCX 내보내기"
+                >
+                  DOCX
+                </button>
+              </>
+            )}
             <a
               href="/pilot"
               target="_blank"
@@ -311,6 +407,29 @@ export function EditorToolbar({
                 </span>
               </>
             ) : null}
+            <div className={styles.navShortcuts}>
+              <Link className={styles.navShortcut} href="/dashboard">
+                홈
+              </Link>
+              <Link className={styles.navShortcut} href="/search" title="전체 검색">
+                🔍
+              </Link>
+              <Link className={styles.navShortcut} href="/documents">
+                문서함
+              </Link>
+              <Link className={styles.navShortcut} href="/templates">
+                템플릿함
+              </Link>
+              <Link className={styles.navShortcut} href="/pilot">
+                KPI
+              </Link>
+              <Link className={styles.navShortcut} href="/onboarding" title="기능 안내">
+                ?
+              </Link>
+              <Link className={styles.navShortcut} href="/batch/jobs" title="배치 작업 관리">
+                배치
+              </Link>
+            </div>
             <Btn
               label="저장"
               title="다른 이름으로 저장 (Ctrl/Cmd+S)"
@@ -324,6 +443,52 @@ export function EditorToolbar({
               active={false}
               disabled={globalDisabled}
               onClick={onLogout}
+            />
+          </div>
+
+          {/* ── 우측 패널 토글 (flex push) ── */}
+          <div className={styles.panelToggles}>
+            <Btn
+              label={sidebarCollapsed ? "패널+" : "패널-"}
+              title="사이드 패널 토글"
+              active={!sidebarCollapsed}
+              disabled={false}
+              onClick={() => onToggleSidebar?.()}
+            />
+            <Btn
+              label="개요"
+              title="문서 개요"
+              active={isTabActive("outline")}
+              disabled={false}
+              onClick={() => onSetSidebarTab("outline")}
+            />
+            <Btn
+              label="AI"
+              title="AI 제안"
+              active={isTabActive("ai")}
+              disabled={false}
+              onClick={() => onSetSidebarTab("ai")}
+            />
+            <Btn
+              label="채팅"
+              title="AI 채팅"
+              active={isTabActive("chat")}
+              disabled={false}
+              onClick={() => onSetSidebarTab("chat")}
+            />
+            <Btn
+              label="분석"
+              title="문서 분석"
+              active={isTabActive("analysis")}
+              disabled={false}
+              onClick={() => onSetSidebarTab("analysis")}
+            />
+            <Btn
+              label="이력"
+              title="수정 이력"
+              active={isTabActive("history")}
+              disabled={false}
+              onClick={() => onSetSidebarTab("history")}
             />
           </div>
         </div>
@@ -505,28 +670,28 @@ export function EditorToolbar({
 
           <div className={styles.group}>
             <Btn
-              label="제목(H1)"
+              label="H1"
               title="제목 필드 지정 (H1)"
               active={editor?.isActive("heading", { level: 1 }) ?? false}
               disabled={editorDisabled}
               onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).updateAttributes("heading", { fieldType: "title" }).run()}
             />
             <Btn
-              label="받는사람(H2)"
+              label="H2"
               title="받는 사람 필드 지정 (H2)"
               active={editor?.isActive("heading", { level: 2 }) ?? false}
               disabled={editorDisabled}
               onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).updateAttributes("heading", { fieldType: "recipient" }).run()}
             />
             <Btn
-              label="보내는사람(H3)"
+              label="H3"
               title="보내는 사람 필드 지정 (H3)"
               active={editor?.isActive("heading", { level: 3 }) ?? false}
               disabled={editorDisabled}
               onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).updateAttributes("heading", { fieldType: "sender" }).run()}
             />
             <Btn
-              label="본문(H4)"
+              label="H4"
               title="본문 필드 지정 (H4)"
               active={editor?.isActive("heading", { level: 4 }) ?? false}
               disabled={editorDisabled}
@@ -541,6 +706,18 @@ export function EditorToolbar({
             groupClassName={styles.group}
             buttonClassName={styles.btn}
           />
+
+          <div className={styles.group}>
+            <button
+              type="button"
+              className={styles.btn}
+              disabled={editorDisabled || imageUploading}
+              onClick={() => imageInputRef.current?.click()}
+              title="이미지 삽입"
+            >
+              {imageUploading ? "이미지..." : "이미지"}
+            </button>
+          </div>
 
           <div className={styles.sep} />
 
@@ -557,8 +734,10 @@ export function EditorToolbar({
             </button>
           </div>
 
-          {/* ── 우측 패널 토글 (flex push) ── */}
-          <div className={styles.panelToggles}>
+        </div>
+
+        <div className={styles.panelToggleRow}>
+          <div className={`${styles.group} ${styles.panelToggleGroup}`}>
             <Btn
               label="개요"
               title="문서 개요"
@@ -604,9 +783,19 @@ export function EditorToolbar({
       {charModalOpen && editor && (
         <CharStyleModal editor={editor} onClose={() => setCharModalOpen(false)} />
       )}
+      {exportModalOpen && onExportWithOptions && (
+        <ExportModal
+          isOpen={exportModalOpen}
+          onClose={() => setExportModalOpen(false)}
+          defaultFileName={currentFileName ?? "document"}
+          onExport={(format: ExportFormat, options: ExportOptions) => {
+            onExportWithOptions(format, options);
+          }}
+        />
+      )}
     </>
   );
-}
+});
 
 /* ── Small helpers ── */
 

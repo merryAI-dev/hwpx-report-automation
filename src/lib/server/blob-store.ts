@@ -1,6 +1,31 @@
+/**
+ * Blob Storage Configuration
+ *
+ * Environment variables:
+ *
+ * Filesystem driver (default):
+ *   BLOB_STORAGE_FS_ROOT        - Root directory for blob storage (default: .blob-storage)
+ *   BLOB_SIGNING_SECRET         - HMAC secret for signed download URLs (required in production)
+ *   BLOB_SIGNED_URL_TTL_SECONDS - Signed URL time-to-live in seconds (default: 900)
+ *   NODE_ENV                    - "production" requires BLOB_SIGNING_SECRET to be set
+ *
+ * S3-compatible driver (BLOB_STORAGE_DRIVER=s3):
+ *   BLOB_STORAGE_DRIVER                    - Set to "s3" to use S3-compatible storage
+ *   BLOB_STORAGE_S3_BUCKET                 - S3 bucket name (required for S3 driver)
+ *   BLOB_STORAGE_S3_REGION                 - AWS region (required for S3 driver)
+ *   BLOB_STORAGE_S3_ENDPOINT               - Custom endpoint URL (for MinIO, Cloudflare R2, etc.)
+ *   BLOB_STORAGE_S3_ACCESS_KEY_ID          - AWS access key ID (required for S3 driver)
+ *   BLOB_STORAGE_S3_SECRET_ACCESS_KEY      - AWS secret access key (required for S3 driver)
+ *   BLOB_STORAGE_S3_FORCE_PATH_STYLE       - Set to "true" for MinIO/path-style endpoints
+ *
+ * Note: S3 driver requires @aws-sdk/client-s3 to be installed.
+ *       Run: npm install @aws-sdk/client-s3
+ */
 import crypto from "node:crypto";
 import fs from "node:fs/promises";
 import path from "node:path";
+import type { BlobDriver } from "./blob-drivers";
+import { createFsDriver, createS3Driver, ConfigError } from "./blob-drivers";
 
 const DEFAULT_STORAGE_DIR = ".blob-storage";
 const DEFAULT_SIGNED_URL_TTL_SECONDS = 15 * 60;
@@ -233,3 +258,53 @@ export function toContentDisposition(fileName: string): string {
   const encoded = encodeURIComponent(safeName);
   return `attachment; filename="${asciiFallback}"; filename*=UTF-8''${encoded}`;
 }
+
+// ── Extended env type and storage driver resolution ───────────────────────────
+
+export type ExtendedBlobStoreEnv = BlobStoreEnv &
+  Partial<{
+    BLOB_STORAGE_DRIVER: string;
+    BLOB_STORAGE_S3_BUCKET: string;
+    BLOB_STORAGE_S3_REGION: string;
+    BLOB_STORAGE_S3_ENDPOINT: string;
+    BLOB_STORAGE_S3_ACCESS_KEY_ID: string;
+    BLOB_STORAGE_S3_SECRET_ACCESS_KEY: string;
+    BLOB_STORAGE_S3_FORCE_PATH_STYLE: string;
+  }>;
+
+export function resolveStorageDriver(env?: ExtendedBlobStoreEnv): BlobDriver {
+  const resolvedEnv = env ?? (process.env as ExtendedBlobStoreEnv);
+  const driver = (resolvedEnv.BLOB_STORAGE_DRIVER || "fs").trim().toLowerCase();
+
+  if (driver !== "s3") {
+    return createFsDriver(resolveBlobStorageRoot(resolvedEnv));
+  }
+
+  const bucket = (resolvedEnv.BLOB_STORAGE_S3_BUCKET || "").trim();
+  const region = (resolvedEnv.BLOB_STORAGE_S3_REGION || "").trim();
+  const accessKeyId = (resolvedEnv.BLOB_STORAGE_S3_ACCESS_KEY_ID || "").trim();
+  const secretAccessKey = (resolvedEnv.BLOB_STORAGE_S3_SECRET_ACCESS_KEY || "").trim();
+
+  if (!bucket || !region || !accessKeyId || !secretAccessKey) {
+    throw new ConfigError(
+      "S3 드라이버를 사용하려면 BLOB_STORAGE_S3_BUCKET, BLOB_STORAGE_S3_REGION, " +
+        "BLOB_STORAGE_S3_ACCESS_KEY_ID, BLOB_STORAGE_S3_SECRET_ACCESS_KEY 환경 변수를 설정하세요.",
+    );
+  }
+
+  const endpoint = (resolvedEnv.BLOB_STORAGE_S3_ENDPOINT || "").trim() || undefined;
+  const forcePathStyle =
+    (resolvedEnv.BLOB_STORAGE_S3_FORCE_PATH_STYLE || "").trim().toLowerCase() === "true";
+
+  return createS3Driver({
+    bucket,
+    region,
+    endpoint,
+    accessKeyId,
+    secretAccessKey,
+    forcePathStyle,
+  });
+}
+
+export { ConfigError } from "./blob-drivers";
+export type { BlobDriver } from "./blob-drivers";

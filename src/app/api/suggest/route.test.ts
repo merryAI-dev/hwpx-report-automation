@@ -46,7 +46,7 @@ describe("suggest route auth", () => {
     const response = await POST(request);
     expect(response.status).toBe(500);
     await expect(response.json()).resolves.toMatchObject({
-      error: "OPENAI_API_KEY is not set on the server.",
+      error: "OpenAI API 키가 설정되지 않았습니다.",
     });
   });
 });

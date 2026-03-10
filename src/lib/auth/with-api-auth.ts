@@ -10,18 +10,19 @@ export type AuthenticatedSession = SessionPayload & {
   activeTenant: SessionTenantMembership | null;
 };
 
-export type AuthenticatedRouteHandler<T extends Request = Request> = (
+export type AuthenticatedRouteHandler<T extends Request = Request, C = unknown> = (
   request: T,
   session: AuthenticatedSession,
+  context?: C,
 ) => Promise<Response> | Response;
 
-export function withApiAuth<T extends Request = Request>(
-  handler: AuthenticatedRouteHandler<T>,
+export function withApiAuth<T extends Request = Request, C = unknown>(
+  handler: AuthenticatedRouteHandler<T, C>,
   options: {
     requireTenant?: boolean;
   } = {},
 ) {
-  return async (request: T) => {
+  return async (request: T, context?: C) => {
     const session = await readSessionFromRequest(request);
     if (!session) {
       return NextResponse.json({ error: "Authentication required." }, { status: 401 });
@@ -36,6 +37,6 @@ export function withApiAuth<T extends Request = Request>(
       return NextResponse.json({ error: "Active tenant is required." }, { status: 403 });
     }
 
-    return handler(request, authenticatedSession);
+    return handler(request, authenticatedSession, context);
   };
 }

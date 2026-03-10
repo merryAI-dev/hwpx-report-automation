@@ -1,0 +1,49 @@
+.popup {
+  position: fixed;
+  z-index: 1000;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 2px;
+  background: #fff;
+  border: 1px solid #c0c0c0;
+  border-radius: 4px;
+  box-shadow: 0 4px 14px rgba(0, 0, 0, 0.18);
+  padding: 3px 4px;
+  animation: fadeIn 0.12s ease-out;
+  white-space: nowrap;
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+    transform: translateX(-50%) translateY(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(-50%) translateY(0);
+  }
+}
+
+.actionBtn {
+  border: 1px solid transparent;
+  background: transparent;
+  border-radius: 3px;
+  padding: 3px 7px;
+  font-size: 12px;
+  font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+  cursor: pointer;
+  color: #1a1a1a;
+  white-space: nowrap;
+  transition: background 0.1s, border-color 0.1s;
+  line-height: 1.4;
+}
+
+.actionBtn:hover {
+  background: #d8e8f8;
+  border-color: #90b4d4;
+}
+
+.actionBtn:active {
+  background: #c0d8f0;
+  border-color: #6090c0;
+}
