@@ -1,18 +1,55 @@
 import { NextResponse } from "next/server";
+import fs from "node:fs/promises";
+import path from "node:path";
+
+export const runtime = "nodejs";
+
+async function checkStorage(): Promise<{ ok: boolean; driver: string; writable: boolean }> {
+  const driver = process.env.BLOB_STORAGE_DRIVER || "fs";
+  if (driver !== "fs") {
+    return { ok: true, driver, writable: true };
+  }
+  const root = process.env.BLOB_STORAGE_FS_ROOT || ".blob-storage";
+  try {
+    await fs.mkdir(root, { recursive: true });
+    const probe = path.join(root, ".health-probe");
+    await fs.writeFile(probe, "ok");
+    await fs.unlink(probe);
+    return { ok: true, driver, writable: true };
+  } catch {
+    return { ok: false, driver, writable: false };
+  }
+}
 
 export async function GET() {
-  const hasOpenAI = !!process.env.OPENAI_API_KEY;
+  const storage = await checkStorage();
   const hasAnthropic = !!process.env.ANTHROPIC_API_KEY;
-  const hasDatabase = !!process.env.DATABASE_URL;
+  const hasOpenAI = !!process.env.OPENAI_API_KEY;
+  const hasAnyAI = hasAnthropic || hasOpenAI;
 
-  return NextResponse.json({
-    status: "ok",
-    timestamp: new Date().toISOString(),
-    version: process.env.npm_package_version || "0.0.0",
-    services: {
-      openai: { configured: hasOpenAI, model: process.env.OPENAI_MODEL || "gpt-4.1-mini" },
-      anthropic: { configured: hasAnthropic, model: process.env.ANTHROPIC_MODEL || "claude-sonnet-4-20250514" },
-      database: { configured: hasDatabase },
+  const allOk = storage.ok && hasAnyAI;
+
+  return NextResponse.json(
+    {
+      status: allOk ? "ok" : "degraded",
+      timestamp: new Date().toISOString(),
+      version: process.env.npm_package_version || "0.0.0",
+      checks: {
+        storage: {
+          ok: storage.ok,
+          driver: storage.driver,
+          writable: storage.writable,
+        },
+        ai: {
+          ok: hasAnyAI,
+          anthropic: hasAnthropic,
+          openai: hasOpenAI,
+          model: hasAnthropic
+            ? (process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6")
+            : (process.env.OPENAI_MODEL || "gpt-4.1-mini"),
+        },
+      },
     },
-  });
+    { status: allOk ? 200 : 503 },
+  );
 }
