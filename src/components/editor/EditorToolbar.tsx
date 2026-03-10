@@ -426,7 +426,7 @@ export const EditorToolbar = memo(function EditorToolbar({
               <Link className={styles.navShortcut} href="/onboarding" title="기능 안내">
                 ?
               </Link>
-              <Link className={styles.navShortcut} href="/batch/jobs" title="배치 작업 관리">
+              <Link className={styles.navShortcut} href="/batch" title="배치 문서 생성 (양식+CSV)">
                 배치
               </Link>
             </div>
