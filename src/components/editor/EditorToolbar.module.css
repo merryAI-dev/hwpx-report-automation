@@ -102,10 +102,41 @@
   padding: 0 6px;
 }
 
-.panelToggles {
-  margin-left: auto;
+.navShortcuts {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.navShortcut {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 5px 10px;
+  border-radius: 6px;
+  color: #334155;
+  text-decoration: none;
+  font-size: 13px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.navShortcut:hover {
+  background: rgba(255, 255, 255, 0.8);
+  color: #2563eb;
+}
+
+.panelToggleRow {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.panelToggleGroup {
   display: flex;
   gap: 4px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  max-width: 100%;
 }
 
 .downloadLink {

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import type { Editor } from "@tiptap/core";
 import type { SidebarTab } from "@/store/document-store";
 import type { RecentFileSnapshotMeta } from "@/lib/recent-files";
@@ -311,6 +312,17 @@ export function EditorToolbar({
                 </span>
               </>
             ) : null}
+            <div className={styles.navShortcuts}>
+              <Link className={styles.navShortcut} href="/documents">
+                문서함
+              </Link>
+              <Link className={styles.navShortcut} href="/templates">
+                템플릿함
+              </Link>
+              <Link className={styles.navShortcut} href="/pilot">
+                KPI
+              </Link>
+            </div>
             <Btn
               label="저장"
               title="다른 이름으로 저장 (Ctrl/Cmd+S)"
@@ -557,8 +569,10 @@ export function EditorToolbar({
             </button>
           </div>
 
-          {/* ── 우측 패널 토글 (flex push) ── */}
-          <div className={styles.panelToggles}>
+        </div>
+
+        <div className={styles.panelToggleRow}>
+          <div className={`${styles.group} ${styles.panelToggleGroup}`}>
             <Btn
               label="개요"
               title="문서 개요"

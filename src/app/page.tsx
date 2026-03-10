@@ -4,6 +4,7 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import type { Editor, JSONContent } from "@tiptap/core";
 import { Fragment, type Node as PMNode } from "@tiptap/pm/model";
 import { useCallback } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { DocumentEditor } from "@/components/editor/DocumentEditor";
 import { EditorToolbar } from "@/components/editor/EditorToolbar";
 import { HwpxSaveDialog } from "@/components/common/HwpxSaveDialog";
@@ -46,6 +47,12 @@ import {
 } from "@/lib/recent-files";
 import { useDocumentStore } from "@/store/document-store";
 import type { RenderElementInfo, SidebarTab } from "@/store/document-store";
+import type {
+  WorkspaceBlobReference,
+  WorkspaceDocumentDetail,
+  WorkspaceSourceFormat,
+  WorkspaceValidationSummary,
+} from "@/lib/workspace-types";
 import styles from "./page.module.css";
 
 function replaceSegmentText(editor: Editor, segmentId: string, nextText: string): boolean {
@@ -368,6 +375,11 @@ type HwpIntakeErrorPayload = {
   details?: string[];
 };
 
+type WorkspaceDocumentApiResponse = {
+  document?: WorkspaceDocumentDetail;
+  error?: string;
+};
+
 function getFileExtension(fileName: string): string {
   return fileName.toLowerCase().split(".").pop() || "";
 }
@@ -377,6 +389,42 @@ function getFormatLabel(extension: string): string {
   if (extension === "docx") return "DOCX";
   if (extension === "pptx") return "PPTX";
   return "HWPX";
+}
+
+function inferWorkspaceSourceFormat(fileName: string): WorkspaceSourceFormat {
+  const extension = getFileExtension(fileName);
+  if (extension === "hwp" || extension === "docx" || extension === "pptx") {
+    return extension;
+  }
+  return "hwpx";
+}
+
+function buildWorkspaceValidationSummary(
+  integrityIssues: string[],
+  warnings: string[],
+): WorkspaceValidationSummary | null {
+  if (!integrityIssues.length && !warnings.length) {
+    return null;
+  }
+
+  return {
+    infoCount: 0,
+    warningCount: warnings.length,
+    errorCount: 0,
+    blockingCount: integrityIssues.length,
+    topIssues: [
+      ...integrityIssues.map((message, index) => ({
+        code: `integrity_${index + 1}`,
+        severity: "blocking" as const,
+        message,
+      })),
+      ...warnings.slice(0, 5).map((message, index) => ({
+        code: `warning_${index + 1}`,
+        severity: "warning" as const,
+        message,
+      })),
+    ],
+  };
 }
 
 function parseContentDispositionFileName(headerValue: string | null): string | null {
@@ -446,6 +494,9 @@ type AuthSessionResponse = {
   expiresAt: number;
 };
 export default function Home() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const workspaceDocumentId = searchParams.get("documentId") || "";
   const [editor, setEditor] = useState<Editor | null>(null);
   const [viewMode, setViewMode] = useState<"editor" | "preview">("editor");
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
@@ -453,9 +504,11 @@ export default function Home() {
   const [selectedRecentSnapshotId, setSelectedRecentSnapshotId] = useState("");
   const [authSession, setAuthSession] = useState<AuthSessionResponse | null>(null);
   const [tenantSwitching, setTenantSwitching] = useState(false);
+  const [workspaceDocument, setWorkspaceDocument] = useState<WorkspaceDocumentDetail | null>(null);
   const autoSaveInFlightRef = useRef(false);
   const docRevisionRef = useRef(0);
   const lastAutoSavedRevisionRef = useRef(-1);
+  const loadedWorkspaceKeyRef = useRef("");
 
   const {
     fileName,
@@ -625,6 +678,14 @@ export default function Home() {
     void refreshAuthSession();
   }, [refreshAuthSession]);
 
+  const clearWorkspaceContext = useCallback(() => {
+    setWorkspaceDocument(null);
+    loadedWorkspaceKeyRef.current = "";
+    if (workspaceDocumentId) {
+      router.replace("/");
+    }
+  }, [router, workspaceDocumentId]);
+
   const onSwitchTenant = useCallback(async (tenantId: string) => {
     if (!authSession?.activeTenant || authSession.activeTenant.tenantId === tenantId) {
       return;
@@ -643,6 +704,8 @@ export default function Home() {
       }
 
       setAuthSession(payload as AuthSessionResponse);
+      setWorkspaceDocument(null);
+      loadedWorkspaceKeyRef.current = "";
       setDownload({
         ...download,
         remoteUrl: null,
@@ -653,13 +716,16 @@ export default function Home() {
       setStatus(
         `활성 테넌트를 ${(payload as AuthSessionResponse).activeTenant?.tenantName || tenantId}로 전환했습니다. 기존 서명 다운로드 URL은 초기화되었습니다.`,
       );
+      if (workspaceDocumentId) {
+        router.replace("/");
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : "테넌트 전환 실패";
       setStatus(message);
     } finally {
       setTenantSwitching(false);
     }
-  }, [authSession, download, setDownload, setStatus]);
+  }, [authSession, download, router, setDownload, setStatus, workspaceDocumentId]);
 
   const localDownloadUrl = useMemo(() => {
     if (!download.blob) {
@@ -788,7 +854,11 @@ export default function Home() {
 
   /* ── File I/O ── */
   const loadFileIntoEditor = useCallback(
-    async (file: File, recentKind: RecentFileKind | null = "opened") => {
+    async (
+      file: File,
+      recentKind: RecentFileKind | null = "opened",
+      options?: { workspaceDocument?: WorkspaceDocumentDetail | null },
+    ) => {
       setBusy(true);
       setViewMode("editor");
       try {
@@ -863,6 +933,20 @@ export default function Home() {
         });
         setOutline(buildOutlineFromDoc(parsed.doc));
         setTemplateCatalog(buildTemplateCatalogFromDoc(parsed.doc));
+        setWorkspaceDocument(options?.workspaceDocument ?? null);
+        loadedWorkspaceKeyRef.current = options?.workspaceDocument
+          ? `${options.workspaceDocument.tenantId}:${options.workspaceDocument.id}`
+          : "";
+        if (options?.workspaceDocument?.currentVersion?.download) {
+          setDownload({
+            blob: null,
+            fileName: options.workspaceDocument.currentVersion.fileName,
+            remoteUrl: options.workspaceDocument.currentVersion.download.downloadUrl,
+            remoteExpiresAt: options.workspaceDocument.currentVersion.download.expiresAt,
+            provider: options.workspaceDocument.currentVersion.blob.provider,
+            blobId: options.workspaceDocument.currentVersion.blob.blobId,
+          });
+        }
         docRevisionRef.current = 0;
         lastAutoSavedRevisionRef.current = -1;
 
@@ -892,7 +976,7 @@ export default function Home() {
         });
 
         // Phase 2-4: Auto-analyze document on upload
-        fireDocumentAnalysis(parsed.segments);
+      fireDocumentAnalysis(parsed.segments);
       } catch (error) {
         const message = error instanceof Error ? error.message : "문서 로드 실패";
         setStatus(message);
@@ -907,13 +991,66 @@ export default function Home() {
       setRenderResult,
       setLoadedDocument,
       setOutline,
+      setDownload,
       setTemplateCatalog,
+      setWorkspaceDocument,
       refreshRecentSnapshots,
       fireDocumentAnalysis,
     ],
   );
 
+  const openWorkspaceDocument = useCallback(async (documentId: string) => {
+    if (!authSession?.activeTenant || !documentId) {
+      return;
+    }
+    setStatus("저장된 문서를 불러오는 중입니다...");
+    try {
+      const response = await fetch(`/api/documents/${documentId}`, {
+        method: "GET",
+        cache: "no-store",
+      });
+      const payload = (await response.json().catch(() => ({}))) as WorkspaceDocumentApiResponse;
+      if (!response.ok || !payload.document) {
+        throw new Error(payload.error || "문서를 불러오지 못했습니다.");
+      }
+      const currentVersion = payload.document.currentVersion;
+      if (!currentVersion?.download) {
+        throw new Error("문서의 최신 저장본을 찾지 못했습니다.");
+      }
+      const fileResponse = await fetch(currentVersion.download.downloadUrl, {
+        method: "GET",
+        cache: "no-store",
+      });
+      if (!fileResponse.ok) {
+        throw new Error("저장된 HWPX 파일을 가져오지 못했습니다.");
+      }
+      const blob = await fileResponse.blob();
+      const file = new File([blob], currentVersion.fileName, {
+        type: currentVersion.blob.contentType || blob.type || "application/octet-stream",
+        lastModified: Date.now(),
+      });
+      await loadFileIntoEditor(file, null, { workspaceDocument: payload.document });
+      setStatus(`저장된 문서를 열었습니다: ${payload.document.title}`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "문서 로드 실패";
+      setStatus(message);
+    }
+  }, [authSession, loadFileIntoEditor, setStatus]);
+
+  useEffect(() => {
+    const tenantId = authSession?.activeTenant?.tenantId || "";
+    if (!tenantId || !workspaceDocumentId) {
+      return;
+    }
+    const nextKey = `${tenantId}:${workspaceDocumentId}`;
+    if (loadedWorkspaceKeyRef.current === nextKey) {
+      return;
+    }
+    void openWorkspaceDocument(workspaceDocumentId);
+  }, [authSession, openWorkspaceDocument, workspaceDocumentId]);
+
   const onPickFile = async (file: File) => {
+    clearWorkspaceContext();
     await loadFileIntoEditor(file, "opened");
   };
 
@@ -933,6 +1070,7 @@ export default function Home() {
       const file = new File([snapshot.blob], snapshot.meta.name, {
         type: snapshot.meta.mimeType || "application/octet-stream",
       });
+      clearWorkspaceContext();
       await loadFileIntoEditor(file, null);
       setSelectedRecentSnapshotId(snapshotId);
     } catch (error) {
@@ -1094,6 +1232,10 @@ export default function Home() {
         | {
             blobId: string;
             provider: string;
+            fileName: string;
+            contentType: string;
+            byteLength: number;
+            createdAt: string;
             downloadUrl: string;
             expiresAt: string;
           }
@@ -1105,6 +1247,10 @@ export default function Home() {
         remoteDownload = {
           blobId: uploaded.blobId,
           provider: uploaded.provider,
+          fileName: uploaded.fileName,
+          contentType: uploaded.contentType,
+          byteLength: uploaded.byteLength,
+          createdAt: uploaded.createdAt,
           downloadUrl: uploaded.downloadUrl,
           expiresAt: uploaded.expiresAt,
         };
@@ -1148,6 +1294,7 @@ export default function Home() {
       return {
         edits: result.edits.length,
         fileName: nextName,
+        warnings: combinedWarnings,
         storage: remoteDownload,
         storageWarning: remoteUploadWarning,
       };
@@ -1169,6 +1316,77 @@ export default function Home() {
     ],
   );
 
+  const persistWorkspaceExport = useCallback(async (params: {
+    fileName: string;
+    label: string;
+    storage:
+      | (WorkspaceBlobReference & {
+          downloadUrl: string;
+          expiresAt: string;
+        })
+      | null;
+    warnings: string[];
+  }): Promise<{ document: WorkspaceDocumentDetail | null; warning?: string }> => {
+    if (!authSession?.activeTenant) {
+      return { document: null, warning: "활성 세션이 없어 문서함 저장을 생략했습니다." };
+    }
+    if (!editorDoc) {
+      return { document: null, warning: "현재 문서 스냅샷이 없어 문서함 저장을 생략했습니다." };
+    }
+    if (!params.storage) {
+      return { document: null, warning: "외부 저장소 업로드가 없어 문서함 저장을 생략했습니다." };
+    }
+
+    const payload = {
+      title: workspaceDocument?.title || toFileStem(params.fileName),
+      label: params.label,
+      fileName: params.fileName,
+      sourceFormat: inferWorkspaceSourceFormat(fileName || params.fileName),
+      editorDoc,
+      templateCatalog,
+      validationSummary: buildWorkspaceValidationSummary([], params.warnings),
+      blob: params.storage,
+    };
+
+    if (workspaceDocument?.id) {
+      const versionResponse = await fetch(`/api/documents/${workspaceDocument.id}/versions`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
+      });
+      const versionPayload = (await versionResponse.json().catch(() => ({}))) as { error?: string };
+      if (!versionResponse.ok) {
+        throw new Error(versionPayload.error || "문서 버전 저장 실패");
+      }
+
+      const detailResponse = await fetch(`/api/documents/${workspaceDocument.id}`, {
+        method: "GET",
+        cache: "no-store",
+      });
+      const detailPayload = (await detailResponse.json().catch(() => ({}))) as WorkspaceDocumentApiResponse;
+      if (!detailResponse.ok || !detailPayload.document) {
+        throw new Error(detailPayload.error || "문서 최신 상태 조회 실패");
+      }
+      setWorkspaceDocument(detailPayload.document);
+      loadedWorkspaceKeyRef.current = `${detailPayload.document.tenantId}:${detailPayload.document.id}`;
+      return { document: detailPayload.document };
+    }
+
+    const createResponse = await fetch("/api/documents", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const createPayload = (await createResponse.json().catch(() => ({}))) as WorkspaceDocumentApiResponse;
+    if (!createResponse.ok || !createPayload.document) {
+      throw new Error(createPayload.error || "문서 생성 실패");
+    }
+    setWorkspaceDocument(createPayload.document);
+    loadedWorkspaceKeyRef.current = `${createPayload.document.tenantId}:${createPayload.document.id}`;
+    router.replace(`/?documentId=${createPayload.document.id}`);
+    return { document: createPayload.document };
+  }, [authSession, editorDoc, fileName, router, templateCatalog, workspaceDocument]);
+
   // 다른 이름으로 저장 다이얼로그 열기
   const onSave = () => setSaveDialogOpen(true);
   const onExport = () => setSaveDialogOpen(true);
@@ -1186,10 +1404,18 @@ export default function Home() {
         markClean: true,
         overrideFileName: customFileName,
       });
+      const persisted = await persistWorkspaceExport({
+        fileName: result.fileName,
+        label: "manual-save",
+        storage: result.storage,
+        warnings: result.warnings,
+      });
       pushHistory(`저장 완료 (${result.edits}건)`, result.edits);
       if (result.storage) {
         setStatus(
-          `저장 완료: ${result.fileName} (외부저장 ${result.storage.provider}, 서명 URL 만료 ${new Date(result.storage.expiresAt).toLocaleTimeString("ko-KR")})`,
+          persisted.warning
+            ? `저장 완료: ${result.fileName} (외부저장 ${result.storage.provider}, ${persisted.warning})`
+            : `저장 완료: ${result.fileName} (문서함 연동 완료, 외부저장 ${result.storage.provider}, 서명 URL 만료 ${new Date(result.storage.expiresAt).toLocaleTimeString("ko-KR")})`,
         );
       } else if (result.storageWarning) {
         setStatus(`저장 완료: ${result.fileName} (${result.storageWarning})`);
@@ -1227,8 +1453,18 @@ export default function Home() {
         triggerDownload: false,
         markClean: false,
       });
+      const persisted = await persistWorkspaceExport({
+        fileName: result.fileName,
+        label: "auto-save",
+        storage: result.storage,
+        warnings: result.warnings,
+      });
       if (result.storage) {
-        setStatus(`자동 저장 완료: ${result.fileName} (외부저장 ${result.storage.provider})`);
+        setStatus(
+          persisted.warning
+            ? `자동 저장 완료: ${result.fileName} (${persisted.warning})`
+            : `자동 저장 완료: ${result.fileName} (문서함 버전 저장 + 외부저장 ${result.storage.provider})`,
+        );
       } else if (result.storageWarning) {
         setStatus(`자동 저장 완료: ${result.fileName} (${result.storageWarning})`);
       } else {
@@ -1244,7 +1480,7 @@ export default function Home() {
     } finally {
       autoSaveInFlightRef.current = false;
     }
-  }, [editorDoc, sourceBuffer, hwpxDocumentModel, isDirty, isBusy, aiBusy, runHwpxExport, setStatus]);
+  }, [editorDoc, sourceBuffer, hwpxDocumentModel, isDirty, isBusy, aiBusy, persistWorkspaceExport, runHwpxExport, setStatus]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
