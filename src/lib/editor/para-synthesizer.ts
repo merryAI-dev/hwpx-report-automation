@@ -29,6 +29,8 @@ export function synthesizeParaNode(
   newParaId: string,
   _sectionFileName: string,
 ): HwpxParaNode {
+  void _sectionFileName;
+
   if (!siblingPara) {
     // 최소 OWPML 문단 (namespace는 루트에서 상속되므로 익스포트 시 문제없음)
     const minimalXml = `<hp:p><hp:run><hp:t></hp:t></hp:run></hp:p>`;

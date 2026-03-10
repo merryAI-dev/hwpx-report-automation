@@ -617,6 +617,11 @@ export default function Home() {
     clearChat,
     appendToolCallToLastMessage,
     appendToolResultToLastMessage,
+
+    // Tool call rollback
+    lastToolCallSnapshot,
+    undoLastToolCall,
+    saveToolCallSnapshot,
   } = useDocumentStore();
 
   // Phase 2: appendTransaction 이후 Zustand 갱신 신호
@@ -2656,6 +2661,13 @@ export default function Home() {
               onApproveTool={onApproveToolCall}
               onRejectTool={onRejectToolCall}
               onClearChat={clearChat}
+              canUndo={!!lastToolCallSnapshot}
+              onUndoLastToolCall={() => {
+                const snapshot = undoLastToolCall();
+                if (snapshot && editor) {
+                  editor.commands.setContent(snapshot);
+                }
+              }}
             />
           }
             analysis={
@@ -2669,9 +2681,34 @@ export default function Home() {
                 onRemoveEntry={removeTerminologyEntry}
                 onApplyTerminology={onApplyTerminology}
                 isBusy={isBusy}
+                compatibilityWarnings={exportWarnings}
+                collaborationStats={{
+                  historyCount: history.length,
+                  aiActionCount: history.filter((h) => h.actor === "ai").length,
+                }}
+                performanceStats={{
+                  segmentCount: sourceSegments.length,
+                  complexity: sourceSegments.length > 200 ? "high" : sourceSegments.length > 50 ? "medium" : "low",
+                }}
+                qaStats={{
+                  integrityIssueCount: integrityIssues.length,
+                  exportWarningCount: exportWarnings.length,
+                  compatibilityWarningCount: exportWarnings.length,
+                }}
               />
             }
-          history={<EditHistoryPanel history={history} />}
+          history={
+            <EditHistoryPanel
+              history={history}
+              onRestoreItem={(id) => {
+                const item = history.find((h) => h.id === id);
+                if (item?.snapshotDoc && editor) {
+                  editor.commands.setContent(item.snapshotDoc);
+                }
+              }}
+              disabled={isBusy || aiBusy}
+            />
+          }
         />
       </main>
 

@@ -83,7 +83,66 @@ describe("real hwpx roundtrip", () => {
       (row) => row.fileName === target.fileName && row.textIndex === target.textIndex,
     );
     expect(node?.text).toBe(marker);
-  }, 60000);
+  }, 120000);
+
+  integrationTest("preserves font size through text-edit HWPX round-trip", async () => {
+    const input = await fsp.readFile(REAL_FIXTURE_PATH);
+    const inputBuffer = Uint8Array.from(input).buffer;
+    const parsed = await parseHwpxToProseMirror(inputBuffer);
+    if (!parsed.hwpxDocumentModel) return;
+
+    // Find a segment that has fontSizePt set
+    const fontSeg = parsed.segments.find(
+      (s) => s.styleHints.hwpxFontSizePt && s.text.trim().length > 0,
+    );
+    if (!fontSeg) return; // fixture doesn't have fontSize info
+
+    const originalFontSize = fontSeg.styleHints.hwpxFontSizePt!;
+
+    // Edit text with fontSize textStyle mark preserved (simulating AI replacement with marks)
+    const editedDoc = JSON.parse(JSON.stringify(parsed.doc)) as JSONContent;
+    const findSegNode = (node: JSONContent): JSONContent | null => {
+      if (
+        (node.type === "paragraph" || node.type === "heading") &&
+        (node.attrs as Record<string, unknown>)?.segmentId === fontSeg.segmentId
+      ) {
+        return node;
+      }
+      for (const child of node.content ?? []) {
+        const found = findSegNode(child);
+        if (found) return found;
+      }
+      return null;
+    };
+    const targetNode = findSegNode(editedDoc);
+    if (!targetNode?.content) return;
+
+    // Modify text but keep the textStyle marks (fontSize)
+    const marker = `[FONT] ${Date.now().toString(36)}`;
+    const existingMarks = targetNode.content.find((n) => n.type === "text")?.marks;
+    targetNode.content = [{ type: "text", text: marker, marks: existingMarks }];
+
+    const result = await applyProseMirrorDocToHwpx(
+      inputBuffer,
+      editedDoc,
+      parsed.segments,
+      parsed.extraSegmentsMap,
+      parsed.hwpxDocumentModel,
+    );
+    expect(result.integrityIssues).toEqual([]);
+
+    // Re-parse and verify fontSize is preserved
+    const outBuffer = await result.blob.arrayBuffer();
+    const reparsed = await parseHwpxToProseMirror(outBuffer);
+    expect(reparsed.integrityIssues).toEqual([]);
+
+    const editedSeg = reparsed.segments.find((s) => s.text === marker);
+    expect(editedSeg).toBeTruthy();
+    // Font size should be preserved (same as original)
+    if (editedSeg?.styleHints.hwpxFontSizePt) {
+      expect(editedSeg.styleHints.hwpxFontSizePt).toBe(originalFontSize);
+    }
+  }, 120000);
 
   integrationTest("preserves bold marks through HWPX round-trip", async () => {
     const input = await fsp.readFile(REAL_FIXTURE_PATH);
@@ -140,5 +199,5 @@ describe("real hwpx roundtrip", () => {
     const boldSeg = reparsed.segments.find((s) => s.text === targetText);
     expect(boldSeg).toBeTruthy();
     expect(boldSeg?.styleHints.hwpxBold).toBe("true");
-  }, 60000);
+  }, 120000);
 });

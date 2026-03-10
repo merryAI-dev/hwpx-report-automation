@@ -43,7 +43,7 @@ export function DocumentEditor({
   onNewParaCreated,
   getHwpxDocumentModel,
 }: DocumentEditorProps) {
-  const isLocalUpdateRef = useRef(false);
+  const lastLocalContentRef = useRef<JSONContent | null>(null);
 
   const editor = useEditor({
     immediatelyRender: false,
@@ -51,8 +51,9 @@ export function DocumentEditor({
     content: content || { type: "doc", content: [{ type: "paragraph" }] },
     editable,
     onUpdate: ({ editor: tiptapEditor }) => {
-      isLocalUpdateRef.current = true;
-      onUpdateDoc(tiptapEditor.getJSON());
+      const doc = tiptapEditor.getJSON();
+      lastLocalContentRef.current = doc;
+      onUpdateDoc(doc);
     },
     onSelectionUpdate: ({ editor: tiptapEditor }) => {
       const { from, to } = tiptapEditor.state.selection;
@@ -69,21 +70,32 @@ export function DocumentEditor({
     return () => onEditorReady(null);
   }, [editor, onEditorReady]);
 
+  // content 참조가 바뀔 때만 setContent — 최초 마운트 및 로컬 편집 에코 제외
+  const prevContentRef = useRef<JSONContent | null>(null);
+  const initialContentRef = useRef<JSONContent | null>(content);
   useEffect(() => {
     if (!editor || !content) {
       return;
     }
-    if (isLocalUpdateRef.current) {
-      isLocalUpdateRef.current = false;
+    // 최초 마운트 시 skip: useEditor 초기값으로 이미 설정됨
+    if (prevContentRef.current === null) {
+      prevContentRef.current = content;
       return;
     }
-    const next = JSON.stringify(content);
-    const current = JSON.stringify(editor.getJSON());
-    if (next === current) {
+    // 참조 동일성 체크: store에서 같은 객체이면 skip (O(1))
+    if (prevContentRef.current === content) {
       return;
     }
+    // 로컬 편집 에코 skip: 방금 editor에서 내보낸 동일 JSON이면 무시
+    if (lastLocalContentRef.current === content) {
+      prevContentRef.current = content;
+      lastLocalContentRef.current = null;
+      return;
+    }
+    prevContentRef.current = content;
     editor.commands.setContent(content, { emitUpdate: false });
   }, [content, editor]);
+  void initialContentRef; // suppress unused variable warning
 
   return (
     <div

@@ -10,10 +10,12 @@ type ChatPanelProps = {
   isBusy: boolean;
   pendingToolCall: PendingToolCall | null;
   hasDocument: boolean;
+  canUndo: boolean;
   onSendMessage: (text: string) => void;
   onApproveTool: () => void;
   onRejectTool: () => void;
   onClearChat: () => void;
+  onUndoLastToolCall: () => void;
 };
 
 const QUICK_COMMANDS = INSTRUCTION_PRESETS
@@ -28,10 +30,12 @@ export function ChatPanel({
   isBusy,
   pendingToolCall,
   hasDocument,
+  canUndo,
   onSendMessage,
   onApproveTool,
   onRejectTool,
   onClearChat,
+  onUndoLastToolCall,
 }: ChatPanelProps) {
   const [input, setInput] = useState("");
   const messagesEndRef = useRef<HTMLDivElement>(null);
@@ -70,7 +74,7 @@ export function ChatPanel({
   return (
     <div className="chat-panel">
       {/* Message list */}
-      <div className="chat-messages">
+      <div className="chat-messages" role="log" aria-live="polite" aria-label="채팅 메시지">
         {messages.length === 0 && !isBusy && (
           <div className="chat-empty">
             <p style={{ fontSize: 13, color: "#6b7280", textAlign: "center", padding: "20px 0" }}>
@@ -108,10 +112,10 @@ export function ChatPanel({
               </div>
             )}
             <div className="chat-pending-tool-actions">
-              <button className="btn primary" onClick={onApproveTool} disabled={isBusy}>
+              <button className="btn primary" onClick={onApproveTool} disabled={isBusy} aria-label="편집 수락">
                 수락
               </button>
-              <button className="btn" onClick={onRejectTool} disabled={isBusy}>
+              <button className="btn" onClick={onRejectTool} disabled={isBusy} aria-label="편집 거부">
                 거부
               </button>
             </div>
@@ -149,6 +153,7 @@ export function ChatPanel({
             placeholder={hasDocument ? "메시지를 입력하세요..." : "문서를 먼저 업로드하세요"}
             disabled={isBusy || !hasDocument}
             rows={1}
+            aria-label="AI 채팅 메시지 입력"
           />
           <button
             className="chat-send-btn"
@@ -158,15 +163,26 @@ export function ChatPanel({
             전송
           </button>
         </div>
-        {messages.length > 0 && (
-          <button
-            className="chat-clear-btn"
-            onClick={onClearChat}
-            disabled={isBusy}
-          >
-            대화 초기화
-          </button>
-        )}
+        <div className="chat-input-actions">
+          {canUndo && (
+            <button
+              className="chat-undo-btn"
+              onClick={onUndoLastToolCall}
+              disabled={isBusy}
+            >
+              실행 취소
+            </button>
+          )}
+          {messages.length > 0 && (
+            <button
+              className="chat-clear-btn"
+              onClick={onClearChat}
+              disabled={isBusy}
+            >
+              대화 초기화
+            </button>
+          )}
+        </div>
       </div>
     </div>
   );
@@ -243,8 +259,8 @@ function ChatMessage({ message }: { message: ChatMessageUI }) {
 function ToolCallBadge({ name, isAutoExecuted }: { name: string; isAutoExecuted: boolean }) {
   const TOOL_LABELS: Record<string, string> = {
     read_document: "문서 읽기",
-    read_segment: "세그먼트 읽기",
-    edit_segment: "세그먼트 수정",
+    read_segment: "문단 읽기",
+    edit_segment: "문단 수정",
     edit_segments: "일괄 수정",
     search_replace: "찾아 바꾸기",
     analyze_style: "스타일 분석",

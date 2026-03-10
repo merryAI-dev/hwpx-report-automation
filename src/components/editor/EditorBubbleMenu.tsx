@@ -10,7 +10,7 @@
  *   3. createPortal로 React 콘텐츠를 해당 DOM 엘리먼트 안에 렌더
  */
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo } from "react";
 import { createPortal } from "react-dom";
 import { BubbleMenuPlugin } from "@tiptap/extension-bubble-menu";
 import { PluginKey } from "@tiptap/pm/state";
@@ -25,31 +25,35 @@ type EditorBubbleMenuProps = {
 
 export function EditorBubbleMenu({ editor }: EditorBubbleMenuProps) {
   // 실제 DOM 엘리먼트 (Plugin이 소유 → Floating UI로 위치 계산)
-  const portalEl = useRef<HTMLDivElement | null>(null);
-  const [ready, setReady] = useState(false);
+  const portalNode = useMemo(() => {
+    if (typeof document === "undefined") {
+      return null;
+    }
+    const el = document.createElement("div");
+    el.style.zIndex = "50";
+    return el;
+  }, []);
 
   // 1단계: 컴포넌트 마운트 시 DOM 엘리먼트 생성
   useEffect(() => {
-    const el = document.createElement("div");
-    el.style.zIndex = "50";
-    document.body.appendChild(el);
-    portalEl.current = el;
-    setReady(true);
+    if (!portalNode) return;
+    document.body.appendChild(portalNode);
 
     return () => {
-      document.body.removeChild(el);
-      portalEl.current = null;
+      if (portalNode.parentNode) {
+        portalNode.parentNode.removeChild(portalNode);
+      }
     };
-  }, []);
+  }, [portalNode]);
 
   // 2단계: 에디터와 DOM 엘리먼트가 모두 준비되면 Plugin 등록
   useEffect(() => {
-    if (!editor || !portalEl.current) return;
+    if (!editor || !portalNode) return;
 
     const plugin = BubbleMenuPlugin({
       pluginKey: BUBBLE_MENU_KEY,
       editor,
-      element: portalEl.current,
+      element: portalNode,
       shouldShow: ({ state }) => {
         const { from, to } = state.selection;
         // 텍스트 선택이 있을 때만 표시
@@ -68,10 +72,10 @@ export function EditorBubbleMenu({ editor }: EditorBubbleMenuProps) {
     return () => {
       editor.unregisterPlugin(BUBBLE_MENU_KEY);
     };
-  }, [editor, ready]);
+  }, [editor, portalNode]);
 
   // 3단계: createPortal로 React 트리를 DOM 엘리먼트 안에 렌더
-  if (!ready || !portalEl.current || !editor) return null;
+  if (!portalNode || !editor) return null;
 
   return createPortal(
     <div className={styles.bubbleMenu}>
@@ -104,6 +108,6 @@ export function EditorBubbleMenu({ editor }: EditorBubbleMenuProps) {
         <i>I</i>
       </button>
     </div>,
-    portalEl.current,
+    portalNode,
   );
 }

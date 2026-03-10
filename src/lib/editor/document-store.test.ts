@@ -27,6 +27,41 @@ describe("buildOutlineFromDoc", () => {
       { id: "outline-1", text: "2.1 상세", level: 3, segmentId: "seg-3" },
     ]);
   });
+
+  it("falls back to heading-like paragraphs when heading nodes are missing", () => {
+    const doc: JSONContent = {
+      type: "doc",
+      content: [
+        {
+          type: "paragraph",
+          attrs: { segmentId: "seg-1" },
+          content: [{ type: "text", text: "1. 사업 목적", marks: [{ type: "bold" }] }],
+        },
+        {
+          type: "paragraph",
+          attrs: { segmentId: "seg-2" },
+          content: [{ type: "text", text: "일반 본문 텍스트" }],
+        },
+        {
+          type: "paragraph",
+          attrs: { segmentId: "seg-3" },
+          content: [
+            {
+              type: "text",
+              text: "핵심 전략",
+              marks: [{ type: "textStyle", attrs: { fontSize: "14pt" } }],
+            },
+          ],
+        },
+      ],
+    };
+
+    const outline = buildOutlineFromDoc(doc);
+    expect(outline).toEqual([
+      { id: "outline-0", text: "1. 사업 목적", level: 2, segmentId: "seg-1" },
+      { id: "outline-1", text: "핵심 전략", level: 2, segmentId: "seg-3" },
+    ]);
+  });
 });
 
 describe("buildDirtySummary", () => {
@@ -41,4 +76,3 @@ describe("buildDirtySummary", () => {
     expect(summary.dirtyFiles).toEqual(["Contents/section0.xml", "Contents/section1.xml"]);
   });
 });
-

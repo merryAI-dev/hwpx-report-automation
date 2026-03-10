@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useRef } from "react";
 import type { JSONContent } from "@tiptap/core";
 import styles from "./HwpxSaveDialog.module.css";
 
@@ -41,11 +41,7 @@ export function HwpxSaveDialog({
   onClose,
   onConfirm,
 }: HwpxSaveDialogProps) {
-  const [inputName, setInputName] = useState(defaultFileName);
-
-  useEffect(() => {
-    if (open) setInputName(defaultFileName);
-  }, [open, defaultFileName]);
+  const inputRef = useRef<HTMLInputElement>(null);
 
   if (!open) return null;
 
@@ -54,7 +50,8 @@ export function HwpxSaveDialog({
   const sourceLabel = sourceFormat.toUpperCase();
 
   const handleConfirm = () => {
-    const trimmed = inputName.trim() || defaultFileName;
+    const raw = inputRef.current?.value ?? "";
+    const trimmed = raw.trim() || defaultFileName;
     const finalName = trimmed.toLowerCase().endsWith(".hwpx") ? trimmed : `${trimmed}.hwpx`;
     onConfirm(finalName);
   };
@@ -65,12 +62,18 @@ export function HwpxSaveDialog({
   };
 
   return (
-    <div className={styles.backdrop} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+    <div className={styles.backdrop} onClick={onClose} role="presentation">
+      <div
+        className={styles.modal}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="save-dialog-title"
+      >
         {/* 타이틀 바 */}
         <div className={styles.titleBar}>
-          <span>다른 이름으로 저장</span>
-          <button type="button" className={styles.closeBtn} onClick={onClose}>
+          <span id="save-dialog-title">다른 이름으로 저장</span>
+          <button type="button" className={styles.closeBtn} onClick={onClose} aria-label="닫기">
             ✕
           </button>
         </div>
@@ -78,7 +81,7 @@ export function HwpxSaveDialog({
         <div className={styles.body}>
           {/* 포맷 변환 경고 배너 */}
           {isConverting && (
-            <div className={styles.conversionBanner}>
+            <div className={styles.conversionBanner} role="alert">
               <span className={styles.conversionBadge}>{sourceLabel} → HWPX</span>
               <span className={styles.conversionNote}>
                 {sourceLabel} 파일을 HWPX 형식으로 변환합니다. 일부 서식이 손실될 수 있습니다.
@@ -95,8 +98,8 @@ export function HwpxSaveDialog({
               id="hwpx-save-name"
               type="text"
               className={styles.fileNameInput}
-              value={inputName}
-              onChange={(e) => setInputName(e.target.value)}
+              ref={inputRef}
+              defaultValue={defaultFileName}
               onKeyDown={handleKeyDown}
               autoFocus
               spellCheck={false}

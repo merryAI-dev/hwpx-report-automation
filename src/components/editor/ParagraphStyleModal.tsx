@@ -92,11 +92,17 @@ export function ParagraphStyleModal({ editor, onClose }: ParagraphStyleModalProp
   };
 
   return (
-    <div className={styles.backdrop} onClick={onClose}>
-      <div className={styles.modal} onClick={(e) => e.stopPropagation()}>
+    <div className={styles.backdrop} onClick={onClose} role="presentation">
+      <div
+        className={styles.modal}
+        onClick={(e) => e.stopPropagation()}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="para-style-title"
+      >
         <div className={styles.titleBar}>
-          <span>문단 모양</span>
-          <button type="button" className={styles.closeBtn} onClick={onClose}>✕</button>
+          <span id="para-style-title">문단 모양</span>
+          <button type="button" className={styles.closeBtn} onClick={onClose} aria-label="닫기">✕</button>
         </div>
 
         <div className={styles.body}>
@@ -110,6 +116,7 @@ export function ParagraphStyleModal({ editor, onClose }: ParagraphStyleModalProp
                   type="button"
                   className={state.align === a ? `${styles.alignBtn} ${styles.alignBtnActive}` : styles.alignBtn}
                   onClick={() => update("align", a)}
+                  aria-pressed={state.align === a}
                 >
                   {{
                     left: "왼쪽",

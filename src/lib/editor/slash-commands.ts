@@ -38,10 +38,10 @@ function baseCommands(): Omit<SlashCommandItem, "run">[] {
       keywords: ["구분선", "hr", "divider"],
     },
     {
-      id: "image-placeholder",
+      id: "image-insert",
       title: "이미지",
-      description: "이미지 자리 표시 문단을 삽입합니다. (Phase 2)",
-      keywords: ["이미지", "image", "placeholder"],
+      description: "이미지 파일을 선택하여 삽입합니다.",
+      keywords: ["이미지", "image", "사진", "그림"],
     },
     {
       id: "set-field-recipient",
@@ -201,7 +201,12 @@ export function getSlashCommandItems(query: string, context: SlashCommandContext
         aiHandler?.();
         return;
       }
-      editor.chain().focus().deleteRange(range).insertContent("[이미지 자리]").run();
+      // Trigger toolbar image file picker
+      editor.chain().focus().deleteRange(range).run();
+      const imageInput = document.querySelector<HTMLInputElement>('input[data-image-input]');
+      if (imageInput) {
+        imageInput.click();
+      }
     },
   }));
 
