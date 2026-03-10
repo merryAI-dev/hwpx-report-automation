@@ -1,0 +1,45 @@
+# fly.toml — hwpx-report-automation
+# Docs: https://fly.io/docs/reference/configuration/
+
+app = "hwpx-report"
+primary_region = "nrt"  # Tokyo — closest to Korea
+
+[build]
+  dockerfile = "Dockerfile"
+
+[env]
+  NODE_ENV = "production"
+  NEXT_TELEMETRY_DISABLED = "1"
+  BLOB_STORAGE_DRIVER = "fs"
+  BLOB_STORAGE_FS_ROOT = "/data/blob-storage"
+  PORT = "3000"
+
+[http_service]
+  internal_port = 3000
+  force_https = true
+  auto_stop_machines = "stop"
+  auto_start_machines = true
+  min_machines_running = 0
+  processes = ["app"]
+
+  [http_service.concurrency]
+    type = "requests"
+    hard_limit = 200
+    soft_limit = 150
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[mounts]
+  source = "hwpx_data"
+  destination = "/data/blob-storage"
+
+[[services.http_checks]]
+  interval = "30s"
+  timeout = "10s"
+  grace_period = "15s"
+  method = "GET"
+  path = "/api/health"
+  protocol = "http"
+  tls_skip_verify = false
