@@ -159,6 +159,24 @@ export type CreateWorkspaceTemplatePayload = {
   catalog: TemplateCatalog;
 };
 
+// ── Tenant Admin ──────────────────────────────────────────────────────────────
+
+export type TenantMember = {
+  userId: string;
+  email: string;
+  displayName: string;
+  role: WorkspaceAccessRole;
+  addedAt: string;
+  addedBy: string;
+};
+
+export type TenantInfo = {
+  tenantId: string;
+  tenantName: string;
+  createdAt: string;
+  memberCount: number;
+};
+
 // ── AI Template Review ────────────────────────────────────────────────────────
 
 export type TemplateReviewVerdict = "approve" | "needs-work" | "reject";
