@@ -9,6 +9,7 @@ import type {
   WorkspaceDocumentVersionSummary,
   WorkspacePermissionEntry,
 } from "@/lib/workspace-types";
+import VersionDiffView from "@/components/editor/VersionDiffView";
 import styles from "../../workspace.module.css";
 
 function badgeClass(status: WorkspaceDocumentDetail["status"]): string {
@@ -35,6 +36,8 @@ export default function DocumentDetailPage() {
     displayName: "",
     role: "viewer",
   });
+  const [previewBlobId, setPreviewBlobId] = useState<string | null>(null);
+  const [diffPair, setDiffPair] = useState<[WorkspaceDocumentVersionSummary, WorkspaceDocumentVersionSummary] | null>(null);
 
   const loadDocument = useCallback(async () => {
     setLoading(true);
@@ -248,7 +251,7 @@ export default function DocumentDetailPage() {
               </div>
               {!versions.length ? <div className={styles.empty}>저장된 버전이 없습니다.</div> : (
                 <div className={styles.list}>
-                  {versions.map((version) => (
+                  {versions.map((version, index) => (
                     <div key={version.id} className={styles.listItem}>
                       <div className={styles.row}>
                         <strong>v{version.versionNumber} · {version.label}</strong>
@@ -268,6 +271,22 @@ export default function DocumentDetailPage() {
                         <span className={styles.code}>{version.fileName}</span>
                         <div className={styles.nav}>
                           {version.download ? <a className={styles.navLink} href={version.download.downloadUrl}>다운로드</a> : null}
+                          <button
+                            type="button"
+                            className={styles.inlineButton}
+                            onClick={() => setPreviewBlobId(previewBlobId === version.blob.blobId ? null : version.blob.blobId)}
+                          >
+                            {previewBlobId === version.blob.blobId ? "미리보기 닫기" : "미리보기"}
+                          </button>
+                          {index < versions.length - 1 ? (
+                            <button
+                              type="button"
+                              className={styles.inlineButton}
+                              onClick={() => setDiffPair([versions[index + 1], version])}
+                            >
+                              버전 비교
+                            </button>
+                          ) : null}
                           {document && version.id !== document.currentVersionId ? (
                             <button
                               type="button"
@@ -280,6 +299,32 @@ export default function DocumentDetailPage() {
                           ) : null}
                         </div>
                       </div>
+                      {previewBlobId === version.blob.blobId && document ? (
+                        <div style={{ display: "grid", gap: "8px" }}>
+                          <div className={styles.row}>
+                            <span className={styles.muted}>미리보기</span>
+                            <a
+                              className={styles.inlineButton}
+                              href={`/api/preview/${version.blob.blobId}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                            >
+                              새 창에서 보기
+                            </a>
+                          </div>
+                          <iframe
+                            src={`/api/preview/${version.blob.blobId}`}
+                            title={`v${version.versionNumber} 미리보기`}
+                            style={{
+                              width: "100%",
+                              minHeight: "600px",
+                              border: "1px solid #e2e8f0",
+                              borderRadius: "12px",
+                              background: "#fff",
+                            }}
+                          />
+                        </div>
+                      ) : null}
                     </div>
                   ))}
                 </div>
@@ -317,6 +362,13 @@ export default function DocumentDetailPage() {
           </>
         ) : null}
       </div>
+      {diffPair ? (
+        <VersionDiffView
+          leftVersion={diffPair[0]}
+          rightVersion={diffPair[1]}
+          onClose={() => setDiffPair(null)}
+        />
+      ) : null}
     </div>
   );
 }

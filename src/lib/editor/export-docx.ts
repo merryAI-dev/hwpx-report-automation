@@ -10,33 +10,79 @@ import {
   Packer,
   AlignmentType,
   BorderStyle,
+  Footer,
+  PageNumber,
+  NumberFormat,
 } from "docx";
 import type { JSONContent } from "@tiptap/core";
 
+export type DocxExportOptions = {
+  /** Author metadata embedded in the document */
+  author?: string;
+  /** Include a page number footer */
+  includePageNumbers?: boolean;
+};
+
 /**
  * Convert TipTap JSONContent to a DOCX Blob.
+ *
+ * Original `exportToDocx(doc, fileName)` signature preserved for backward compatibility.
  */
 export async function exportToDocx(
   doc: JSONContent,
   fileName: string,
+  options?: DocxExportOptions,
 ): Promise<{ blob: Blob; fileName: string }> {
   const children = (doc.content || []).flatMap(convertNode);
+  const title = fileName.replace(/\.(hwpx|docx|pptx)$/i, "");
+  const author = options?.author ?? "HWPX Editor";
+  const includePageNumbers = options?.includePageNumbers ?? false;
+
+  const footers = includePageNumbers
+    ? {
+        default: new Footer({
+          children: [
+            new Paragraph({
+              alignment: AlignmentType.CENTER,
+              children: [
+                new TextRun({ children: [PageNumber.CURRENT] }),
+                new TextRun(" / "),
+                new TextRun({ children: [PageNumber.TOTAL_PAGES] }),
+              ],
+            }),
+          ],
+        }),
+      }
+    : undefined;
 
   const document = new Document({
+    creator: author,
+    title,
+    description: title,
+    styles: {
+      paragraphStyles: [],
+    },
+    numbering: {
+      config: [],
+    },
     sections: [
       {
         properties: {
           page: {
             margin: { top: 1440, bottom: 1440, left: 1440, right: 1440 }, // 1 inch
+            pageNumbers: includePageNumbers
+              ? { start: 1, formatType: NumberFormat.DECIMAL }
+              : undefined,
           },
         },
+        footers,
         children,
       },
     ],
   });
 
   const blob = await Packer.toBlob(document);
-  const exportName = fileName.replace(/\.(hwpx|docx|pptx)$/i, "") + ".docx";
+  const exportName = title + ".docx";
   return { blob, fileName: exportName };
 }
 

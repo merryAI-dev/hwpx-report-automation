@@ -8,6 +8,8 @@ import type { RecentFileSnapshotMeta } from "@/lib/recent-files";
 import { TableControls } from "./TableControls";
 import { ParagraphStyleModal } from "./ParagraphStyleModal";
 import { CharStyleModal } from "./CharStyleModal";
+import { ExportModal } from "./ExportModal";
+import type { ExportFormat, ExportOptions } from "./ExportModal";
 import styles from "./EditorToolbar.module.css";
 
 const HWP_FONTS = [
@@ -46,6 +48,10 @@ type EditorToolbarProps = {
   onExport: () => void;
   onExportPdf: () => void;
   onExportDocx: () => void;
+  /** Optional: called when user exports from the ExportModal with format + options */
+  onExportWithOptions?: (format: ExportFormat, options: ExportOptions) => void;
+  /** Current document file name (used as default in ExportModal) */
+  currentFileName?: string;
   onSave: () => void;
   sessionContext: {
     email: string;
@@ -128,6 +134,8 @@ export function EditorToolbar({
   onExport,
   onExportPdf,
   onExportDocx,
+  onExportWithOptions,
+  currentFileName,
   onSave,
   sessionContext,
   tenantSwitching,
@@ -140,6 +148,7 @@ export function EditorToolbar({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [paraModalOpen, setParaModalOpen] = useState(false);
   const [charModalOpen, setCharModalOpen] = useState(false);
+  const [exportModalOpen, setExportModalOpen] = useState(false);
 
   const currentFont = getCurrentFontFamily(editor);
   const currentSize = getCurrentFontSize(editor);
@@ -240,33 +249,47 @@ export function EditorToolbar({
                 최근열기
               </button>
             </div>
-            <button
-              type="button"
-              className={styles.btn}
-              disabled={globalDisabled || !hasDocument}
-              onClick={onExport}
-              title="내보내기"
-            >
-              내보내기
-            </button>
-            <button
-              type="button"
-              className={styles.btn}
-              disabled={globalDisabled || !hasDocument}
-              onClick={onExportPdf}
-              title="PDF 내보내기"
-            >
-              PDF
-            </button>
-            <button
-              type="button"
-              className={styles.btn}
-              disabled={globalDisabled || !hasDocument}
-              onClick={onExportDocx}
-              title="DOCX 내보내기"
-            >
-              DOCX
-            </button>
+            {onExportWithOptions ? (
+              <button
+                type="button"
+                className={styles.btn}
+                disabled={globalDisabled || !hasDocument}
+                onClick={() => setExportModalOpen(true)}
+                title="내보내기 옵션"
+              >
+                내보내기
+              </button>
+            ) : (
+              <>
+                <button
+                  type="button"
+                  className={styles.btn}
+                  disabled={globalDisabled || !hasDocument}
+                  onClick={onExport}
+                  title="내보내기"
+                >
+                  내보내기
+                </button>
+                <button
+                  type="button"
+                  className={styles.btn}
+                  disabled={globalDisabled || !hasDocument}
+                  onClick={onExportPdf}
+                  title="PDF 내보내기"
+                >
+                  PDF
+                </button>
+                <button
+                  type="button"
+                  className={styles.btn}
+                  disabled={globalDisabled || !hasDocument}
+                  onClick={onExportDocx}
+                  title="DOCX 내보내기"
+                >
+                  DOCX
+                </button>
+              </>
+            )}
             <a
               href="/pilot"
               target="_blank"
@@ -321,6 +344,12 @@ export function EditorToolbar({
               </Link>
               <Link className={styles.navShortcut} href="/pilot">
                 KPI
+              </Link>
+              <Link className={styles.navShortcut} href="/onboarding" title="기능 안내">
+                ?
+              </Link>
+              <Link className={styles.navShortcut} href="/batch/jobs" title="배치 작업 관리">
+                배치
               </Link>
             </div>
             <Btn
@@ -617,6 +646,16 @@ export function EditorToolbar({
       )}
       {charModalOpen && editor && (
         <CharStyleModal editor={editor} onClose={() => setCharModalOpen(false)} />
+      )}
+      {exportModalOpen && onExportWithOptions && (
+        <ExportModal
+          isOpen={exportModalOpen}
+          onClose={() => setExportModalOpen(false)}
+          defaultFileName={currentFileName ?? "document"}
+          onExport={(format: ExportFormat, options: ExportOptions) => {
+            onExportWithOptions(format, options);
+          }}
+        />
       )}
     </>
   );

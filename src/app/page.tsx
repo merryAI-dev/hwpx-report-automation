@@ -19,6 +19,7 @@ import { EditHistoryPanel } from "@/components/sidebar/EditHistoryPanel";
 import { DocumentAnalysisPanel } from "@/components/sidebar/DocumentAnalysisPanel";
 import { streamChat } from "@/lib/chat/chat-stream";
 import type { ChatMessageAPI, ContentBlock, DocumentContext, EditPreview, TableContext, ToolCallInfo } from "@/types/chat";
+import { InlineAiPopup } from "@/components/editor/InlineAiPopup";
 import { buildBatchApplyPlan, collectSectionBatchItems } from "@/lib/editor/batch-ai";
 import { buildDirtySummary, buildOutlineFromDoc } from "@/lib/editor/document-store";
 import { parseHwpxToProseMirror } from "@/lib/editor/hwpx-to-prosemirror";
@@ -2567,6 +2568,21 @@ export default function Home() {
                   getHwpxDocumentModel={getHwpxDocumentModel}
                 />
               </EditorLayout>
+              <InlineAiPopup
+                editor={editor}
+                onAction={(action, text) => {
+                  const instructionMap: Record<string, string> = {
+                    "다듬기": `선택된 텍스트를 더 자연스럽고 전문적으로 다듬어주세요: ${text}`,
+                    "요약": `다음 텍스트를 2-3문장으로 요약해주세요: ${text}`,
+                    "번역": `다음 텍스트를 영어로 번역해주세요: ${text}`,
+                    "확장": `다음 텍스트를 더 자세하게 확장해주세요: ${text}`,
+                  };
+                  const msg = instructionMap[action] ?? `${action}: ${text}`;
+                  setActiveSidebarTab("chat");
+                  if (sidebarCollapsed) toggleSidebar();
+                  void onSendChatMessage(msg);
+                }}
+              />
             </div>
 
             {/* 미리보기 탭 */}
