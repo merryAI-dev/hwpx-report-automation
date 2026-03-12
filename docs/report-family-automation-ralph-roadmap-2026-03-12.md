@@ -259,6 +259,18 @@ Exit criteria:
 - 3+ report families onboarded
 - each family has 3+ benchmark packets
 
+## 10. MYSC packet status
+
+The first reviewed packet for this family is now registered at:
+
+- `docs/benchmarks/mysc-final-report.packet.json`
+
+What it currently proves:
+
+- the source slide deck TOC does not exact-match the target submission report TOC
+- the target family introduces a different section graph and appendix structure
+- therefore the current slide-TOC baseline must fail the benchmark until a family-specific TOC transformation layer exists
+
 ## 10. What this means for MYSC right now
 
 For the MYSC family, the next build step should be:

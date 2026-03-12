@@ -1,0 +1,80 @@
+{
+  "familyId": "mysc-final-report",
+  "packetId": "mysc-marine-2025-final-pair",
+  "capturedAt": "2026-03-12",
+  "sourceArtifacts": {
+    "sourceDeckFileName": "[MYSC] 해양수산 최종결과보고서_1216_vf.pdf",
+    "sourceDeckTocPage": 2,
+    "targetReportFileName": "★최종★[MYSC] 2025년 해양수산 액셀러레이터 최종보고서_엠와이소셜컴퍼니.pdf",
+    "targetReportTocPage": 7,
+    "note": "Local-only PDFs are not committed. This packet stores the reviewed TOC structure extracted from rendered pages."
+  },
+  "benchmarkCases": [
+    {
+      "caseId": "mysc-top-level-toc",
+      "description": "Top-level section structure from the submission report TOC page versus the current slide-deck TOC baseline.",
+      "goldEntries": [
+        { "numbering": "1", "title": "프로그램 개요" },
+        { "numbering": "2", "title": "프로그램 추진 결과 총괄표" },
+        { "numbering": "3", "title": "프로그램 세부추진 결과" },
+        { "numbering": "4", "title": "기업 육성 상세" },
+        { "numbering": "5", "title": "우수 사례" },
+        { "numbering": "6", "title": "기업 만족도 조사" },
+        { "numbering": "7", "title": "2026년도 사업 추진 전략" },
+        { "numbering": "[첨부1]", "title": "보육기업 기본 정보" },
+        { "numbering": "[첨부2]", "title": "기업 만족도 조사 결과" }
+      ],
+      "baselinePredictedEntries": [
+        { "numbering": "1", "title": "운영사 소개" },
+        { "numbering": "2", "title": "핵심 달성 목표" },
+        { "numbering": "3", "title": "주요 추진 사항" },
+        { "numbering": "4", "title": "기업별 상세 현황" },
+        { "numbering": "5", "title": "제언" }
+      ]
+    },
+    {
+      "caseId": "mysc-detailed-toc",
+      "description": "Detailed section slots from the submission report TOC page versus the current slide-deck detail TOC baseline.",
+      "goldEntries": [
+        { "numbering": "-", "title": "사업내용" },
+        { "numbering": "-", "title": "모집, 홍보 및 발굴, 선정" },
+        { "numbering": "-", "title": "최종 선정기업 및 초기자금지급" },
+        { "numbering": "-", "title": "성과관리" },
+        { "numbering": "-", "title": "프로그램 운영" },
+        { "numbering": "-", "title": "성과 요약" },
+        { "numbering": "-", "title": "알럼나이 사후관리" },
+        { "numbering": "-", "title": "기업별 육성내용" },
+        { "numbering": "-", "title": "사후관리 계획" },
+        { "numbering": "-", "title": "홍보 및 보도자료 요약정리" },
+        { "numbering": "-", "title": "로비고스" },
+        { "numbering": "-", "title": "저크" },
+        { "numbering": "-", "title": "만족도 조사 결과" },
+        { "numbering": "-", "title": "제언" }
+      ],
+      "baselinePredictedEntries": [
+        { "numbering": "1.", "title": "운영사 소개" },
+        { "numbering": "2.", "title": "프로그램 핵심 전략" },
+        { "numbering": "1.", "title": "핵심 KPI 성과" },
+        { "numbering": "2.", "title": "프로그램 운영 성과" },
+        { "numbering": "1.", "title": "주요 일정" },
+        { "numbering": "2.", "title": "모집 선발 및 보육기업" },
+        { "numbering": "3.", "title": "OT 및 기업 진단/교육" },
+        { "numbering": "4.", "title": "특화모듈(ODA/OI/오픈컨퍼런스)" },
+        { "numbering": "5.", "title": "사업 홍보" },
+        { "numbering": "6.", "title": "알럼나이 사후관리" },
+        { "numbering": "7.", "title": "투자/글로벌 트랙 상세" },
+        { "numbering": "8.", "title": "예비창업자 육성 상세" },
+        { "numbering": "9.", "title": "네트워킹" },
+        { "numbering": "1.", "title": "기업 성과 총괄표" },
+        { "numbering": "2.", "title": "기업별 상세내용" },
+        { "numbering": "1.", "title": "만족도조사" },
+        { "numbering": "2.", "title": "프로그램 제언" }
+      ]
+    }
+  ],
+  "reviewNotes": [
+    "The target submission report uses a formal A4 program-report structure with appendices, not the same narrative structure as the slide deck.",
+    "A slide-TOC-driven planner cannot pass this family without transforming source slides into the target family schema first.",
+    "The benchmark should therefore treat any direct reuse of the slide TOC as a hard failure for TOC exact match."
+  ]
+}
