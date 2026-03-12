@@ -16,6 +16,7 @@ export type ReportFamilyBenchmarkRun = {
   familyId: string;
   sampleCount: number;
   tocExtractionAccuracy: number;
+  tocBenchmarkCases?: TocBenchmarkCase[];
   sectionCoverage: number;
   slideGroundingCoverage: number;
   documentMaskingCoverage: number;
@@ -68,6 +69,35 @@ export type ReportFamilyBenchmarkEvaluation = {
   metrics: BenchmarkMetricResult[];
   blockers: BenchmarkMetricResult[];
   nextFocusAreas: string[];
+  tocSummary: TocBenchmarkSummary | null;
+};
+
+export type TocBenchmarkEntry = {
+  title: string;
+  numbering?: string | null;
+  required?: boolean;
+};
+
+export type TocBenchmarkCase = {
+  caseId: string;
+  goldEntries: TocBenchmarkEntry[];
+  predictedEntries: TocBenchmarkEntry[];
+};
+
+export type TocBenchmarkCaseResult = {
+  caseId: string;
+  exactMatch: boolean;
+  goldCount: number;
+  predictedCount: number;
+  missingRequiredEntries: string[];
+  extraEntries: string[];
+  orderPassed: boolean;
+};
+
+export type TocBenchmarkSummary = {
+  exactMatchRate: number;
+  requiredSectionMatchRate: number;
+  caseResults: TocBenchmarkCaseResult[];
 };
 
 type MetricDefinition = {
@@ -82,7 +112,7 @@ type MetricDefinition = {
 
 export const DEFAULT_REPORT_FAMILY_THRESHOLDS: BenchmarkThresholds = {
   minSampleCount: 3,
-  tocExtractionAccuracy: 0.9,
+  tocExtractionAccuracy: 1,
   sectionCoverage: 0.9,
   slideGroundingCoverage: 0.85,
   documentMaskingCoverage: 0.95,
@@ -108,12 +138,12 @@ const METRIC_DEFINITIONS: MetricDefinition[] = [
   },
   {
     id: "toc_extraction_accuracy",
-    label: "TOC extraction accuracy",
+    label: "TOC exact-match rate",
     comparator: "gte",
     thresholdKey: "tocExtractionAccuracy",
     critical: true,
     weight: 0.14,
-    suggestedAction: "목차 detector와 section graph matcher를 개선하세요.",
+    suggestedAction: "목차 detector가 required section, numbering, 순서를 전부 맞추도록 exact-match 기준으로 강화하세요.",
   },
   {
     id: "section_coverage",
@@ -225,12 +255,97 @@ function roundScore(value: number): number {
   return Math.round(value * 10) / 10;
 }
 
-function metricValue(metricId: BenchmarkMetricId, run: ReportFamilyBenchmarkRun): number {
+function normalizeTocToken(value: string | null | undefined): string {
+  return (value || "")
+    .replace(/\s+/g, " ")
+    .replace(/[.)]+$/g, "")
+    .trim()
+    .toLowerCase();
+}
+
+function toTocEntryKey(entry: TocBenchmarkEntry): string {
+  return `${normalizeTocToken(entry.numbering)}::${normalizeTocToken(entry.title)}`;
+}
+
+function toTocEntryLabel(entry: TocBenchmarkEntry): string {
+  const numbering = (entry.numbering || "").trim();
+  const title = entry.title.trim();
+  return numbering ? `${numbering} ${title}` : title;
+}
+
+export function evaluateTocBenchmarkCases(cases: TocBenchmarkCase[]): TocBenchmarkSummary {
+  if (!cases.length) {
+    return {
+      exactMatchRate: 0,
+      requiredSectionMatchRate: 0,
+      caseResults: [],
+    };
+  }
+
+  let exactMatchCount = 0;
+  let requiredCount = 0;
+  let matchedRequiredCount = 0;
+
+  const caseResults = cases.map((testCase) => {
+    const goldKeys = testCase.goldEntries.map(toTocEntryKey);
+    const predictedKeys = testCase.predictedEntries.map(toTocEntryKey);
+    const goldSet = new Set(goldKeys);
+    const predictedSet = new Set(predictedKeys);
+
+    const requiredEntries = testCase.goldEntries.filter((entry) => entry.required !== false);
+    requiredCount += requiredEntries.length;
+
+    const missingRequiredEntries = requiredEntries
+      .filter((entry) => !predictedSet.has(toTocEntryKey(entry)))
+      .map(toTocEntryLabel);
+    matchedRequiredCount += requiredEntries.length - missingRequiredEntries.length;
+
+    const extraEntries = testCase.predictedEntries
+      .filter((entry) => !goldSet.has(toTocEntryKey(entry)))
+      .map(toTocEntryLabel);
+
+    const alignedGoldOrder = goldKeys.filter((key) => predictedSet.has(key));
+    const alignedPredictedOrder = predictedKeys.filter((key) => goldSet.has(key));
+    const orderPassed =
+      alignedGoldOrder.length === alignedPredictedOrder.length &&
+      alignedGoldOrder.every((key, index) => alignedPredictedOrder[index] === key);
+
+    const exactMatch =
+      goldKeys.length === predictedKeys.length &&
+      goldKeys.every((key, index) => predictedKeys[index] === key);
+
+    if (exactMatch) {
+      exactMatchCount += 1;
+    }
+
+    return {
+      caseId: testCase.caseId,
+      exactMatch,
+      goldCount: goldKeys.length,
+      predictedCount: predictedKeys.length,
+      missingRequiredEntries,
+      extraEntries,
+      orderPassed,
+    } satisfies TocBenchmarkCaseResult;
+  });
+
+  return {
+    exactMatchRate: clampPercent(exactMatchCount / cases.length),
+    requiredSectionMatchRate: requiredCount > 0 ? clampPercent(matchedRequiredCount / requiredCount) : 1,
+    caseResults,
+  };
+}
+
+function metricValue(
+  metricId: BenchmarkMetricId,
+  run: ReportFamilyBenchmarkRun,
+  tocSummary: TocBenchmarkSummary | null,
+): number {
   switch (metricId) {
     case "sample_count":
       return clampCount(run.sampleCount);
     case "toc_extraction_accuracy":
-      return clampPercent(run.tocExtractionAccuracy);
+      return tocSummary ? clampPercent(tocSummary.exactMatchRate) : clampPercent(run.tocExtractionAccuracy);
     case "section_coverage":
       return clampPercent(run.sectionCoverage);
     case "slide_grounding_coverage":
@@ -281,8 +396,12 @@ export function evaluateReportFamilyBenchmark(
   run: ReportFamilyBenchmarkRun,
   thresholds: BenchmarkThresholds = DEFAULT_REPORT_FAMILY_THRESHOLDS,
 ): ReportFamilyBenchmarkEvaluation {
+  const tocSummary = run.tocBenchmarkCases?.length
+    ? evaluateTocBenchmarkCases(run.tocBenchmarkCases)
+    : null;
+
   const metrics = METRIC_DEFINITIONS.map((definition) => {
-    const value = metricValue(definition.id, run);
+    const value = metricValue(definition.id, run, tocSummary);
     const threshold = thresholds[definition.thresholdKey] as number;
     return {
       id: definition.id,
@@ -325,5 +444,6 @@ export function evaluateReportFamilyBenchmark(
     metrics,
     blockers,
     nextFocusAreas: sortedFailures.slice(0, 5).map((metric) => metric.suggestedAction),
+    tocSummary,
   };
 }

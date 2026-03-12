@@ -82,10 +82,10 @@ function actionForBucket(bucket: RalphRetryBucket): RalphRetryAction {
       return {
         bucket,
         title: "목차 추출 강화",
-        reason: "목차와 section graph가 틀리면 이후 생성도 모두 흔들립니다.",
+        reason: "목차 exact match가 깨지면 이후 생성도 모두 흔들립니다.",
         steps: [
           "cover, 목차, 본문 페이지를 분리해서 section detector를 다시 학습시킵니다.",
-          "슬라이드 제목과 제출본 목차를 align하는 section map을 구축합니다.",
+          "required section, numbering, 순서까지 gold TOC와 exact match 하도록 section map을 구축합니다.",
         ],
       };
     case "tighten_document_masking":

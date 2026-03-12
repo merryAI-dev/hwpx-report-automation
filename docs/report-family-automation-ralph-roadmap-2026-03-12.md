@@ -92,6 +92,7 @@ Minimum startup rule:
 For this family, the primary benchmark should be:
 
 - `toc_extraction_accuracy`
+- `toc exact-match rate`
 - `section_coverage`
 - `slide_grounding_coverage`
 - `document_masking_coverage`
@@ -105,8 +106,9 @@ For this family, the primary benchmark should be:
 
 Interpretation:
 
-- `toc_extraction_accuracy`
-  - can the system recover the family-level table of contents from the target report
+- `toc exact-match rate`
+  - pass only when the extracted TOC matches the family gold TOC completely
+  - required sections, numbering, and order must all match
 - `slide_grounding_coverage`
   - how much generated section content is truly grounded in slides
 - `document_masking_coverage`
@@ -199,7 +201,7 @@ Build:
 Exit criteria:
 
 - 3 benchmark packets for one family
-- target TOC extracted with useful accuracy
+- target TOC exact-match rate = `1.0`
 
 ## Phase 1. Slide-grounded generation
 

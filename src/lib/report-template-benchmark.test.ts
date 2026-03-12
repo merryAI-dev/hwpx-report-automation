@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   evaluateReportFamilyBenchmark,
+  evaluateTocBenchmarkCases,
   type ReportFamilyBenchmarkRun,
 } from "./report-template-benchmark";
 
@@ -8,7 +9,7 @@ function makeRun(overrides: Partial<ReportFamilyBenchmarkRun> = {}): ReportFamil
   return {
     familyId: "mysc-final-report",
     sampleCount: 3,
-    tocExtractionAccuracy: 0.9,
+    tocExtractionAccuracy: 1,
     sectionCoverage: 0.9,
     slideGroundingCoverage: 0.85,
     documentMaskingCoverage: 0.95,
@@ -24,6 +25,40 @@ function makeRun(overrides: Partial<ReportFamilyBenchmarkRun> = {}): ReportFamil
 }
 
 describe("evaluateReportFamilyBenchmark", () => {
+  it("scores toc benchmark cases by exact match instead of loose overlap", () => {
+    const summary = evaluateTocBenchmarkCases([
+      {
+        caseId: "packet-1",
+        goldEntries: [
+          { numbering: "1", title: "사업 개요" },
+          { numbering: "2", title: "주요 성과" },
+        ],
+        predictedEntries: [
+          { numbering: "1", title: "사업 개요" },
+          { numbering: "2", title: "주요 성과" },
+        ],
+      },
+      {
+        caseId: "packet-2",
+        goldEntries: [
+          { numbering: "1", title: "사업 개요" },
+          { numbering: "2", title: "주요 성과" },
+          { numbering: "3", title: "향후 계획" },
+        ],
+        predictedEntries: [
+          { numbering: "1", title: "사업 개요" },
+          { numbering: "3", title: "향후 계획" },
+          { numbering: "2", title: "주요 성과" },
+        ],
+      },
+    ]);
+
+    expect(summary.exactMatchRate).toBe(0.5);
+    expect(summary.requiredSectionMatchRate).toBe(1);
+    expect(summary.caseResults[1]?.exactMatch).toBe(false);
+    expect(summary.caseResults[1]?.orderPassed).toBe(false);
+  });
+
   it("returns insufficient_evidence when the benchmark packet is too small", () => {
     const evaluation = evaluateReportFamilyBenchmark(makeRun({ sampleCount: 1 }));
 
@@ -57,7 +92,7 @@ describe("evaluateReportFamilyBenchmark", () => {
     const evaluation = evaluateReportFamilyBenchmark(
       makeRun({
         sampleCount: 5,
-        tocExtractionAccuracy: 0.97,
+        tocExtractionAccuracy: 1,
         sectionCoverage: 0.96,
         slideGroundingCoverage: 0.93,
         documentMaskingCoverage: 0.99,
@@ -76,5 +111,73 @@ describe("evaluateReportFamilyBenchmark", () => {
     expect(evaluation.shouldRetry).toBe(false);
     expect(evaluation.overallScore).toBeGreaterThanOrEqual(85);
     expect(evaluation.blockers).toHaveLength(0);
+  });
+
+  it("forces retry when toc exact-match is not perfect even if other metrics pass", () => {
+    const evaluation = evaluateReportFamilyBenchmark(
+      makeRun({
+        sampleCount: 5,
+        tocExtractionAccuracy: 0.99,
+        sectionCoverage: 0.98,
+        slideGroundingCoverage: 0.95,
+        documentMaskingCoverage: 1,
+        maskedSourceLeakageRate: 0,
+        layoutSimilarity: 0.94,
+        tableStructureAccuracy: 0.94,
+        promptIterationWinRate: 0.83,
+        reviewerEditRate: 0.05,
+        criticalHallucinationRate: 0,
+        manualCorrectionMinutes: 15,
+      }),
+    );
+
+    expect(evaluation.status).toBe("retry");
+    expect(evaluation.blockers.some((metric) => metric.id === "toc_extraction_accuracy")).toBe(true);
+  });
+
+  it("uses detailed toc benchmark packets as the hard gate source of truth", () => {
+    const evaluation = evaluateReportFamilyBenchmark(
+      makeRun({
+        sampleCount: 5,
+        tocExtractionAccuracy: 1,
+        tocBenchmarkCases: [
+          {
+            caseId: "packet-1",
+            goldEntries: [
+              { numbering: "1", title: "사업 개요" },
+              { numbering: "2", title: "주요 성과" },
+            ],
+            predictedEntries: [
+              { numbering: "1", title: "사업 개요" },
+              { numbering: "2", title: "주요 성과" },
+            ],
+          },
+          {
+            caseId: "packet-2",
+            goldEntries: [
+              { numbering: "1", title: "사업 개요" },
+              { numbering: "2", title: "주요 성과" },
+            ],
+            predictedEntries: [
+              { numbering: "1", title: "사업 개요" },
+            ],
+          },
+        ],
+        sectionCoverage: 0.98,
+        slideGroundingCoverage: 0.95,
+        documentMaskingCoverage: 1,
+        maskedSourceLeakageRate: 0,
+        layoutSimilarity: 0.94,
+        tableStructureAccuracy: 0.94,
+        promptIterationWinRate: 0.83,
+        reviewerEditRate: 0.05,
+        criticalHallucinationRate: 0,
+        manualCorrectionMinutes: 15,
+      }),
+    );
+
+    expect(evaluation.status).toBe("retry");
+    expect(evaluation.metrics.find((metric) => metric.id === "toc_extraction_accuracy")?.value).toBe(0.5);
+    expect(evaluation.tocSummary?.caseResults[1]?.missingRequiredEntries).toEqual(["2 주요 성과"]);
   });
 });
