@@ -44,6 +44,10 @@ import { INSTRUCTION_PRESETS } from "@/lib/editor/ai-presets";
 import type { PresetKey } from "@/lib/editor/ai-presets";
 import { uploadBlobForSignedDownload } from "@/lib/blob-storage-client";
 import { buildTemplateCatalogFromDoc } from "@/lib/template-catalog";
+import {
+  buildPptxReportFamilyPlanPayload,
+  type ReportFamilyPlan,
+} from "@/lib/report-family-planner";
 import type { SessionIdentityProvider, SessionTenantMembership } from "@/lib/auth/session";
 import { evaluateQualityGate, type QualityGateResult } from "@/lib/quality-gates";
 import { recordPilotMetricEvent } from "@/lib/pilot-metrics";
@@ -595,6 +599,7 @@ export default function Home() {
     selectedPreset,
     // Phase 2-4: Document Intelligence
     documentAnalysis,
+    reportFamilyPlanState,
     templateCatalog,
     analysisLoading,
     // Phase 2-5: Terminology
@@ -642,6 +647,7 @@ export default function Home() {
     setSelectedPreset,
     // Phase 2-4
     setDocumentAnalysis,
+    setReportFamilyPlanState,
     setTemplateCatalog,
     setAnalysisLoading,
     // Phase 2-5
@@ -671,7 +677,6 @@ export default function Home() {
     // Tool call rollback
     lastToolCallSnapshot,
     undoLastToolCall,
-    saveToolCallSnapshot,
   } = useDocumentStore();
 
   // Phase 2: appendTransaction 이후 Zustand 갱신 신호
@@ -938,6 +943,75 @@ export default function Home() {
       .finally(() => setAnalysisLoading(false));
   }, [setAnalysisLoading, setDocumentAnalysis, setInstruction, setSelectedPreset]);
 
+  const fireReportFamilyPlanning = useCallback(
+    async (params: {
+      fileName: string;
+      segments: typeof sourceSegments;
+      outlineItems: typeof outline;
+    }) => {
+      const extension = getFileExtension(params.fileName);
+      if (extension !== "pptx" || !params.segments.length || !params.outlineItems.length) {
+        setReportFamilyPlanState({
+          plan: null,
+          isLoading: false,
+          error: extension === "pptx" ? "목차 추출에 사용할 outline이 부족합니다." : null,
+        });
+        return;
+      }
+
+      setReportFamilyPlanState({
+        plan: null,
+        isLoading: true,
+        error: null,
+      });
+
+      try {
+        const payload = buildPptxReportFamilyPlanPayload({
+          familyName: `${toFileStem(params.fileName)} 보고서`,
+          fileName: params.fileName,
+          segments: params.segments,
+          outline: params.outlineItems,
+        });
+
+        const response = await fetch("/api/report-family/plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const result = (await response.json()) as ReportFamilyPlan & { error?: string };
+
+        if (!response.ok) {
+          throw new Error(result.error || "리포트 패밀리 계획 계산 실패");
+        }
+
+        setReportFamilyPlanState({
+          plan: result,
+          isLoading: false,
+          error: null,
+        });
+      } catch (error) {
+        setReportFamilyPlanState({
+          plan: null,
+          isLoading: false,
+          error: error instanceof Error ? error.message : "리포트 패밀리 계획 계산 실패",
+        });
+      }
+    },
+    [setReportFamilyPlanState],
+  );
+
+  const onRefreshReportFamilyPlan = useCallback(() => {
+    if (getFileExtension(fileName) !== "pptx") {
+      setStatus("현재는 PPTX 문서에 대해서만 리포트 패밀리 계획을 계산합니다.");
+      return;
+    }
+    void fireReportFamilyPlanning({
+      fileName,
+      segments: sourceSegments,
+      outlineItems: outline,
+    });
+  }, [fileName, fireReportFamilyPlanning, outline, setStatus, sourceSegments]);
+
   /* ── File I/O ── */
   const loadFileIntoEditor = useCallback(
     async (
@@ -1029,7 +1103,8 @@ export default function Home() {
         if (previewPayload?.html && previewPayload.elementMap) {
           setRenderResult(previewPayload.html, previewPayload.elementMap);
         }
-        setOutline(buildOutlineFromDoc(parsed.doc));
+        const nextOutline = buildOutlineFromDoc(parsed.doc);
+        setOutline(nextOutline);
         setTemplateCatalog(buildTemplateCatalogFromDoc(parsed.doc));
         setWorkspaceDocument(options?.workspaceDocument ?? null);
         loadedWorkspaceKeyRef.current = options?.workspaceDocument
@@ -1075,6 +1150,13 @@ export default function Home() {
 
         // Phase 2-4: Auto-analyze document on upload
         fireDocumentAnalysis(parsed.segments);
+        if (ext === "pptx") {
+          void fireReportFamilyPlanning({
+            fileName: workingFile.name,
+            segments: parsed.segments,
+            outlineItems: nextOutline,
+          });
+        }
       } catch (error) {
         setPreviewStatus("error");
         const message = error instanceof Error ? error.message : "문서 로드 실패";
@@ -1096,6 +1178,7 @@ export default function Home() {
       setWorkspaceDocument,
       refreshRecentSnapshots,
       fireDocumentAnalysis,
+      fireReportFamilyPlanning,
     ],
   );
 
@@ -2953,6 +3036,9 @@ export default function Home() {
                     exportWarningCount: exportWarnings.length,
                     compatibilityWarningCount: exportWarnings.length,
                   }}
+                  reportFamilyPlanState={reportFamilyPlanState}
+                  canGenerateReportFamilyPlan={getFileExtension(fileName) === "pptx" && sourceSegments.length > 0 && outline.length > 0}
+                  onGenerateReportFamilyPlan={onRefreshReportFamilyPlan}
                 />
               }
             history={

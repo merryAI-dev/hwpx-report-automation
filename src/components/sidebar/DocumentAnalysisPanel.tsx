@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { TemplateCatalog } from "@/lib/template-catalog";
-import type { DocumentAnalysis } from "@/store/document-store";
+import type { DocumentAnalysis, ReportFamilyPlanState } from "@/store/document-store";
 import {
   COMPLEX_OBJECT_TYPE_LABELS,
   hasComplexObjectSignal,
@@ -33,6 +33,9 @@ type DocumentAnalysisPanelProps = {
     exportWarningCount: number;
     compatibilityWarningCount: number;
   };
+  reportFamilyPlanState: ReportFamilyPlanState;
+  canGenerateReportFamilyPlan: boolean;
+  onGenerateReportFamilyPlan: () => void;
 };
 
 function ScoreBar({ score }: { score: number }) {
@@ -78,6 +81,9 @@ export function DocumentAnalysisPanel({
   collaborationStats,
   performanceStats,
   qaStats,
+  reportFamilyPlanState,
+  canGenerateReportFamilyPlan,
+  onGenerateReportFamilyPlan,
 }: DocumentAnalysisPanelProps) {
   const [expandTerms, setExpandTerms] = useState(true);
   const [expandTemplateFields, setExpandTemplateFields] = useState(true);
@@ -87,11 +93,11 @@ export function DocumentAnalysisPanel({
     templateCatalog.fieldCount > 0 || templateCatalog.issues.length > 0
   );
 
-  if (isLoading && !analysis && !hasTemplateCatalog && !hasComplexObjects) {
+  if (isLoading && !analysis && !hasTemplateCatalog && !hasComplexObjects && !reportFamilyPlanState.isLoading) {
     return <p className="sidebar-empty">문서 분석 중...</p>;
   }
 
-  if (!analysis && !hasTemplateCatalog && !hasComplexObjects) {
+  if (!analysis && !hasTemplateCatalog && !hasComplexObjects && !reportFamilyPlanState.plan) {
     return <p className="sidebar-empty">문서를 열면 자동으로 분석됩니다.</p>;
   }
 
@@ -155,6 +161,109 @@ export function DocumentAnalysisPanel({
         <label className="sidebar-label">5. QA 게이트</label>
         <div className="sidebar-box">
           무결성 경고 {qaStats.integrityIssueCount}건 · 내보내기 경고 {qaStats.exportWarningCount}건 · 호환성 경고 {qaStats.compatibilityWarningCount}건
+        </div>
+      </div>
+
+      <div>
+        <label className="sidebar-label">6. 리포트 패밀리 계획</label>
+        <div className="sidebar-box" style={{ display: "grid", gap: 10, background: "#f8fafc" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.6 }}>
+              PPTX 기반 보고서 family용 TOC, masking, slide-grounded prompt 계획입니다.
+            </div>
+            <button
+              type="button"
+              onClick={onGenerateReportFamilyPlan}
+              disabled={isBusy || reportFamilyPlanState.isLoading || !canGenerateReportFamilyPlan}
+              style={{
+                borderRadius: 10,
+                border: "1px solid #cbd5e1",
+                background: canGenerateReportFamilyPlan ? "#ffffff" : "#f8fafc",
+                color: canGenerateReportFamilyPlan ? "#0f172a" : "#94a3b8",
+                padding: "6px 10px",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: canGenerateReportFamilyPlan ? "pointer" : "not-allowed",
+              }}
+            >
+              {reportFamilyPlanState.isLoading ? "계획 계산 중..." : "계획 다시 계산"}
+            </button>
+          </div>
+
+          {reportFamilyPlanState.error ? (
+            <div
+              style={{
+                fontSize: 12,
+                padding: "6px 8px",
+                background: "#fff1f2",
+                border: "1px solid #fecdd3",
+                borderRadius: 8,
+                color: "#9f1239",
+              }}
+            >
+              {reportFamilyPlanState.error}
+            </div>
+          ) : null}
+
+          {!canGenerateReportFamilyPlan && !reportFamilyPlanState.plan ? (
+            <div style={{ fontSize: 12, color: "#64748b" }}>
+              현재는 PPTX 문서를 열었을 때만 slide-grounded 계획을 자동 계산합니다.
+            </div>
+          ) : null}
+
+          {reportFamilyPlanState.plan ? (
+            <>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#dbeafe", color: "#1d4ed8", fontWeight: 600 }}>
+                  TOC {reportFamilyPlanState.plan.toc.length}
+                </span>
+                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#dcfce7", color: "#166534", fontWeight: 600 }}>
+                  Allowed {reportFamilyPlanState.plan.sourcePolicy.allowedSourceIds.length}
+                </span>
+                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#fee2e2", color: "#991b1b", fontWeight: 600 }}>
+                  Masked {reportFamilyPlanState.plan.sourcePolicy.maskedSourceIds.length}
+                </span>
+                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#ede9fe", color: "#6d28d9", fontWeight: 600 }}>
+                  Section prompts {reportFamilyPlanState.plan.sectionPlans.length}
+                </span>
+              </div>
+
+              <div style={{ display: "grid", gap: 4 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>추출된 목차</div>
+                <ul style={{ listStyle: "none", display: "grid", gap: 4 }}>
+                  {reportFamilyPlanState.plan.toc.slice(0, 6).map((entry) => (
+                    <li key={entry.id} style={{ fontSize: 12, color: "#334155" }}>
+                      {entry.numbering ? `${entry.numbering} ` : ""}{entry.title}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div style={{ display: "grid", gap: 4 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>생성 소스 정책</div>
+                <ul style={{ listStyle: "none", display: "grid", gap: 4 }}>
+                  {reportFamilyPlanState.plan.sourcePolicy.reasons.map((reason) => (
+                    <li key={reason} style={{ fontSize: 12, color: "#475569" }}>
+                      {reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {reportFamilyPlanState.plan.retryPlan?.actions.length ? (
+                <div style={{ display: "grid", gap: 4 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>다음 RALPH 액션</div>
+                  <ul style={{ listStyle: "none", display: "grid", gap: 4 }}>
+                    {reportFamilyPlanState.plan.retryPlan.actions.slice(0, 4).map((action) => (
+                      <li key={action.bucket} style={{ fontSize: 12, color: "#475569" }}>
+                        <strong style={{ color: "#0f172a" }}>{action.title}</strong>: {action.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </>
+          ) : null}
         </div>
       </div>
 

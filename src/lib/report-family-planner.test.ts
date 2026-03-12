@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildPptxReportFamilyPlanPayload,
   buildReportFamilyPlan,
   buildSourcePolicy,
   buildSectionPromptPlans,
@@ -122,5 +123,45 @@ describe("buildReportFamilyPlan", () => {
     expect(plan.sectionPlans.length).toBeGreaterThan(0);
     expect(plan.benchmarkEvaluation?.status).toBe("retry");
     expect(plan.retryPlan?.actions.some((action) => action.bucket === "tighten_document_masking")).toBe(true);
+  });
+});
+
+describe("buildPptxReportFamilyPlanPayload", () => {
+  it("builds a synthetic target report from outline and keeps slide grounding metadata", () => {
+    const payload = buildPptxReportFamilyPlanPayload({
+      familyName: "MYSC 해양수산 최종보고서",
+      fileName: "marine-demo.pptx",
+      outline: [
+        { id: "o1", text: "1 사업 개요", level: 1 },
+        { id: "o2", text: "2 주요 성과", level: 1 },
+        { id: "o3", text: "2.1 후속 연계", level: 2 },
+      ],
+      segments: [
+        {
+          segmentId: "pptx::0",
+          fileName: "pptx",
+          textIndex: 0,
+          text: "1 사업 개요",
+          originalText: "1 사업 개요",
+          tag: "h2",
+          styleHints: { slideNumber: "1", pptxRole: "title" },
+        },
+        {
+          segmentId: "pptx::1",
+          fileName: "pptx",
+          textIndex: 1,
+          text: "운영 배경과 추진 체계를 설명한다.",
+          originalText: "운영 배경과 추진 체계를 설명한다.",
+          tag: "p",
+          styleHints: { slideNumber: "1", pptxRole: "body" },
+        },
+      ],
+    });
+
+    expect(payload.targetDocument.role).toBe("target_report");
+    expect(payload.targetDocument.segments[1]?.text).toContain("1 사업 개요");
+    expect(payload.sourceDocuments).toHaveLength(1);
+    expect(payload.sourceDocuments[0]?.role).toBe("slide_deck");
+    expect(payload.sourceDocuments[0]?.segments[0]?.slideNumber).toBe(1);
   });
 });

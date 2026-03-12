@@ -8,6 +8,7 @@ import type { TemplateCatalog } from "@/lib/template-catalog";
 import type { HwpxDocumentModel } from "@/types/hwpx-model";
 import type { QualityGateResult } from "@/lib/quality-gates";
 import type { ComplexObjectReport } from "@/lib/editor/hwpx-complex-objects";
+import type { ReportFamilyPlan } from "@/lib/report-family-planner";
 
 import type { ChatMessageUI, PendingToolCall } from "@/types/chat";
 
@@ -55,6 +56,12 @@ export type DocumentAnalysis = {
     variants: string[];
     suggestedTerm: string;
   }>;
+};
+
+export type ReportFamilyPlanState = {
+  plan: ReportFamilyPlan | null;
+  isLoading: boolean;
+  error: string | null;
 };
 
 export type VerificationResult = {
@@ -108,6 +115,7 @@ type DocumentState = {
   selectedPreset: PresetKey;
   // Phase 2-4: Document Intelligence
   documentAnalysis: DocumentAnalysis | null;
+  reportFamilyPlanState: ReportFamilyPlanState;
   templateCatalog: TemplateCatalog | null;
   analysisLoading: boolean;
   // Phase 2-5: Terminology
@@ -182,6 +190,7 @@ type DocumentState = {
   setSelectedPreset: (preset: PresetKey) => void;
   // Phase 2-4
   setDocumentAnalysis: (analysis: DocumentAnalysis | null) => void;
+  setReportFamilyPlanState: (state: ReportFamilyPlanState) => void;
   setTemplateCatalog: (catalog: TemplateCatalog | null) => void;
   setAnalysisLoading: (loading: boolean) => void;
   // Phase 2-5
@@ -260,6 +269,11 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
   batchDecisions: {},
   selectedPreset: "custom",
   documentAnalysis: null,
+  reportFamilyPlanState: {
+    plan: null,
+    isLoading: false,
+    error: null,
+  },
   templateCatalog: null,
   analysisLoading: false,
   terminologyDict: {},
@@ -299,6 +313,11 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       batchSuggestions: [],
       batchDecisions: {},
       documentAnalysis: null,
+      reportFamilyPlanState: {
+        plan: null,
+        isLoading: false,
+        error: null,
+      },
       templateCatalog: null,
       analysisLoading: false,
       terminologyDict: {},
@@ -347,6 +366,11 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       batchSuggestions: [],
       batchDecisions: {},
       documentAnalysis: null,
+      reportFamilyPlanState: {
+        plan: null,
+        isLoading: false,
+        error: null,
+      },
       templateCatalog: null,
       terminologyDict: {},
       verificationResult: null,
@@ -427,6 +451,7 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
 
   // Phase 2-4: Document Intelligence
   setDocumentAnalysis: (documentAnalysis) => set({ documentAnalysis }),
+  setReportFamilyPlanState: (reportFamilyPlanState) => set({ reportFamilyPlanState }),
   setTemplateCatalog: (templateCatalog) => set({ templateCatalog }),
   setAnalysisLoading: (analysisLoading) => set({ analysisLoading }),
 

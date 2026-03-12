@@ -7,6 +7,8 @@ import {
   type ReportFamilyBenchmarkEvaluation,
   type ReportFamilyBenchmarkRun,
 } from "./report-template-benchmark";
+import type { EditorSegment } from "@/lib/editor/hwpx-to-prosemirror";
+import type { OutlineItem } from "@/lib/editor/document-store";
 
 export type ReportFamilyDocumentRole =
   | "target_report"
@@ -71,6 +73,13 @@ export type ReportFamilyPlan = {
   sectionPlans: SectionPromptPlan[];
   benchmarkEvaluation: ReportFamilyBenchmarkEvaluation | null;
   retryPlan: ReportFamilyRalphPlan | null;
+};
+
+export type ReportFamilyPlanRequestPayload = {
+  familyName: string;
+  targetDocument: ReportFamilyDocumentInput;
+  sourceDocuments: ReportFamilyDocumentInput[];
+  benchmarkRun?: ReportFamilyBenchmarkRun | null;
 };
 
 const MAX_TOC_ENTRIES = 24;
@@ -382,5 +391,88 @@ export function buildReportFamilyPlan(params: {
     sectionPlans,
     benchmarkEvaluation,
     retryPlan,
+  };
+}
+
+export function buildSyntheticTargetReportFromOutline(params: {
+  familyName: string;
+  fileName: string;
+  outline: OutlineItem[];
+}): ReportFamilyDocumentInput {
+  const topLevelItems = params.outline.filter((item) => item.level <= 2).slice(0, MAX_TOC_ENTRIES);
+  const tocLines = topLevelItems.map((item, index) => {
+    const prefix = item.text.match(/^\d+([.\-]\d+){0,2}/)?.[0];
+    if (prefix) {
+      return item.text;
+    }
+    return `${index + 1} ${item.text}`;
+  });
+
+  return {
+    documentId: "synthetic-target-report",
+    fileName: `${params.fileName.replace(/\.[^.]+$/i, "")}-synthetic-target.pdf`,
+    role: "target_report",
+    segments: [
+      { id: "toc-title", text: "목차", type: "heading", level: 1, pageNumber: 1 },
+      {
+        id: "toc-body",
+        text: tocLines.join("\n"),
+        type: "paragraph",
+        pageNumber: 1,
+      },
+    ],
+  };
+}
+
+export function buildSourceDocumentFromEditorSegments(params: {
+  fileName: string;
+  documentId: string;
+  role: ReportFamilyDocumentRole;
+  segments: EditorSegment[];
+}): ReportFamilyDocumentInput {
+  return {
+    documentId: params.documentId,
+    fileName: params.fileName,
+    role: params.role,
+    segments: params.segments
+      .filter((segment) => normalizeWhitespace(segment.text))
+      .map((segment) => ({
+        id: segment.segmentId,
+        text: segment.text,
+        type: segment.tag,
+        level:
+          segment.tag.startsWith("h") && Number.isFinite(Number(segment.tag.slice(1)))
+            ? Number(segment.tag.slice(1))
+            : undefined,
+        slideNumber: Number.isFinite(Number(segment.styleHints.slideNumber))
+          ? Number(segment.styleHints.slideNumber)
+          : null,
+      })),
+  };
+}
+
+export function buildPptxReportFamilyPlanPayload(params: {
+  familyName: string;
+  fileName: string;
+  segments: EditorSegment[];
+  outline: OutlineItem[];
+  benchmarkRun?: ReportFamilyBenchmarkRun | null;
+}): ReportFamilyPlanRequestPayload {
+  return {
+    familyName: params.familyName,
+    targetDocument: buildSyntheticTargetReportFromOutline({
+      familyName: params.familyName,
+      fileName: params.fileName,
+      outline: params.outline,
+    }),
+    sourceDocuments: [
+      buildSourceDocumentFromEditorSegments({
+        fileName: params.fileName,
+        documentId: "current-slide-deck",
+        role: "slide_deck",
+        segments: params.segments,
+      }),
+    ],
+    benchmarkRun: params.benchmarkRun ?? null,
   };
 }
