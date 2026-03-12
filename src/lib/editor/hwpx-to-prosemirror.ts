@@ -1,6 +1,7 @@
 import JSZip from "jszip";
 import type { JSONContent } from "@tiptap/core";
 import { inspectHwpx, scanTopLevelBlocks } from "../hwpx";
+import { extractPagePr, injectPageSeparators } from "./page-layout";
 import type { HwpxDocumentModel, HwpxSectionModel, HwpxParaNode, HwpxBlockSlot, HwpxRun } from "../../types/hwpx-model";
 import type { ComplexObjectReport } from "./hwpx-complex-objects";
 import { collectComplexObjectReport } from "./hwpx-complex-objects";
@@ -1233,6 +1234,10 @@ function parseSectionNode(
       if (paraId) {
         node.attrs = { ...(node.attrs || {}), paraId };
       }
+      // Inject explicit pageBreak flag from <hp:p pageBreak="1">
+      if (paragraph.getAttribute("pageBreak") === "1") {
+        node.attrs = { ...(node.attrs || {}), hwpxPageBreak: true };
+      }
       // Inject paraPr attrs for paragraph formatting round-trip
       const paraPrIDRef = paragraph.getAttribute("paraPrIDRef");
       if (paraPrIDRef) {
@@ -1411,10 +1416,17 @@ export async function parseHwpxToProseMirror(fileBuffer: ArrayBuffer): Promise<P
       : { sections: [], paraStore: new Map(), headerXml: "", baseBuffer: fileBuffer };
   const complexObjectReport = collectComplexObjectReport(sectionDocs);
 
+  // Inject page separators using the first section's pagePr
+  const firstSectionXml = sectionFiles.length > 0
+    ? await zip.files[sectionFiles[0]].async("string")
+    : "";
+  const pagePr = extractPagePr(firstSectionXml);
+  const contentWithSeparators = injectPageSeparators(content, pagePr);
+
   return {
     doc: {
       type: "doc",
-      content,
+      content: contentWithSeparators,
     },
     segments: usedSegments,
     extraSegmentsMap,

@@ -20,7 +20,7 @@ export function AppNav() {
   if (pathname === "/login") return null;
 
   return (
-    <nav className="border-b border-[var(--color-notion-border)] bg-white">
+    <nav className="border-b border-[var(--color-notion-border)] bg-[var(--color-notion-bg)]">
       <div className="flex h-11 items-center justify-between px-4">
         <div className="flex items-center gap-2">
           <Link

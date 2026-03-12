@@ -2073,8 +2073,9 @@ function buildOrphanParaXml(
     corePrefix,
   });
 
+  const orphanPageBreak = (nodeAttrs as Record<string, unknown>).hwpxPageBreak ? "1" : "0";
   return (
-    `<hp:p id="${paraXmlId}" paraPrIDRef="${paraPrIDRef}" styleIDRef="${styleIDRef}" pageBreak="0" columnBreak="0" merged="0">` +
+    `<hp:p id="${paraXmlId}" paraPrIDRef="${paraPrIDRef}" styleIDRef="${styleIDRef}" pageBreak="${orphanPageBreak}" columnBreak="0" merged="0">` +
     runXmls.join("") +
     `<hp:linesegarray/>` +
     `</hp:p>`
@@ -2297,7 +2298,10 @@ function rebuildParaXmlWithMarks(
   // 기존 paraXml에서 구조 속성 추출 — regex로 직접 추출 (DOM 파싱 제거)
   const paraPrIDRef = newParaPrIDRef ?? (para.paraXml.match(/paraPrIDRef="([^"]*)"/)?.[1] ?? "0");
   const styleIDRef = newStyleIDRef ?? (para.paraXml.match(/styleIDRef="([^"]*)"/)?.[1] ?? "0");
-  const pageBreak = para.paraXml.match(/pageBreak="([^"]*)"/)?.[1] ?? "0";
+  // hwpxPageBreak attr (set by injectPageSeparators) overrides the stored value
+  const pageBreak = (node.attrs as Record<string, unknown>)?.hwpxPageBreak
+    ? "1"
+    : (para.paraXml.match(/pageBreak="([^"]*)"/)?.[1] ?? "0");
   const columnBreak = para.paraXml.match(/columnBreak="([^"]*)"/)?.[1] ?? "0";
   const merged = para.paraXml.match(/merged="([^"]*)"/)?.[1] ?? "0";
 

@@ -22,6 +22,67 @@
   --font-code: var(--font-code), "IBM Plex Mono", monospace;
 }
 
+/* ── Dark mode token overrides ── */
+html.dark {
+  --color-notion-bg: #191919;
+  --color-notion-bg-secondary: #212121;
+  --color-notion-bg-hover: #2a2a2a;
+  --color-notion-bg-active: #333333;
+  --color-notion-text: #e8e8e8;
+  --color-notion-text-secondary: #9b9b9b;
+  --color-notion-text-tertiary: #5e5e5e;
+  --color-notion-border: #303030;
+  --color-notion-border-strong: #404040;
+  --color-notion-accent: #4e9ded;
+  --color-notion-accent-hover: #6db0f5;
+  --color-notion-accent-light: #1a2f4a;
+}
+
+/* ── Korean HWP font fallbacks ──
+ * HWP documents use Korean-specific fonts (함초롬바탕, 함초롬돋움, etc.)
+ * that may not be installed. These @font-face rules map them to available system fonts.
+ */
+@font-face {
+  font-family: "함초롬바탕";
+  src: local("함초롬바탕"), local("HCR Batang"), local("바탕체"), local("바탕"), local("Batang");
+}
+@font-face {
+  font-family: "함초롬돋움";
+  src: local("함초롬돋움"), local("HCR Dotum"), local("돋움체"), local("돋움"), local("Dotum");
+}
+@font-face {
+  font-family: "맑은 고딕";
+  src: local("맑은 고딕"), local("Malgun Gothic"), local("Apple SD Gothic Neo"), local("Noto Sans KR");
+}
+@font-face {
+  font-family: "나눔고딕";
+  src: local("NanumGothic"), local("나눔고딕"), local("Apple SD Gothic Neo");
+}
+@font-face {
+  font-family: "나눔명조";
+  src: local("NanumMyeongjo"), local("나눔명조"), local("Apple Myungjo");
+}
+@font-face {
+  font-family: "궁서";
+  src: local("궁서"), local("Gungsuh"), local("Apple Myungjo");
+}
+@font-face {
+  font-family: "바탕";
+  src: local("바탕"), local("Batang"), local("Apple Myungjo");
+}
+@font-face {
+  font-family: "바탕체";
+  src: local("바탕체"), local("BatangChe"), local("Apple Myungjo");
+}
+@font-face {
+  font-family: "굴림";
+  src: local("굴림"), local("Gulim"), local("Apple SD Gothic Neo");
+}
+@font-face {
+  font-family: "돋움";
+  src: local("돋움"), local("Dotum"), local("Apple SD Gothic Neo");
+}
+
 /* ── Global overrides on top of Tailwind preflight ── */
 html,
 body {
@@ -101,8 +162,17 @@ a {
 
 /* ── Document editor inside A4 paper ── */
 .document-editor-wrap {
-  background: #fff;
+  background: var(--paper-bg, #fff);
   height: 100%;
+  --editor-page-padding-y: 60px;
+  --editor-page-padding-x: 80px;
+  --page-separator-edge: 10px;
+  --page-separator-gap: 34px;
+  --page-separator-shadow-top: rgba(15, 23, 42, 0.24);
+  --page-separator-shadow-bottom: rgba(15, 23, 42, 0.18);
+  --page-separator-highlight: rgba(255, 255, 255, 0.88);
+  --page-separator-explicit-accent: rgba(59, 130, 246, 0.42);
+  --page-separator-explicit-ring: rgba(59, 130, 246, 0.12);
 }
 
 .document-editor {
@@ -111,15 +181,28 @@ a {
 
 .document-editor .ProseMirror {
   /* HWP-like A4 margins: ~25mm each side inside 794px paper */
-  padding: 60px 80px;
+  padding: var(--editor-page-padding-y) var(--editor-page-padding-x);
   min-height: 1060px;
   outline: none;
+  background: var(--paper-bg, #fff);
   font-family: '바탕', 'Batang', 'serif';
   font-size: 10pt;
   line-height: 1.6;
   letter-spacing: 0;
   word-break: keep-all;
   color: #111;
+}
+
+.dark .document-editor-wrap {
+  --page-separator-shadow-top: rgba(0, 0, 0, 0.5);
+  --page-separator-shadow-bottom: rgba(0, 0, 0, 0.4);
+  --page-separator-highlight: rgba(255, 255, 255, 0.12);
+  --page-separator-explicit-accent: rgba(96, 165, 250, 0.55);
+  --page-separator-explicit-ring: rgba(96, 165, 250, 0.16);
+}
+
+.dark .document-editor .ProseMirror {
+  color: #e8e8e8;
 }
 
 .document-editor .ProseMirror p {
@@ -168,10 +251,197 @@ a {
   background: #d6eaff;
 }
 
+.dark .document-editor .ProseMirror td,
+.dark .document-editor .ProseMirror th {
+  border-color: #4b5563;
+}
+
+.dark .document-editor .ProseMirror .selectedCell {
+  background: #1e3a5f;
+}
+
 .document-editor .ProseMirror hr {
   border: none;
   border-top: 1px solid #cbd5e1;
   margin: 14px 0;
+}
+
+/* ── Page separator — paper gap between pages ── */
+.document-editor .ProseMirror .page-separator {
+  margin-inline: calc(var(--editor-page-padding-x) * -1);
+  margin-block: 0;
+  height: calc(var(--page-separator-edge) * 2 + var(--page-separator-gap));
+  position: relative;
+  background:
+    linear-gradient(
+      to bottom,
+      var(--paper-bg, #fff) 0,
+      var(--paper-bg, #fff) var(--page-separator-edge),
+      var(--page-gap-bg, #dde1e7) var(--page-separator-edge),
+      var(--page-gap-bg, #dde1e7) calc(var(--page-separator-edge) + var(--page-separator-gap)),
+      var(--paper-bg, #fff) calc(var(--page-separator-edge) + var(--page-separator-gap)),
+      var(--paper-bg, #fff) 100%
+    );
+  user-select: none;
+  pointer-events: none;
+}
+
+.document-editor .ProseMirror .page-separator::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: var(--page-separator-edge);
+  height: var(--page-separator-gap);
+  box-shadow:
+    inset 0 1px 0 var(--page-separator-highlight),
+    inset 0 -1px 0 var(--page-separator-highlight),
+    0 -12px 16px -12px var(--page-separator-shadow-top),
+    0 12px 16px -12px var(--page-separator-shadow-bottom);
+}
+
+.document-editor .ProseMirror .page-separator[data-explicit="true"]::after {
+  content: "";
+  position: absolute;
+  right: calc(var(--editor-page-padding-x) - 12px);
+  top: calc(var(--page-separator-edge) + (var(--page-separator-gap) / 2));
+  transform: translateY(-50%);
+  width: 24px;
+  height: 4px;
+  border-radius: 999px;
+  background: var(--page-separator-explicit-accent);
+  box-shadow: 0 0 0 4px var(--page-separator-explicit-ring);
+}
+
+/* ── Full dark mode — global class overrides ── */
+
+/* Status bar */
+.dark .status-bar {
+  border-top-color: rgba(60, 60, 60, 0.5);
+  background: linear-gradient(180deg, rgba(25, 25, 25, 0.92), rgba(20, 20, 20, 0.82));
+  color: #8899aa;
+}
+.dark .status-bar strong {
+  color: #60a5fa;
+}
+
+/* Outline */
+.dark .outline-item-btn {
+  color: #c8c8c8;
+}
+.dark .outline-item-btn:hover {
+  background: #2a3040;
+}
+.dark .outline-item-btn.active {
+  background: #1a2f4a;
+  color: #60a5fa;
+}
+
+/* Sidebar boxes / diff / history */
+.dark .sidebar-box {
+  border-color: #3a3a3a;
+  background: #212121;
+  color: #c8c8c8;
+}
+.dark .sidebar-textarea {
+  border-color: #3a3a3a;
+  background: #212121;
+  color: #c8c8c8;
+}
+.dark .sidebar-label {
+  color: #8899aa;
+}
+.dark .batch-diff-item {
+  border-color: #3a3a3a;
+  background: #212121;
+}
+.dark .batch-diff-item strong {
+  color: #7a8a9a;
+}
+.dark .batch-diff-col {
+  border-color: #333;
+  background: #1a1a1a;
+}
+.dark .batch-diff-col small {
+  color: #6b7280;
+}
+.dark .history-list li {
+  border-color: #3a3a3a;
+  background: #212121;
+}
+.dark .history-list small,
+.dark .history-list span {
+  color: #6b7280;
+}
+
+/* Slash command menu */
+.dark .slash-command-menu {
+  background: #222;
+  border-color: #444;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+.dark .slash-command-item {
+  background: #222;
+  color: #c8c8c8;
+}
+.dark .slash-command-item.active {
+  background: #1a2f4a;
+}
+.dark .slash-command-item small {
+  color: #6b7280;
+}
+.dark .slash-command-empty {
+  color: #6b7280;
+}
+
+/* Chat panel */
+.dark .chat-bubble-assistant {
+  background: #2a2a2a;
+  color: #e2e8f0;
+}
+.dark .chat-input-area {
+  border-top-color: #333;
+  background: #1e1e1e;
+}
+.dark .chat-textarea {
+  border-color: #3a3a3a;
+  background: #252525;
+  color: #e2e8f0;
+}
+.dark .chat-textarea:focus {
+  border-color: #4a7ab0;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.15);
+}
+.dark .chat-textarea:disabled {
+  background: #1a1a1a;
+  color: #555;
+}
+.dark .chat-tool-badge {
+  background: #2a2a2a;
+  color: #9ca3af;
+}
+.dark .chat-quick-chip {
+  background: #2a2a2a;
+  border-color: #404040;
+  color: #c8c8c8;
+}
+.dark .chat-quick-chip:hover {
+  background: #333;
+  border-color: #505050;
+}
+.dark .chat-pending-tool {
+  background: #1e1a00;
+  border-color: #7c5f00;
+}
+.dark .chat-tool-diffs {
+  border-color: #333;
+  background: #1e1e1e;
+}
+.dark .chat-diff-item {
+  border-bottom-color: #2a2a2a;
+}
+.dark .chat-tool-summary {
+  color: #c8c8c8;
 }
 
 /* ── Sidebar panel content: shared global classes ── */

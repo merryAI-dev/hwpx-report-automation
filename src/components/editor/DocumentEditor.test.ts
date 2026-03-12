@@ -146,4 +146,60 @@ describe("DocumentEditor", () => {
 
     expect(setContent).toHaveBeenCalledWith(remoteContent, { emitUpdate: false });
   });
+
+  it("hydrates the editor when content arrives after an initial null mount", () => {
+    const loadedContent = createDoc("loaded");
+
+    const setContent = vi.fn();
+    const editor = {
+      commands: {
+        setContent,
+      },
+      getJSON: vi.fn(() => createDoc("empty")),
+      state: {
+        selection: {
+          $from: { parent: { attrs: {} } },
+        },
+        doc: {
+          textBetween: vi.fn(() => ""),
+        },
+      },
+    };
+
+    useEditorMock.mockReturnValue(editor);
+
+    const onUpdateDoc = vi.fn();
+    const onSelectionChange = vi.fn();
+    const onEditorReady = vi.fn();
+
+    container = document.createElement("div");
+    document.body.appendChild(container);
+    root = ReactDOMClient.createRoot(container);
+
+    act(() => {
+      root.render(
+        React.createElement(DocumentEditor, {
+          content: null,
+          onUpdateDoc,
+          onSelectionChange,
+          onEditorReady,
+        }),
+      );
+    });
+
+    expect(setContent).not.toHaveBeenCalled();
+
+    act(() => {
+      root.render(
+        React.createElement(DocumentEditor, {
+          content: loadedContent,
+          onUpdateDoc,
+          onSelectionChange,
+          onEditorReady,
+        }),
+      );
+    });
+
+    expect(setContent).toHaveBeenCalledWith(loadedContent, { emitUpdate: false });
+  });
 });

@@ -12,7 +12,7 @@ import Color from "@tiptap/extension-color";
 import Highlight from "@tiptap/extension-highlight";
 import Superscript from "@tiptap/extension-superscript";
 import Subscript from "@tiptap/extension-subscript";
-import { Extension } from "@tiptap/core";
+import { Extension, Node } from "@tiptap/core";
 import { Plugin, PluginKey } from "@tiptap/pm/state";
 import type { Transaction, EditorState } from "@tiptap/pm/state";
 import { FontSize } from "./font-size-extension";
@@ -25,6 +25,53 @@ import { CustomImage } from "./custom-image";
 import BubbleMenu from "@tiptap/extension-bubble-menu";
 import { synthesizeParaNode } from "./para-synthesizer";
 import type { HwpxDocumentModel } from "../../types/hwpx-model";
+
+/** Non-editable atom block that renders a page boundary indicator. */
+const PageSeparatorExtension = Node.create({
+  name: "pageSeparator",
+  group: "block",
+  atom: true,
+  selectable: false,
+  draggable: false,
+  addAttributes() {
+    return {
+      pageNumber: {
+        default: 1,
+        parseHTML: (element: HTMLElement) => {
+          const raw = element.getAttribute("data-page-number");
+          const parsed = Number.parseInt(raw ?? "1", 10);
+          return Number.isFinite(parsed) && parsed > 0 ? parsed : 1;
+        },
+      },
+      isExplicit: {
+        default: false,
+        parseHTML: (element: HTMLElement) => element.getAttribute("data-explicit") === "true",
+      },
+    };
+  },
+  parseHTML() {
+    return [{ tag: "div[data-page-separator]" }];
+  },
+  renderHTML({ node }) {
+    const pageNumber = Number(node.attrs.pageNumber) || 1;
+    const isExplicit = Boolean(node.attrs.isExplicit);
+    return [
+      "div",
+      {
+        "data-page-separator": "",
+        "data-page-number": String(pageNumber),
+        "data-explicit": isExplicit ? "true" : "false",
+        class: "page-separator",
+        contenteditable: "false",
+        role: "separator",
+        "aria-orientation": "horizontal",
+        "aria-label": isExplicit
+          ? `${pageNumber}쪽 앞 페이지 나눔`
+          : `${pageNumber}쪽 시작`,
+      },
+    ];
+  },
+});
 
 type EditorExtensionOptions = {
   onAiCommand?: () => void;
@@ -165,6 +212,7 @@ export function createEditorExtensions(options: EditorExtensionOptions = {}) {
       placeholder: "문서 내용을 입력하세요. # 으로 커맨드를 열 수 있습니다.",
     }),
     HwpxMetadataExtension,
+    PageSeparatorExtension,
     SlashCommandExtension.configure({
       onAiCommand,
     }),

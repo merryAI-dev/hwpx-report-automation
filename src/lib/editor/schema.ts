@@ -210,6 +210,15 @@ export const HwpxMetadataExtension = Extension.create({
               return { "data-hwpx-space-after": String(attributes.hwpxSpaceAfter), style: `margin-bottom: ${px}px` };
             },
           },
+          hwpxPageBreak: {
+            default: false,
+            parseHTML: (element: HTMLElement) =>
+              element.getAttribute("data-hwpx-page-break") === "true",
+            renderHTML: (attributes: Record<string, unknown>) => {
+              if (!attributes.hwpxPageBreak) return {};
+              return { "data-hwpx-page-break": "true" };
+            },
+          },
         },
       },
       {

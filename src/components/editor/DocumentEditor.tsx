@@ -80,6 +80,9 @@ export function DocumentEditor({
     // 최초 마운트 시 skip: useEditor 초기값으로 이미 설정됨
     if (prevContentRef.current === null) {
       prevContentRef.current = content;
+      if (initialContentRef.current !== content) {
+        editor.commands.setContent(content, { emitUpdate: false });
+      }
       return;
     }
     // 참조 동일성 체크: store에서 같은 객체이면 skip (O(1))
@@ -95,7 +98,6 @@ export function DocumentEditor({
     prevContentRef.current = content;
     editor.commands.setContent(content, { emitUpdate: false });
   }, [content, editor]);
-  void initialContentRef; // suppress unused variable warning
 
   return (
     <div

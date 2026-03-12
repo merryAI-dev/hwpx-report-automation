@@ -356,10 +356,17 @@ export const useDocumentStore = create<DocumentState>((set, get) => ({
       batchMode: "section",
       batchJob: null,
       selection: { selectedSegmentId: null, selectedText: "" },
+      history: [],
+      chatMessages: [],
+      chatBusy: false,
+      pendingToolCall: null,
+      lastToolCallSnapshot: null,
       download: {
         blob: null,
         fileName: fileName.replace(/\.hwpx$/i, "") + "-edited.hwpx",
       },
+      renderHtml: null,
+      renderElementMap: null,
       status: integrityIssues.length
         ? `문서 로드 완료 (무결성 경고 ${integrityIssues.length}개)`
         : "문서 로드 완료",

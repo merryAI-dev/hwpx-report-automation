@@ -46,6 +46,7 @@ type EditorToolbarProps = {
   onSelectRecentSnapshot: (snapshotId: string) => void;
   onLoadRecentSnapshot: (snapshotId: string) => void;
   onPickFile: (file: File) => void;
+  onOpenStartWizard?: () => void;
   onExport: () => void;
   onExportPdf: () => void;
   onExportDocx: () => void;
@@ -85,6 +86,40 @@ function getCurrentFontSize(editor: Editor | null): number {
   const raw = attrs.fontSize || "";
   const n = Number.parseInt(raw, 10);
   return Number.isFinite(n) && n > 0 ? n : 10;
+}
+
+/**
+ * HWP/Word style: apply textStyle mark attrs to the entire current block
+ * if nothing is selected, otherwise apply to the current selection.
+ * Uses a single chain to avoid transaction ordering issues.
+ */
+function applyFontToBlock(editor: Editor, markAttrs: Record<string, string>) {
+  const { state } = editor;
+  const { from, to } = state.selection;
+
+  if (from !== to) {
+    // Has selection — apply directly
+    editor.chain().focus().setMark("textStyle", markAttrs).run();
+    return;
+  }
+
+  // No selection — select current block, apply mark, restore cursor
+  const $from = state.selection.$from;
+  const blockStart = $from.start();
+  const blockEnd = $from.end();
+
+  if (blockStart >= blockEnd) {
+    // Empty paragraph — just store as pending mark
+    editor.chain().focus().setMark("textStyle", markAttrs).run();
+    return;
+  }
+
+  editor.chain()
+    .focus()
+    .setTextSelection({ from: blockStart, to: blockEnd })
+    .setMark("textStyle", markAttrs)
+    .setTextSelection(from)
+    .run();
 }
 
 function getCurrentLetterSpacing(editor: Editor | null): number {
@@ -162,6 +197,7 @@ export const EditorToolbar = memo(function EditorToolbar({
   onSelectRecentSnapshot,
   onLoadRecentSnapshot,
   onPickFile,
+  onOpenStartWizard,
   onExport,
   onExportPdf,
   onExportDocx,
@@ -187,6 +223,7 @@ export const EditorToolbar = memo(function EditorToolbar({
   const currentFont = getCurrentFontFamily(editor);
   const currentSize = getCurrentFontSize(editor);
   const currentLetterSpacing = getCurrentLetterSpacing(editor);
+  const showDocumentControls = hasDocument;
 
   const isTabActive = (tab: SidebarTab) => !sidebarCollapsed && activeSidebarTab === tab;
 
@@ -285,6 +322,17 @@ export const EditorToolbar = memo(function EditorToolbar({
         {/* ── 1행: 열기~저장 + 패널 토글 ── */}
         <div className={styles.toolbarRow}>
           <div className={styles.group}>
+            {onOpenStartWizard ? (
+              <button
+                type="button"
+                className={styles.btn}
+                disabled={globalDisabled}
+                onClick={onOpenStartWizard}
+                title="새로 시작"
+              >
+                시작
+              </button>
+            ) : null}
             <button
               type="button"
               className={styles.btn}
@@ -321,46 +369,53 @@ export const EditorToolbar = memo(function EditorToolbar({
                 최근열기
               </button>
             </div>
-            {onExportWithOptions ? (
-              <button
-                type="button"
-                className={styles.btn}
-                disabled={globalDisabled || !hasDocument}
-                onClick={() => setExportModalOpen(true)}
-                title="내보내기 옵션"
-              >
-                내보내기
-              </button>
-            ) : (
-              <>
+            {showDocumentControls ? (
+              onExportWithOptions ? (
                 <button
                   type="button"
                   className={styles.btn}
-                  disabled={globalDisabled || !hasDocument}
-                  onClick={onExport}
-                  title="내보내기"
+                  disabled={globalDisabled}
+                  onClick={() => setExportModalOpen(true)}
+                  title="내보내기 옵션"
                 >
                   내보내기
                 </button>
-                <button
-                  type="button"
-                  className={styles.btn}
-                  disabled={globalDisabled || !hasDocument}
-                  onClick={onExportPdf}
-                  title="PDF 내보내기"
-                >
-                  PDF
-                </button>
-                <button
-                  type="button"
-                  className={styles.btn}
-                  disabled={globalDisabled || !hasDocument}
-                  onClick={onExportDocx}
-                  title="DOCX 내보내기"
-                >
-                  DOCX
-                </button>
-              </>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    className={styles.btn}
+                    disabled={globalDisabled}
+                    onClick={onExport}
+                    title="내보내기"
+                  >
+                    내보내기
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.btn}
+                    disabled={globalDisabled}
+                    onClick={onExportPdf}
+                    title="PDF 내보내기"
+                  >
+                    PDF
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.btn}
+                    disabled={globalDisabled}
+                    onClick={onExportDocx}
+                    title="DOCX 내보내기"
+                  >
+                    DOCX
+                  </button>
+                </>
+              )
+            ) : (
+              <div className={styles.toolbarHint} role="status" aria-live="polite">
+                <strong>문서 없음</strong>
+                <span>업로드나 템플릿으로 바로 시작하세요.</span>
+              </div>
             )}
             <a
               href="/pilot"
@@ -371,7 +426,7 @@ export const EditorToolbar = memo(function EditorToolbar({
             >
               파일럿
             </a>
-            {downloadUrl && (
+            {showDocumentControls && downloadUrl && (
               <a
                 href={downloadUrl}
                 download={downloadName}
@@ -430,13 +485,15 @@ export const EditorToolbar = memo(function EditorToolbar({
                 배치
               </Link>
             </div>
-            <Btn
-              label="저장"
-              title="다른 이름으로 저장 (Ctrl/Cmd+S)"
-              active={false}
-              disabled={globalDisabled || !hasDocument}
-              onClick={onSave}
-            />
+            {showDocumentControls ? (
+              <Btn
+                label="저장"
+                title="다른 이름으로 저장 (Ctrl/Cmd+S)"
+                active={false}
+                disabled={globalDisabled}
+                onClick={onSave}
+              />
+            ) : null}
             <Btn
               label="로그아웃"
               title="세션 종료"
@@ -447,54 +504,57 @@ export const EditorToolbar = memo(function EditorToolbar({
           </div>
 
           {/* ── 우측 패널 토글 (flex push) ── */}
-          <div className={styles.panelToggles}>
-            <Btn
-              label={sidebarCollapsed ? "패널+" : "패널-"}
-              title="사이드 패널 토글"
-              active={!sidebarCollapsed}
-              disabled={false}
-              onClick={() => onToggleSidebar?.()}
-            />
-            <Btn
-              label="개요"
-              title="문서 개요"
-              active={isTabActive("outline")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("outline")}
-            />
-            <Btn
-              label="AI"
-              title="AI 제안"
-              active={isTabActive("ai")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("ai")}
-            />
-            <Btn
-              label="채팅"
-              title="AI 채팅"
-              active={isTabActive("chat")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("chat")}
-            />
-            <Btn
-              label="분석"
-              title="문서 분석"
-              active={isTabActive("analysis")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("analysis")}
-            />
-            <Btn
-              label="이력"
-              title="수정 이력"
-              active={isTabActive("history")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("history")}
-            />
-          </div>
+          {showDocumentControls ? (
+            <div className={styles.panelToggles}>
+              <Btn
+                label={sidebarCollapsed ? "패널+" : "패널-"}
+                title="사이드 패널 토글"
+                active={!sidebarCollapsed}
+                disabled={false}
+                onClick={() => onToggleSidebar?.()}
+              />
+              <Btn
+                label="개요"
+                title="문서 개요"
+                active={isTabActive("outline")}
+                disabled={false}
+                onClick={() => onSetSidebarTab("outline")}
+              />
+              <Btn
+                label="AI"
+                title="AI 제안"
+                active={isTabActive("ai")}
+                disabled={false}
+                onClick={() => onSetSidebarTab("ai")}
+              />
+              <Btn
+                label="채팅"
+                title="AI 채팅"
+                active={isTabActive("chat")}
+                disabled={false}
+                onClick={() => onSetSidebarTab("chat")}
+              />
+              <Btn
+                label="분석"
+                title="문서 분석"
+                active={isTabActive("analysis")}
+                disabled={false}
+                onClick={() => onSetSidebarTab("analysis")}
+              />
+              <Btn
+                label="이력"
+                title="수정 이력"
+                active={isTabActive("history")}
+                disabled={false}
+                onClick={() => onSetSidebarTab("history")}
+              />
+            </div>
+          ) : null}
         </div>
 
         {/* ── 2행: 뒤로가기~AI 수정 ── */}
-        <div className={styles.toolbarRow}>
+        {showDocumentControls ? (
+          <div className={styles.toolbarRow}>
           <div className={styles.group}>
             <Btn
               label="←"
@@ -520,7 +580,7 @@ export const EditorToolbar = memo(function EditorToolbar({
               disabled={editorDisabled}
               value={currentFont}
               onChange={(e) => {
-                editor?.chain().focus().setFontFamily(e.target.value).run();
+                if (editor) applyFontToBlock(editor, { fontFamily: e.target.value });
               }}
               title="글꼴"
             >
@@ -536,8 +596,7 @@ export const EditorToolbar = memo(function EditorToolbar({
               disabled={editorDisabled}
               value={currentSize}
               onChange={(e) => {
-                const size = Number(e.target.value);
-                editor?.chain().focus().setMark("textStyle", { fontSize: `${size}pt` }).run();
+                if (editor) applyFontToBlock(editor, { fontSize: `${Number(e.target.value)}pt` });
               }}
               title="글자 크기"
             >
@@ -734,47 +793,50 @@ export const EditorToolbar = memo(function EditorToolbar({
             </button>
           </div>
 
-        </div>
-
-        <div className={styles.panelToggleRow}>
-          <div className={`${styles.group} ${styles.panelToggleGroup}`}>
-            <Btn
-              label="개요"
-              title="문서 개요"
-              active={isTabActive("outline")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("outline")}
-            />
-            <Btn
-              label="AI"
-              title="AI 제안"
-              active={isTabActive("ai")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("ai")}
-            />
-            <Btn
-              label="채팅"
-              title="AI 채팅"
-              active={isTabActive("chat")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("chat")}
-            />
-            <Btn
-              label="분석"
-              title="문서 분석"
-              active={isTabActive("analysis")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("analysis")}
-            />
-            <Btn
-              label="이력"
-              title="수정 이력"
-              active={isTabActive("history")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("history")}
-            />
           </div>
-        </div>
+        ) : null}
+
+        {showDocumentControls ? (
+          <div className={styles.panelToggleRow}>
+            <div className={`${styles.group} ${styles.panelToggleGroup}`}>
+              <Btn
+                label="개요"
+                title="문서 개요"
+                active={isTabActive("outline")}
+                disabled={false}
+                onClick={() => onSetSidebarTab("outline")}
+              />
+              <Btn
+                label="AI"
+                title="AI 제안"
+                active={isTabActive("ai")}
+                disabled={false}
+                onClick={() => onSetSidebarTab("ai")}
+              />
+              <Btn
+                label="채팅"
+                title="AI 채팅"
+                active={isTabActive("chat")}
+                disabled={false}
+                onClick={() => onSetSidebarTab("chat")}
+              />
+              <Btn
+                label="분석"
+                title="문서 분석"
+                active={isTabActive("analysis")}
+                disabled={false}
+                onClick={() => onSetSidebarTab("analysis")}
+              />
+              <Btn
+                label="이력"
+                title="수정 이력"
+                active={isTabActive("history")}
+                disabled={false}
+                onClick={() => onSetSidebarTab("history")}
+              />
+            </div>
+          </div>
+        ) : null}
       </div>
 
       {paraModalOpen && editor && (
