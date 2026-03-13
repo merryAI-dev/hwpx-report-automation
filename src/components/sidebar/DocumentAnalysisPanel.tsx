@@ -234,6 +234,9 @@ export function DocumentAnalysisPanel({
                 <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#ede9fe", color: "#6d28d9", fontWeight: 600 }}>
                   Section prompts {reportFamilyPlanState.plan.sectionPlans.length}
                 </span>
+                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#fef3c7", color: "#92400e", fontWeight: 600 }}>
+                  Mapped {reportFamilyPlanState.plan.sectionPlans.filter((section) => section.alignmentStrategy === "registered_mapping").length}
+                </span>
               </div>
 
               <div style={{ display: "grid", gap: 4 }}>
@@ -255,6 +258,33 @@ export function DocumentAnalysisPanel({
                       {reason}
                     </li>
                   ))}
+                </ul>
+              </div>
+
+              <div style={{ display: "grid", gap: 4 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>대표 섹션 매핑</div>
+                <ul style={{ listStyle: "none", display: "grid", gap: 6 }}>
+                  {reportFamilyPlanState.plan.sectionPlans
+                    .filter((section) => section.supportingChunks.length > 0)
+                    .slice(0, 4)
+                    .map((section) => (
+                      <li
+                        key={section.tocEntryId}
+                        style={{
+                          fontSize: 12,
+                          padding: "6px 8px",
+                          background: "#fff",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: 8,
+                          color: "#334155",
+                        }}
+                      >
+                        <strong style={{ color: "#0f172a" }}>{section.tocTitle}</strong>
+                        <div style={{ marginTop: 2 }}>
+                          {section.supportingChunks.map((chunk) => chunk.title).join(", ")}
+                        </div>
+                      </li>
+                    ))}
                 </ul>
               </div>
 

@@ -66,6 +66,8 @@ export type SectionPromptPlan = {
   prompt: string;
   supportingChunks: SlideChunk[];
   maskedDocumentIds: string[];
+  alignmentStrategy: "heuristic" | "registered_mapping";
+  alignmentReasons: string[];
 };
 
 export type ReportFamilyPlan = {
@@ -98,6 +100,12 @@ type RegisteredBenchmarkPacketCase = {
   goldEntries: TocBenchmarkEntry[];
 };
 
+type RegisteredSectionMapping = {
+  sourceTopics?: string[];
+  sourceKeywords?: string[];
+  note?: string;
+};
+
 type RegisteredBenchmarkPacket = {
   familyId: string;
   packetId: string;
@@ -106,6 +114,7 @@ type RegisteredBenchmarkPacket = {
     targetReportFileName: string;
   };
   benchmarkCases: RegisteredBenchmarkPacketCase[];
+  sectionMappings?: Record<string, RegisteredSectionMapping>;
 };
 
 const MAX_TOC_ENTRIES = 24;
@@ -276,6 +285,16 @@ function packetCase(packet: RegisteredBenchmarkPacket, caseId: string): Register
   return packet.benchmarkCases.find((testCase) => testCase.caseId === caseId) || null;
 }
 
+function packetSectionMapping(
+  packet: RegisteredBenchmarkPacket,
+  tocTitle: string,
+): RegisteredSectionMapping | null {
+  const entries = Object.entries(packet.sectionMappings || {});
+  const normalizedTitle = normalizeWhitespace(tocTitle);
+  const matched = entries.find(([title]) => normalizeWhitespace(title) === normalizedTitle);
+  return matched?.[1] || null;
+}
+
 export function resolveRegisteredReportFamilyPacket(params: {
   familyName: string;
   fileName: string;
@@ -297,6 +316,15 @@ export function resolveRegisteredReportFamilyPacket(params: {
       );
     }) || null
   );
+}
+
+function resolveRegisteredReportFamilyPacketByFamilyId(
+  familyId: string | null | undefined,
+): RegisteredBenchmarkPacket | null {
+  if (!familyId) {
+    return null;
+  }
+  return REGISTERED_REPORT_FAMILY_PACKETS.find((packet) => packet.familyId === familyId) || null;
 }
 
 function toRegisteredTocLine(entry: TocBenchmarkEntry, level: number): string {
@@ -401,6 +429,101 @@ function buildSlideChunks(document: ReportFamilyDocumentInput): RawSlideChunk[] 
   return chunks;
 }
 
+function scoreAgainstTerms(chunk: RawSlideChunk, terms: string[]): number {
+  if (!terms.length) {
+    return 0;
+  }
+  return Math.max(
+    ...terms.map((term) =>
+      Math.max(
+        scoreTokenOverlap(term, chunk.title),
+        scoreTokenOverlap(term, chunk.summary),
+      ),
+    ),
+  );
+}
+
+function exactContainmentBoost(chunk: RawSlideChunk, terms: string[]): number {
+  const haystack = normalizeWhitespace(`${chunk.title} ${chunk.summary}`).toLowerCase();
+  return terms.some((term) => haystack.includes(normalizeWhitespace(term).toLowerCase())) ? 0.35 : 0;
+}
+
+function buildSupportingChunksForEntry(params: {
+  entry: TocEntry;
+  allowedSlideChunks: RawSlideChunk[];
+  registeredPacket: RegisteredBenchmarkPacket | null;
+}): {
+  supportingChunks: SlideChunk[];
+  alignmentStrategy: "heuristic" | "registered_mapping";
+  alignmentReasons: string[];
+} {
+  const mapping = params.registeredPacket
+    ? packetSectionMapping(params.registeredPacket, params.entry.title)
+    : null;
+
+  const alignmentReasons: string[] = [];
+  const rankedChunks = params.allowedSlideChunks
+    .map((chunk) => {
+      const entryScore = Math.max(
+        scoreTokenOverlap(params.entry.title, chunk.title),
+        scoreTokenOverlap(params.entry.title, chunk.summary),
+      );
+
+      if (!mapping) {
+        return {
+          ...chunk,
+          score: entryScore,
+        };
+      }
+
+      const mappingTopics = (mapping.sourceTopics || []).map(normalizeWhitespace).filter(Boolean);
+      const mappingKeywords = (mapping.sourceKeywords || []).map(normalizeWhitespace).filter(Boolean);
+      const topicScore = scoreAgainstTerms(chunk, mappingTopics);
+      const keywordScore = scoreAgainstTerms(chunk, mappingKeywords);
+      const boost =
+        exactContainmentBoost(chunk, mappingTopics) +
+        exactContainmentBoost(chunk, mappingKeywords);
+
+      return {
+        ...chunk,
+        score: Math.max(entryScore, topicScore * 1.2, keywordScore) + boost,
+      };
+    })
+    .sort((left, right) => right.score - left.score);
+
+  if (mapping?.sourceTopics?.length) {
+    alignmentReasons.push(`mapped source topics: ${mapping.sourceTopics.join(", ")}`);
+  }
+  if (mapping?.sourceKeywords?.length) {
+    alignmentReasons.push(`mapping keywords: ${mapping.sourceKeywords.join(", ")}`);
+  }
+  if (mapping?.note) {
+    alignmentReasons.push(mapping.note);
+  }
+
+  const filteredRankedChunks = mapping
+    ? rankedChunks.filter((chunk) => chunk.score >= 0.2)
+    : rankedChunks.filter((chunk) => chunk.score > 0);
+
+  const selected = (filteredRankedChunks.length ? filteredRankedChunks : rankedChunks)
+    .slice(0, MAX_SECTION_CHUNKS)
+    .map((chunk) => ({
+      chunkId: chunk.chunkId,
+      documentId: chunk.documentId,
+      title: chunk.title,
+      slideNumber: chunk.slideNumber,
+      summary: chunk.summary,
+      segmentIds: chunk.segmentIds,
+      score: Math.round(chunk.score * 1000) / 1000,
+    }));
+
+  return {
+    supportingChunks: selected,
+    alignmentStrategy: mapping ? "registered_mapping" : "heuristic",
+    alignmentReasons,
+  };
+}
+
 export function buildSourcePolicy(
   targetDocument: ReportFamilyDocumentInput,
   sourceDocuments: ReportFamilyDocumentInput[],
@@ -430,31 +553,29 @@ export function buildSectionPromptPlans(
   targetDocument: ReportFamilyDocumentInput,
   sourceDocuments: ReportFamilyDocumentInput[],
   sourcePolicy: SourcePolicy,
+  options?: {
+    familyId?: string | null;
+    schemaSource?: ReportFamilySchemaSource;
+  },
 ): SectionPromptPlan[] {
   const allowedSlideChunks = sourceDocuments
     .filter((document) => sourcePolicy.allowedSourceIds.includes(document.documentId))
     .flatMap((document) => buildSlideChunks(document));
+  const registeredPacket =
+    options?.schemaSource === "registered_packet"
+      ? resolveRegisteredReportFamilyPacketByFamilyId(options.familyId)
+      : null;
 
   return toc.map((entry) => {
-    const supportingChunks = allowedSlideChunks
-      .map((chunk) => ({
-        ...chunk,
-        score: Math.max(
-          scoreTokenOverlap(entry.title, chunk.title),
-          scoreTokenOverlap(entry.title, chunk.summary),
-        ),
-      }))
-      .sort((left, right) => right.score - left.score)
-      .slice(0, MAX_SECTION_CHUNKS)
-      .map((chunk) => ({
-        chunkId: chunk.chunkId,
-        documentId: chunk.documentId,
-        title: chunk.title,
-        slideNumber: chunk.slideNumber,
-        summary: chunk.summary,
-        segmentIds: chunk.segmentIds,
-        score: Math.round(chunk.score * 1000) / 1000,
-      }));
+    const {
+      supportingChunks,
+      alignmentStrategy,
+      alignmentReasons,
+    } = buildSupportingChunksForEntry({
+      entry,
+      allowedSlideChunks,
+      registeredPacket,
+    });
 
     const chunkText = supportingChunks.length
       ? supportingChunks
@@ -477,6 +598,9 @@ export function buildSectionPromptPlans(
       `섹션 번호: ${entry.numbering || "(없음)"}`,
       `섹션 제목: ${entry.title}`,
       "",
+      alignmentReasons.length
+        ? `섹션 정렬 힌트:\n${alignmentReasons.map((reason) => `- ${reason}`).join("\n")}\n`
+        : "",
       "허용된 슬라이드 근거:",
       chunkText,
       "",
@@ -494,6 +618,8 @@ export function buildSectionPromptPlans(
       prompt,
       supportingChunks,
       maskedDocumentIds: sourcePolicy.maskedSourceIds,
+      alignmentStrategy,
+      alignmentReasons,
     };
   });
 }
@@ -514,6 +640,10 @@ export function buildReportFamilyPlan(params: {
     params.targetDocument,
     params.sourceDocuments,
     sourcePolicy,
+    {
+      familyId: params.familyId,
+      schemaSource: params.schemaSource,
+    },
   );
 
   const benchmarkEvaluation = params.benchmarkRun

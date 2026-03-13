@@ -39,6 +39,28 @@ function makeSlideDocument(): ReportFamilyDocumentInput {
   };
 }
 
+function makeMyscSlideDocument(): ReportFamilyDocumentInput {
+  return {
+    documentId: "slides-mysc",
+    fileName: "mysc-source-slides.pptx",
+    role: "slide_deck",
+    segments: [
+      { id: "m1", text: "운영사 소개", type: "heading", slideNumber: 1 },
+      { id: "m2", text: "운영사의 주요 연혁과 기관 개요를 정리한다.", type: "paragraph", slideNumber: 1 },
+      { id: "m3", text: "프로그램 핵심 전략", type: "heading", slideNumber: 2 },
+      { id: "m4", text: "해양수산 생태계 관점의 장기 프로그램 운영 전략을 설명한다.", type: "paragraph", slideNumber: 2 },
+      { id: "m5", text: "핵심 KPI 성과", type: "heading", slideNumber: 3 },
+      { id: "m6", text: "직접 투자, 후속 투자, 고용, 매출 KPI 달성 현황을 요약한다.", type: "paragraph", slideNumber: 3 },
+      { id: "m7", text: "사업 홍보", type: "heading", slideNumber: 4 },
+      { id: "m8", text: "보도자료, 블로그, 홍보 활동을 정리한다.", type: "paragraph", slideNumber: 4 },
+      { id: "m9", text: "만족도조사", type: "heading", slideNumber: 5 },
+      { id: "m10", text: "참여 기업 만족도 조사와 설문 결과를 정리한다.", type: "paragraph", slideNumber: 5 },
+      { id: "m11", text: "프로그램 제언", type: "heading", slideNumber: 6 },
+      { id: "m12", text: "다음 연도 추진 전략과 개선 제언을 정리한다.", type: "paragraph", slideNumber: 6 },
+    ],
+  };
+}
+
 describe("extractTableOfContents", () => {
   it("extracts numbered toc entries from the target report", () => {
     const toc = extractTableOfContents(makeTargetDocument());
@@ -217,5 +239,36 @@ describe("registered MYSC packet", () => {
     expect(toc.some((entry) => entry.title === "프로그램 추진 결과 총괄표")).toBe(true);
     expect(toc.some((entry) => entry.title === "홍보 및 보도자료 요약정리")).toBe(true);
     expect(toc.some((entry) => entry.title === "기업 만족도 조사 결과")).toBe(true);
+  });
+
+  it("uses registered section mappings to align target sections with source slide topics", () => {
+    const packet = resolveRegisteredReportFamilyPacket({
+      familyName: "MYSC 해양수산 최종보고서",
+      fileName: "[MYSC] 해양수산 최종결과보고서_1216_vf.pptx",
+    });
+    const targetDocument = buildTargetDocumentFromRegisteredPacket({
+      packet: packet!,
+      fileName: "mysc-marine-demo.pptx",
+    });
+
+    const plan = buildReportFamilyPlan({
+      familyId: packet?.familyId,
+      familyName: "MYSC 해양수산 최종보고서",
+      schemaSource: "registered_packet",
+      targetDocument,
+      sourceDocuments: [makeMyscSlideDocument()],
+    });
+
+    const overviewSection = plan.sectionPlans.find((section) => section.tocTitle === "프로그램 개요");
+    const prSection = plan.sectionPlans.find((section) => section.tocTitle === "홍보 및 보도자료 요약정리");
+    const strategySection = plan.sectionPlans.find((section) => section.tocTitle === "2026년도 사업 추진 전략");
+
+    expect(overviewSection?.alignmentStrategy).toBe("registered_mapping");
+    expect(overviewSection?.supportingChunks.some((chunk) => chunk.title === "운영사 소개")).toBe(true);
+    expect(overviewSection?.supportingChunks.some((chunk) => chunk.title === "프로그램 핵심 전략")).toBe(true);
+    expect(overviewSection?.alignmentReasons.join(" ")).toContain("운영사 소개");
+
+    expect(prSection?.supportingChunks[0]?.title).toBe("사업 홍보");
+    expect(strategySection?.supportingChunks.some((chunk) => chunk.title === "프로그램 제언")).toBe(true);
   });
 });

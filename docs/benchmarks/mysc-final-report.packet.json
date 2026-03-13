@@ -72,6 +72,123 @@
       ]
     }
   ],
+  "sectionMappings": {
+    "프로그램 개요": {
+      "sourceTopics": ["운영사 소개", "프로그램 핵심 전략"],
+      "sourceKeywords": ["운영사소개", "핵심전략", "해양수산생태계", "장기적 프로그램 운영"],
+      "note": "운영사 배경과 프로그램의 장기 전략을 합쳐 target report의 사업 개요로 재구성한다."
+    },
+    "프로그램 추진 결과 총괄표": {
+      "sourceTopics": ["핵심 달성 목표", "핵심 KPI 성과", "프로그램 운영 성과"],
+      "sourceKeywords": ["핵심달성목표", "KPI", "직접투자", "후속투자", "매출", "고용"],
+      "note": "핵심 KPI와 달성 수치를 총괄표 섹션으로 묶는다."
+    },
+    "프로그램 세부추진 결과": {
+      "sourceTopics": ["주요 추진 사항", "주요 일정", "모집 선발 및 보육기업", "OT 및 기업 진단/교육", "특화모듈(ODA/OI/오픈컨퍼런스)", "사업 홍보", "알럼나이 사후관리", "투자/글로벌 트랙 상세", "예비창업자 육성 상세", "네트워킹"],
+      "sourceKeywords": ["주요추진사항", "주요일정", "모집", "선발", "OT", "교육", "특화모듈", "홍보", "알럼나이", "글로벌", "네트워킹"],
+      "note": "프로그램 운영 과정 전반을 묶는 핵심 본문 섹션이다."
+    },
+    "기업 육성 상세": {
+      "sourceTopics": ["기업별 상세 현황", "기업 성과 총괄표", "기업별 상세내용"],
+      "sourceKeywords": ["기업별상세현황", "기업성과총괄표", "기업별상세내용"],
+      "note": "기업별 성과와 육성 내용을 상세 파트로 재배치한다."
+    },
+    "우수 사례": {
+      "sourceTopics": ["기업별 상세내용", "기업 성과 총괄표"],
+      "sourceKeywords": ["우수사례", "로비고스", "저크", "기업별"],
+      "note": "기업 상세 슬라이드 중 사례성이 높은 내용을 우수 사례 파트로 전개한다."
+    },
+    "기업 만족도 조사": {
+      "sourceTopics": ["만족도조사"],
+      "sourceKeywords": ["만족도조사", "만족도"],
+      "note": "만족도 관련 슬라이드와 설문 결과를 대응시킨다."
+    },
+    "2026년도 사업 추진 전략": {
+      "sourceTopics": ["제언", "프로그램 제언"],
+      "sourceKeywords": ["제언", "향후", "전략"],
+      "note": "source deck의 제언 내용을 다음 연도 전략 섹션으로 승격한다."
+    },
+    "사업내용": {
+      "sourceTopics": ["운영사 소개", "프로그램 핵심 전략"],
+      "sourceKeywords": ["운영사소개", "핵심전략", "미션"],
+      "note": "사업 개요 내 세부 슬롯."
+    },
+    "모집, 홍보 및 발굴, 선정": {
+      "sourceTopics": ["모집 선발 및 보육기업", "사업 홍보"],
+      "sourceKeywords": ["모집", "선발", "보육기업", "홍보"],
+      "note": "모집과 홍보 흐름을 묶는 운영 슬롯."
+    },
+    "최종 선정기업 및 초기자금지급": {
+      "sourceTopics": ["모집 선발 및 보육기업", "기업 성과 총괄표"],
+      "sourceKeywords": ["선정기업", "초기자금", "보육기업"],
+      "note": "선정 결과와 초기 자금 정보를 연결한다."
+    },
+    "성과관리": {
+      "sourceTopics": ["핵심 KPI 성과", "프로그램 운영 성과", "기업 성과 총괄표"],
+      "sourceKeywords": ["성과관리", "KPI", "성과"],
+      "note": "정량 성과와 운영 성과를 성과관리 슬롯으로 압축한다."
+    },
+    "프로그램 운영": {
+      "sourceTopics": ["주요 일정", "OT 및 기업 진단/교육", "특화모듈(ODA/OI/오픈컨퍼런스)", "투자/글로벌 트랙 상세", "예비창업자 육성 상세", "네트워킹"],
+      "sourceKeywords": ["주요일정", "교육", "특화모듈", "글로벌", "예비창업자", "네트워킹"],
+      "note": "실행 프로그램 중심의 운영 슬롯."
+    },
+    "성과 요약": {
+      "sourceTopics": ["기업 성과 총괄표", "프로그램 운영 성과", "핵심 KPI 성과"],
+      "sourceKeywords": ["성과요약", "총괄표", "KPI"],
+      "note": "기업 육성 상세 내 요약 슬롯."
+    },
+    "알럼나이 사후관리": {
+      "sourceTopics": ["알럼나이 사후관리"],
+      "sourceKeywords": ["알럼나이", "사후관리"],
+      "note": "알럼나이 후속지원 슬롯."
+    },
+    "기업별 육성내용": {
+      "sourceTopics": ["기업별 상세내용"],
+      "sourceKeywords": ["기업별상세내용", "기업별"],
+      "note": "개별 기업 육성 내용의 메인 슬롯."
+    },
+    "사후관리 계획": {
+      "sourceTopics": ["알럼나이 사후관리", "프로그램 제언"],
+      "sourceKeywords": ["사후관리", "후속", "제언"],
+      "note": "운영 이후 후속 계획 슬롯."
+    },
+    "홍보 및 보도자료 요약정리": {
+      "sourceTopics": ["사업 홍보"],
+      "sourceKeywords": ["사업홍보", "보도자료", "홍보"],
+      "note": "홍보 성과를 정리하는 슬롯."
+    },
+    "로비고스": {
+      "sourceTopics": ["기업별 상세내용", "기업 성과 총괄표"],
+      "sourceKeywords": ["로비고스"],
+      "note": "우수 사례 중 로비고스 기업 슬롯."
+    },
+    "저크": {
+      "sourceTopics": ["기업별 상세내용", "기업 성과 총괄표"],
+      "sourceKeywords": ["저크"],
+      "note": "우수 사례 중 저크 기업 슬롯."
+    },
+    "만족도 조사 결과": {
+      "sourceTopics": ["만족도조사"],
+      "sourceKeywords": ["만족도조사", "설문"],
+      "note": "만족도 조사 세부 결과 슬롯."
+    },
+    "제언": {
+      "sourceTopics": ["제언", "프로그램 제언"],
+      "sourceKeywords": ["제언", "개선"],
+      "note": "최종 전략 섹션 내 제언 슬롯."
+    },
+    "보육기업 기본 정보": {
+      "sourceTopics": ["기업 성과 총괄표", "기업별 상세내용"],
+      "sourceKeywords": ["기업성과총괄표", "기업기본정보"],
+      "note": "첨부 자료 성격의 기본 정보 슬롯."
+    },
+    "기업 만족도 조사 결과": {
+      "sourceTopics": ["만족도조사"],
+      "sourceKeywords": ["만족도조사", "설문"],
+      "note": "첨부 자료 성격의 만족도 상세 결과 슬롯."
+    }
+  },
   "reviewNotes": [
     "The target submission report uses a formal A4 program-report structure with appendices, not the same narrative structure as the slide deck.",
     "A slide-TOC-driven planner cannot pass this family without transforming source slides into the target family schema first.",
