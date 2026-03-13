@@ -7,6 +7,7 @@ import {
   type ReportFamilyDocumentInput,
   type ReportFamilyDocumentRole,
   type ReportFamilySegment,
+  type ReportFamilySchemaSource,
 } from "@/lib/report-family-planner";
 import type { ReportFamilyBenchmarkRun } from "@/lib/report-template-benchmark";
 
@@ -27,7 +28,9 @@ type DocumentInput = {
 };
 
 type RequestBody = {
+  familyId?: string | null;
   familyName?: string;
+  schemaSource?: ReportFamilySchemaSource;
   targetDocument?: DocumentInput;
   sourceDocuments?: DocumentInput[];
   benchmarkRun?: ReportFamilyBenchmarkRun | null;
@@ -83,7 +86,9 @@ async function handlePost(request: Request) {
     );
 
     const plan = buildReportFamilyPlan({
+      familyId: typeof body.familyId === "string" ? body.familyId : null,
       familyName,
+      schemaSource: body.schemaSource || "target_document",
       targetDocument,
       sourceDocuments,
       benchmarkRun: body.benchmarkRun || null,

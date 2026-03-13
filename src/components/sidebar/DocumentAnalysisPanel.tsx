@@ -214,6 +214,14 @@ export function DocumentAnalysisPanel({
           {reportFamilyPlanState.plan ? (
             <>
               <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {reportFamilyPlanState.plan.familyId ? (
+                  <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#e2e8f0", color: "#334155", fontWeight: 600 }}>
+                    Family {reportFamilyPlanState.plan.familyId}
+                  </span>
+                ) : null}
+                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#f1f5f9", color: "#475569", fontWeight: 600 }}>
+                  {reportFamilyPlanState.plan.schemaSource === "registered_packet" ? "registered packet schema" : reportFamilyPlanState.plan.schemaSource === "synthetic_outline" ? "outline-derived schema" : "target document schema"}
+                </span>
                 <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#dbeafe", color: "#1d4ed8", fontWeight: 600 }}>
                   TOC {reportFamilyPlanState.plan.toc.length}
                 </span>

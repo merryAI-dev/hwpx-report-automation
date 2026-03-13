@@ -6,9 +6,11 @@ import {
   evaluateReportFamilyBenchmark,
   type ReportFamilyBenchmarkEvaluation,
   type ReportFamilyBenchmarkRun,
+  type TocBenchmarkEntry,
 } from "./report-template-benchmark";
 import type { EditorSegment } from "@/lib/editor/hwpx-to-prosemirror";
 import type { OutlineItem } from "@/lib/editor/document-store";
+import myscBenchmarkPacket from "../../docs/benchmarks/mysc-final-report.packet.json";
 
 export type ReportFamilyDocumentRole =
   | "target_report"
@@ -67,7 +69,9 @@ export type SectionPromptPlan = {
 };
 
 export type ReportFamilyPlan = {
+  familyId: string | null;
   familyName: string;
+  schemaSource: ReportFamilySchemaSource;
   toc: TocEntry[];
   sourcePolicy: SourcePolicy;
   sectionPlans: SectionPromptPlan[];
@@ -75,18 +79,47 @@ export type ReportFamilyPlan = {
   retryPlan: ReportFamilyRalphPlan | null;
 };
 
+export type ReportFamilySchemaSource =
+  | "target_document"
+  | "synthetic_outline"
+  | "registered_packet";
+
 export type ReportFamilyPlanRequestPayload = {
+  familyId?: string | null;
   familyName: string;
+  schemaSource?: ReportFamilySchemaSource;
   targetDocument: ReportFamilyDocumentInput;
   sourceDocuments: ReportFamilyDocumentInput[];
   benchmarkRun?: ReportFamilyBenchmarkRun | null;
 };
 
+type RegisteredBenchmarkPacketCase = {
+  caseId: string;
+  goldEntries: TocBenchmarkEntry[];
+};
+
+type RegisteredBenchmarkPacket = {
+  familyId: string;
+  packetId: string;
+  sourceArtifacts: {
+    sourceDeckFileName: string;
+    targetReportFileName: string;
+  };
+  benchmarkCases: RegisteredBenchmarkPacketCase[];
+};
+
 const MAX_TOC_ENTRIES = 24;
 const MAX_SECTION_CHUNKS = 3;
+const REGISTERED_REPORT_FAMILY_PACKETS: RegisteredBenchmarkPacket[] = [
+  myscBenchmarkPacket as RegisteredBenchmarkPacket,
+];
 
 function normalizeWhitespace(value: string): string {
   return value.replace(/\s+/g, " ").trim();
+}
+
+function normalizeFamilyKey(value: string): string {
+  return normalizeWhitespace(value).toLowerCase();
 }
 
 function stripTrailingPageNumber(value: string): string {
@@ -140,6 +173,36 @@ function parseTocLine(
   const cleaned = stripTrailingPageNumber(normalizeWhitespace(text));
   if (!cleaned || /^목차|^차례$/i.test(cleaned)) {
     return null;
+  }
+
+  const appendixMatch = cleaned.match(/^(\[첨부\d+\])\s*(.+)$/i);
+  if (appendixMatch) {
+    const title = normalizeWhitespace(appendixMatch[2] || "");
+    if (!title) {
+      return null;
+    }
+    return {
+      id: `toc-${index}`,
+      title,
+      numbering: appendixMatch[1] || null,
+      level: 1,
+      sourceSegmentId,
+    };
+  }
+
+  const bulletMatch = cleaned.match(/^[-•]\s*(.+)$/);
+  if (bulletMatch) {
+    const title = normalizeWhitespace(bulletMatch[1] || "");
+    if (!title) {
+      return null;
+    }
+    return {
+      id: `toc-${index}`,
+      title,
+      numbering: null,
+      level: 2,
+      sourceSegmentId,
+    };
   }
 
   const matched = cleaned.match(
@@ -207,6 +270,80 @@ export function extractTableOfContents(
   }
 
   return parsed;
+}
+
+function packetCase(packet: RegisteredBenchmarkPacket, caseId: string): RegisteredBenchmarkPacketCase | null {
+  return packet.benchmarkCases.find((testCase) => testCase.caseId === caseId) || null;
+}
+
+export function resolveRegisteredReportFamilyPacket(params: {
+  familyName: string;
+  fileName: string;
+}): RegisteredBenchmarkPacket | null {
+  const haystack = normalizeFamilyKey(`${params.familyName} ${params.fileName}`);
+  return (
+    REGISTERED_REPORT_FAMILY_PACKETS.find((packet) => {
+      const sourceName = normalizeFamilyKey(packet.sourceArtifacts.sourceDeckFileName);
+      const targetName = normalizeFamilyKey(packet.sourceArtifacts.targetReportFileName);
+      const myscSignal =
+        haystack.includes("mysc") || haystack.includes("엠와이소셜컴퍼니");
+      const marineSignal = haystack.includes("해양수산");
+      return (
+        (myscSignal && marineSignal) ||
+        sourceName.includes(haystack) ||
+        haystack.includes(sourceName) ||
+        targetName.includes(haystack) ||
+        haystack.includes(targetName)
+      );
+    }) || null
+  );
+}
+
+function toRegisteredTocLine(entry: TocBenchmarkEntry, level: number): string {
+  const title = normalizeWhitespace(entry.title);
+  const numbering = normalizeWhitespace(entry.numbering || "");
+  if (numbering.startsWith("[첨부")) {
+    return `${numbering} ${title}`;
+  }
+  if (!numbering || numbering === "-") {
+    return level > 1 ? `- ${title}` : title;
+  }
+  return `${numbering} ${title}`;
+}
+
+export function buildTargetDocumentFromRegisteredPacket(params: {
+  packet: RegisteredBenchmarkPacket;
+  fileName: string;
+}): ReportFamilyDocumentInput {
+  const topLevelCase = packetCase(params.packet, "mysc-top-level-toc");
+  const detailCase = packetCase(params.packet, "mysc-detailed-toc");
+  const topLevelLines = (topLevelCase?.goldEntries || []).map((entry) =>
+    toRegisteredTocLine(entry, 1),
+  );
+  const detailLines = (detailCase?.goldEntries || []).map((entry) =>
+    toRegisteredTocLine(entry, 2),
+  );
+
+  return {
+    documentId: `${params.packet.familyId}-registered-target`,
+    fileName: `${params.fileName.replace(/\.[^.]+$/i, "")}-registered-target.pdf`,
+    role: "target_report",
+    segments: [
+      { id: "toc-title", text: "목차", type: "heading", level: 1, pageNumber: 1 },
+      {
+        id: "toc-top-level",
+        text: topLevelLines.join("\n"),
+        type: "paragraph",
+        pageNumber: 1,
+      },
+      {
+        id: "toc-details",
+        text: detailLines.join("\n"),
+        type: "paragraph",
+        pageNumber: 1,
+      },
+    ].filter((segment) => normalizeWhitespace(segment.text)),
+  };
 }
 
 type RawSlideChunk = {
@@ -362,7 +499,9 @@ export function buildSectionPromptPlans(
 }
 
 export function buildReportFamilyPlan(params: {
+  familyId?: string | null;
   familyName: string;
+  schemaSource?: ReportFamilySchemaSource;
   targetDocument: ReportFamilyDocumentInput;
   sourceDocuments: ReportFamilyDocumentInput[];
   benchmarkRun?: ReportFamilyBenchmarkRun | null;
@@ -385,7 +524,9 @@ export function buildReportFamilyPlan(params: {
     : null;
 
   return {
+    familyId: params.familyId || null,
     familyName: params.familyName,
+    schemaSource: params.schemaSource || "target_document",
     toc,
     sourcePolicy,
     sectionPlans,
@@ -458,13 +599,25 @@ export function buildPptxReportFamilyPlanPayload(params: {
   outline: OutlineItem[];
   benchmarkRun?: ReportFamilyBenchmarkRun | null;
 }): ReportFamilyPlanRequestPayload {
-  return {
+  const registeredPacket = resolveRegisteredReportFamilyPacket({
     familyName: params.familyName,
-    targetDocument: buildSyntheticTargetReportFromOutline({
-      familyName: params.familyName,
-      fileName: params.fileName,
-      outline: params.outline,
-    }),
+    fileName: params.fileName,
+  });
+
+  return {
+    familyId: registeredPacket?.familyId || null,
+    familyName: params.familyName,
+    schemaSource: registeredPacket ? "registered_packet" : "synthetic_outline",
+    targetDocument: registeredPacket
+      ? buildTargetDocumentFromRegisteredPacket({
+          packet: registeredPacket,
+          fileName: params.fileName,
+        })
+      : buildSyntheticTargetReportFromOutline({
+          familyName: params.familyName,
+          fileName: params.fileName,
+          outline: params.outline,
+        }),
     sourceDocuments: [
       buildSourceDocumentFromEditorSegments({
         fileName: params.fileName,

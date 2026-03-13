@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import {
+  buildTargetDocumentFromRegisteredPacket,
   buildPptxReportFamilyPlanPayload,
   buildReportFamilyPlan,
   buildSourcePolicy,
   buildSectionPromptPlans,
   extractTableOfContents,
+  resolveRegisteredReportFamilyPacket,
   type ReportFamilyDocumentInput,
 } from "./report-family-planner";
 
@@ -129,8 +131,8 @@ describe("buildReportFamilyPlan", () => {
 describe("buildPptxReportFamilyPlanPayload", () => {
   it("builds a synthetic target report from outline and keeps slide grounding metadata", () => {
     const payload = buildPptxReportFamilyPlanPayload({
-      familyName: "MYSC 해양수산 최종보고서",
-      fileName: "marine-demo.pptx",
+      familyName: "일반 보고서 패밀리",
+      fileName: "generic-demo.pptx",
       outline: [
         { id: "o1", text: "1 사업 개요", level: 1 },
         { id: "o2", text: "2 주요 성과", level: 1 },
@@ -159,9 +161,61 @@ describe("buildPptxReportFamilyPlanPayload", () => {
     });
 
     expect(payload.targetDocument.role).toBe("target_report");
+    expect(payload.schemaSource).toBe("synthetic_outline");
+    expect(payload.familyId).toBeNull();
     expect(payload.targetDocument.segments[1]?.text).toContain("1 사업 개요");
     expect(payload.sourceDocuments).toHaveLength(1);
     expect(payload.sourceDocuments[0]?.role).toBe("slide_deck");
     expect(payload.sourceDocuments[0]?.segments[0]?.slideNumber).toBe(1);
+  });
+
+  it("uses a registered family packet schema when the file matches MYSC marine reports", () => {
+    const payload = buildPptxReportFamilyPlanPayload({
+      familyName: "[MYSC] 해양수산 최종결과보고서 보고서",
+      fileName: "[MYSC] 해양수산 최종결과보고서_1216_vf.pptx",
+      outline: [
+        { id: "o1", text: "1 운영사 소개", level: 1 },
+        { id: "o2", text: "2 핵심 달성 목표", level: 1 },
+      ],
+      segments: [
+        {
+          segmentId: "pptx::0",
+          fileName: "pptx",
+          textIndex: 0,
+          text: "운영사 소개",
+          originalText: "운영사 소개",
+          tag: "h2",
+          styleHints: { slideNumber: "1", pptxRole: "title" },
+        },
+      ],
+    });
+
+    expect(payload.familyId).toBe("mysc-final-report");
+    expect(payload.schemaSource).toBe("registered_packet");
+    const toc = extractTableOfContents(payload.targetDocument);
+    expect(toc.some((entry) => entry.title === "프로그램 개요")).toBe(true);
+    expect(toc.some((entry) => entry.title === "사업내용")).toBe(true);
+    expect(toc.some((entry) => entry.title === "보육기업 기본 정보")).toBe(true);
+  });
+});
+
+describe("registered MYSC packet", () => {
+  it("resolves the MYSC marine packet and materializes target-report TOC lines", () => {
+    const packet = resolveRegisteredReportFamilyPacket({
+      familyName: "MYSC 해양수산 최종보고서",
+      fileName: "[MYSC] 해양수산 최종결과보고서_1216_vf.pptx",
+    });
+
+    expect(packet?.familyId).toBe("mysc-final-report");
+
+    const targetDocument = buildTargetDocumentFromRegisteredPacket({
+      packet: packet!,
+      fileName: "mysc-marine-demo.pptx",
+    });
+    const toc = extractTableOfContents(targetDocument);
+
+    expect(toc.some((entry) => entry.title === "프로그램 추진 결과 총괄표")).toBe(true);
+    expect(toc.some((entry) => entry.title === "홍보 및 보도자료 요약정리")).toBe(true);
+    expect(toc.some((entry) => entry.title === "기업 만족도 조사 결과")).toBe(true);
   });
 });
