@@ -7,6 +7,7 @@ export type BatchItem = {
   styleHints?: Record<string, string>;
   prevText?: string;
   nextText?: string;
+  planContext?: string;
 };
 
 export type BatchSuggestionRow = {
@@ -46,6 +47,7 @@ export function normalizeBatchItems(rawItems: BatchItem[]): BatchItem[] {
       styleHints: item.styleHints || {},
       prevText: item.prevText,
       nextText: item.nextText,
+      planContext: typeof item.planContext === "string" ? item.planContext.trim() : undefined,
     }))
     .filter((item) => item.id && item.text);
 }
@@ -79,7 +81,7 @@ export async function generateBatchSuggestions(
         content:
           `수정 지시:\n${instruction}\n\n`
           + `항목(JSON):\n${JSON.stringify(items)}\n\n`
-          + "요구사항: 각 항목의 text만 수정하라. prevText/nextText는 맥락 참고용이며 수정 대상이 아니다. 각 항목의 의미를 보존하고 더 읽기 좋게 다듬어라. 원문 길이와 문장 수는 유사하게 유지하라.",
+          + "요구사항: 각 항목의 text만 수정하라. prevText/nextText는 맥락 참고용이며 수정 대상이 아니다. planContext가 있으면 해당 section plan을 우선 적용하라. 각 항목의 의미를 보존하고 더 읽기 좋게 다듬어라. 원문 길이와 문장 수는 유사하게 유지하라.",
       },
     ],
   });

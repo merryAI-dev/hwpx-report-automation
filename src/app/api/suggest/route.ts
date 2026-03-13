@@ -17,6 +17,7 @@ import { estimateCost } from "@/lib/ai-cost-tracker";
 type RequestBody = {
   text?: string;
   instruction?: string;
+  planContext?: string;
   styleHints?: Record<string, string>;
   prevText?: string;
   nextText?: string;
@@ -48,6 +49,7 @@ async function handlePost(request: Request) {
     }
     const text = requireString(body.text, "text");
     const instruction = requireString(body.instruction, "instruction");
+    const planContext = String(body.planContext || "").trim();
 
     // ── Monthly cost limit check ──
     const costLimitResp = await checkMonthlyCostLimit(body.monthlyCostLimitUsd ?? 0);
@@ -73,9 +75,10 @@ async function handlePost(request: Request) {
                 (body.prevText ? `앞 문단:\n${body.prevText}\n\n` : "") +
                 `원문:\n${text}\n\n` +
                 (body.nextText ? `뒤 문단:\n${body.nextText}\n\n` : "") +
+                (planContext ? `리포트 패밀리 섹션 계획:\n${planContext}\n\n` : "") +
                 `수정 지시:\n${instruction}\n\n` +
                 `스타일 힌트(JSON):\n${styleContext}\n\n` +
-                "요구사항: 원문만 수정하라. 앞/뒤 문단은 맥락 참고용이다. 문장 수와 길이는 원문과 유사하게 유지하고, 핵심 정보 누락 없이 더 읽기 좋게 고쳐라.",
+                "요구사항: 원문만 수정하라. 앞/뒤 문단은 맥락 참고용이다. planContext가 있으면 해당 section plan을 우선 적용하라. 문장 수와 길이는 원문과 유사하게 유지하고, 핵심 정보 누락 없이 더 읽기 좋게 고쳐라.",
             },
           ],
         }),

@@ -48,6 +48,7 @@ import {
   buildPptxReportFamilyPlanPayload,
   type ReportFamilyPlan,
 } from "@/lib/report-family-planner";
+import { buildReportFamilyPromptContext } from "@/lib/report-family-prompt-context";
 import type { SessionIdentityProvider, SessionTenantMembership } from "@/lib/auth/session";
 import { evaluateQualityGate, type QualityGateResult } from "@/lib/quality-gates";
 import { recordPilotMetricEvent } from "@/lib/pilot-metrics";
@@ -839,9 +840,33 @@ export default function Home() {
     () => collectSectionBatchItems(editorDoc, batchMode === "document" ? null : selection.selectedSegmentId),
     [editorDoc, selection.selectedSegmentId, batchMode],
   );
+  const selectedReportFamilyPlanContext = useMemo(
+    () =>
+      buildReportFamilyPromptContext({
+        plan: reportFamilyPlanState.plan,
+        segmentId: selection.selectedSegmentId,
+        text: selection.selectedText,
+      }),
+    [reportFamilyPlanState.plan, selection.selectedSegmentId, selection.selectedText],
+  );
+  const batchItemsWithPlanContext = useMemo(
+    () =>
+      batchItems.map((item) => ({
+        ...item,
+        planContext: buildReportFamilyPromptContext({
+          plan: reportFamilyPlanState.plan,
+          segmentId: item.id,
+          text: item.text,
+          sectionTitle: item.styleHints.sectionTitle,
+          prevText: item.prevText,
+          nextText: item.nextText,
+        }) || undefined,
+      })),
+    [batchItems, reportFamilyPlanState.plan],
+  );
   const batchPlan = useMemo(
-    () => buildBatchApplyPlan(batchItems, batchSuggestions),
-    [batchItems, batchSuggestions],
+    () => buildBatchApplyPlan(batchItemsWithPlanContext, batchSuggestions),
+    [batchItemsWithPlanContext, batchSuggestions],
   );
   const batchSuggestionCount = useMemo(
     () => batchPlan.filter((item) => item.changed).length,
@@ -1416,6 +1441,7 @@ export default function Home() {
         body: JSON.stringify({
           text,
           instruction,
+          planContext: selectedReportFamilyPlanContext || undefined,
           model: undefined,
         }),
       });
@@ -1826,7 +1852,7 @@ export default function Home() {
     clearBatchDecisions();
     setBatchSuggestions([]);
     setBatchJob(null);
-    const requestedBatchItems = [...batchItems];
+    const requestedBatchItems = [...batchItemsWithPlanContext];
     let createdJobId: string | null = null;
     let batchFailureTracked = false;
 
@@ -1956,7 +1982,7 @@ export default function Home() {
         .filter(([, decision]) => decision === "accepted")
         .map(([id]) => id),
     );
-    const changedPlan = buildBatchApplyPlan(batchItems, batchSuggestions).filter((item) => item.changed);
+    const changedPlan = buildBatchApplyPlan(batchItemsWithPlanContext, batchSuggestions).filter((item) => item.changed);
     const plan = changedPlan.filter((item) => {
       const gate = gateById.get(item.id);
       return !gate?.requiresApproval || approvedIds.has(item.id);
@@ -2019,7 +2045,7 @@ export default function Home() {
       setStatus("수락된 항목이 없습니다.");
       return;
     }
-    const plan = buildBatchApplyPlan(batchItems, batchSuggestions)
+    const plan = buildBatchApplyPlan(batchItemsWithPlanContext, batchSuggestions)
       .filter((item) => item.changed && acceptedIds.has(item.id));
     const approvedRiskCount = plan.filter((item) =>
       batchSuggestions.find((suggestion) => suggestion.id === item.id)?.qualityGate.requiresApproval,
