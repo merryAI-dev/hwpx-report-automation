@@ -56,6 +56,15 @@ describe("/api/report-family/plan", () => {
             { id: "r1", text: "이전 결과보고서", type: "paragraph" },
           ],
         },
+        {
+          documentId: "evidence-1",
+          fileName: "appendix-evidence.pdf",
+          role: "evidence_doc",
+          segments: [
+            { id: "e1", text: "보육기업 기본 정보", type: "heading", pageNumber: 10 },
+            { id: "e2", text: "기업 기본 정보 및 증빙 첨부 자료", type: "paragraph", pageNumber: 10 },
+          ],
+        },
       ],
       benchmarkRun: {
         familyId: "mysc-final-report",
@@ -78,7 +87,7 @@ describe("/api/report-family/plan", () => {
     const json = await response.json();
     expect(json.toc).toHaveLength(3);
     expect(json.sourcePolicy.allowedSourceIds).toEqual(["slides-1"]);
-    expect(json.sourcePolicy.maskedSourceIds).toEqual(["reference-1"]);
+    expect(json.sourcePolicy.maskedSourceIds).toEqual(["reference-1", "evidence-1"]);
     expect(json.sectionPlans[0].prompt).toContain("masked source");
     expect(json.retryPlan.actions.some((action: { bucket: string }) => action.bucket === "improve_toc_extractor")).toBe(true);
   });

@@ -251,6 +251,9 @@ export function DocumentAnalysisPanel({
                     <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#f0fdf4", color: "#166534", fontWeight: 600 }}>
                       Entity {Math.round(reportFamilyPlanState.plan.planQuality.entityCoverage * 100)}%
                     </span>
+                    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#f8fafc", color: "#475569", fontWeight: 600 }}>
+                      Evidence {reportFamilyPlanState.plan.planQuality.evidenceBundleCount}
+                    </span>
                   </>
                 ) : null}
               </div>
@@ -393,6 +396,11 @@ export function DocumentAnalysisPanel({
                               appendix bundle
                             </span>
                           ) : null}
+                          {section.chunkingStrategy === "slide_entity" ? (
+                            <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#ecfeff", color: "#155e75", fontWeight: 700 }}>
+                              entity chunks
+                            </span>
+                          ) : null}
                         </div>
                         <div style={{ marginTop: 2 }}>
                           {section.supportingChunks.map((chunk) => chunk.title).join(", ")}
@@ -400,6 +408,11 @@ export function DocumentAnalysisPanel({
                         {section.focusEntities.length ? (
                           <div style={{ marginTop: 2, color: "#64748b" }}>
                             entity: {section.focusEntities.join(", ")}
+                          </div>
+                        ) : null}
+                        {section.evidenceBundles.length ? (
+                          <div style={{ marginTop: 2, color: "#7c2d12" }}>
+                            evidence: {section.evidenceBundles.map((bundle) => bundle.fileName).join(", ")}
                           </div>
                         ) : null}
                       </li>

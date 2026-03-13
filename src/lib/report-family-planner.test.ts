@@ -67,6 +67,47 @@ function makeMyscSlideDocument(): ReportFamilyDocumentInput {
   };
 }
 
+function makeCombinedEntitySlideDocument(): ReportFamilyDocumentInput {
+  return {
+    documentId: "slides-entity-combined",
+    fileName: "mysc-combined-entities.pptx",
+    role: "slide_deck",
+    segments: [
+      { id: "e1", text: "기업별 상세내용", type: "heading", slideNumber: 7 },
+      {
+        id: "e2",
+        text: "로비고스는 직접 투자와 후속 연계 성과가 두드러지고, 저크는 글로벌 디스커버리와 후속 투자 사례가 핵심이다.",
+        type: "paragraph",
+        slideNumber: 7,
+      },
+    ],
+  };
+}
+
+function makeMyscEvidenceDocument(): ReportFamilyDocumentInput {
+  return {
+    documentId: "mysc-evidence",
+    fileName: "mysc-appendix-evidence.pdf",
+    role: "evidence_doc",
+    segments: [
+      { id: "a1", text: "보육기업 기본 정보", type: "heading", pageNumber: 12 },
+      {
+        id: "a2",
+        text: "로비고스 법인명, 사업분야, 사업자등록 정보 및 육성 현황 증빙.",
+        type: "paragraph",
+        pageNumber: 12,
+      },
+      { id: "a3", text: "기업 만족도 조사 결과", type: "heading", pageNumber: 13 },
+      {
+        id: "a4",
+        text: "참여 기업 만족도 결과와 주요 설문 문항별 응답 요약.",
+        type: "paragraph",
+        pageNumber: 13,
+      },
+    ],
+  };
+}
+
 describe("extractTableOfContents", () => {
   it("extracts numbered toc entries from the target report", () => {
     const toc = extractTableOfContents(makeTargetDocument());
@@ -116,6 +157,29 @@ describe("buildSectionPromptPlans", () => {
     expect(plans[0].sectionType).toBe("narrative");
     expect(plans[0].prompt).toContain("masked source");
     expect(plans[0].prompt).toContain("슬라이드");
+  });
+
+  it("splits generic company slides into entity-aware chunks for case-study sections", () => {
+    const target = {
+      documentId: "target-report",
+      fileName: "target-report.pdf",
+      role: "target_report" as const,
+      segments: [
+        { id: "t1", text: "목차", type: "heading" },
+        { id: "t2", text: "- 로비고스", type: "paragraph" },
+      ],
+    };
+    const slides = makeCombinedEntitySlideDocument();
+    const sourcePolicy = buildSourcePolicy(target, [slides]);
+    const toc = extractTableOfContents(target);
+    const plans = buildSectionPromptPlans("MYSC 해양수산 최종보고서", toc, target, [slides], sourcePolicy, {
+      familyId: "mysc-final-report",
+      schemaSource: "registered_packet",
+    });
+
+    expect(plans[0]?.chunkingStrategy).toBe("slide_entity");
+    expect(plans[0]?.supportingChunks[0]?.title).toContain("로비고스");
+    expect(plans[0]?.alignmentReasons).toContain("entity-aware chunking enabled");
   });
 });
 
@@ -226,6 +290,28 @@ describe("buildPptxReportFamilyPlanPayload", () => {
     expect(toc.some((entry) => entry.title === "사업내용")).toBe(true);
     expect(toc.some((entry) => entry.title === "보육기업 기본 정보")).toBe(true);
   });
+
+  it("keeps additional evidence documents in the planner payload", () => {
+    const payload = buildPptxReportFamilyPlanPayload({
+      familyName: "MYSC 해양수산 최종보고서",
+      fileName: "[MYSC] 해양수산 최종결과보고서_1216_vf.pptx",
+      outline: [{ id: "o1", text: "1 운영사 소개", level: 1 }],
+      segments: [
+        {
+          segmentId: "pptx::0",
+          fileName: "pptx",
+          textIndex: 0,
+          text: "운영사 소개",
+          originalText: "운영사 소개",
+          tag: "h2",
+          styleHints: { slideNumber: "1", pptxRole: "title" },
+        },
+      ],
+      additionalSourceDocuments: [makeMyscEvidenceDocument()],
+    });
+
+    expect(payload.sourceDocuments.some((document) => document.role === "evidence_doc")).toBe(true);
+  });
 });
 
 describe("registered MYSC packet", () => {
@@ -263,7 +349,7 @@ describe("registered MYSC packet", () => {
       familyName: "MYSC 해양수산 최종보고서",
       schemaSource: "registered_packet",
       targetDocument,
-      sourceDocuments: [makeMyscSlideDocument()],
+      sourceDocuments: [makeMyscSlideDocument(), makeMyscEvidenceDocument()],
     });
 
     const overviewSection = plan.sectionPlans.find((section) => section.tocTitle === "프로그램 개요");
@@ -295,5 +381,31 @@ describe("registered MYSC packet", () => {
     expect(appendixSection?.sectionType).toBe("appendix_evidence");
     expect(appendixSection?.evidenceExpectation).toBe("appendix_bundle_required");
     expect(appendixSection?.prompt).toContain("appendix evidence bundle required");
+    expect(appendixSection?.evidenceBundles.length).toBeGreaterThan(0);
+    expect(appendixSection?.prompt).toContain("첨부 근거 후보");
+    expect(appendixSection?.evidenceBundles[0]?.fileName).toBe("mysc-appendix-evidence.pdf");
+  });
+
+  it("marks registered appendix sections as retry when no evidence bundle is available", () => {
+    const packet = resolveRegisteredReportFamilyPacket({
+      familyName: "MYSC 해양수산 최종보고서",
+      fileName: "[MYSC] 해양수산 최종결과보고서_1216_vf.pptx",
+    });
+    const targetDocument = buildTargetDocumentFromRegisteredPacket({
+      packet: packet!,
+      fileName: "mysc-marine-demo.pptx",
+    });
+
+    const plan = buildReportFamilyPlan({
+      familyId: packet?.familyId,
+      familyName: "MYSC 해양수산 최종보고서",
+      schemaSource: "registered_packet",
+      targetDocument,
+      sourceDocuments: [makeMyscSlideDocument()],
+    });
+
+    expect(plan.planQuality?.status).toBe("retry");
+    expect(plan.planQuality?.appendixEvidenceReadiness).toBeLessThan(1);
+    expect(plan.planQuality?.appendixGaps.some((gap) => gap.includes("보육기업 기본 정보"))).toBe(true);
   });
 });

@@ -99,6 +99,7 @@ describe("evaluateReportFamilyBenchmark", () => {
             tocTitle: "보육기업 기본 정보",
             sectionType: "appendix_evidence",
             evidenceExpectation: "appendix_bundle_required",
+            minEvidenceBundleCount: 1,
           },
           {
             tocTitle: "로비고스",
@@ -112,11 +113,13 @@ describe("evaluateReportFamilyBenchmark", () => {
             tocTitle: "보육기업 기본 정보",
             sectionType: "appendix_evidence",
             evidenceExpectation: "slide_grounded",
+            evidenceBundleCount: 0,
           },
           {
             tocTitle: "로비고스",
             sectionType: "case_study",
             focusEntities: ["저크"],
+            focusEntityResolved: false,
           },
         ],
       },
@@ -125,7 +128,9 @@ describe("evaluateReportFamilyBenchmark", () => {
     expect(summary.sectionTypeExactMatchRate).toBe(1);
     expect(summary.appendixEvidenceReadinessRate).toBe(0);
     expect(summary.entityFocusCoverageRate).toBe(0);
-    expect(summary.caseResults[0]?.appendixGaps).toEqual(["보육기업 기본 정보"]);
+    expect(summary.caseResults[0]?.appendixGaps).toEqual([
+      "보육기업 기본 정보: expected bundle 1, got 0",
+    ]);
     expect(summary.caseResults[0]?.entityGaps).toEqual(["로비고스"]);
   });
 
@@ -243,6 +248,7 @@ describe("evaluateReportFamilyBenchmark", () => {
                 tocTitle: "보육기업 기본 정보",
                 sectionType: "appendix_evidence",
                 evidenceExpectation: "appendix_bundle_required",
+                minEvidenceBundleCount: 1,
               },
               {
                 tocTitle: "로비고스",
@@ -255,11 +261,13 @@ describe("evaluateReportFamilyBenchmark", () => {
                 tocTitle: "보육기업 기본 정보",
                 sectionType: "appendix_evidence",
                 evidenceExpectation: "slide_grounded",
+                evidenceBundleCount: 0,
               },
               {
                 tocTitle: "로비고스",
                 sectionType: "narrative",
                 focusEntities: [],
+                focusEntityResolved: false,
               },
             ],
           },

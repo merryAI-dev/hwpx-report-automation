@@ -112,7 +112,10 @@ export type SectionPlanBenchmarkEntry = {
   tocTitle: string;
   sectionType?: string | null;
   evidenceExpectation?: string | null;
+  minEvidenceBundleCount?: number;
+  evidenceBundleCount?: number;
   focusEntities?: string[];
+  focusEntityResolved?: boolean;
   required?: boolean;
 };
 
@@ -479,12 +482,18 @@ export function evaluateSectionPlanBenchmarkCases(
       if (expected.evidenceExpectation === "appendix_bundle_required") {
         caseAppendixExpected += 1;
         appendixExpectedCount += 1;
-        const matched = normalizeSectionTitle(predicted?.evidenceExpectation) === "appendix_bundle_required";
+        const expectedBundleCount = Math.max(1, expected.minEvidenceBundleCount || 1);
+        const predictedBundleCount = Math.max(0, predicted?.evidenceBundleCount || 0);
+        const matched =
+          normalizeSectionTitle(predicted?.evidenceExpectation) === "appendix_bundle_required" &&
+          predictedBundleCount >= expectedBundleCount;
         if (matched) {
           caseAppendixMatched += 1;
           appendixMatchedCount += 1;
         } else {
-          appendixGaps.push(formatExpectedSectionLabel(expected));
+          appendixGaps.push(
+            `${formatExpectedSectionLabel(expected)}: expected bundle ${expectedBundleCount}, got ${predictedBundleCount}`,
+          );
         }
       }
 
@@ -493,7 +502,9 @@ export function evaluateSectionPlanBenchmarkCases(
         caseEntityExpected += 1;
         entityExpectedCount += 1;
         const predictedEntities = normalizeEntities(predicted?.focusEntities);
-        const matched = expectedEntities.every((entity) => predictedEntities.includes(entity));
+        const matched =
+          expectedEntities.every((entity) => predictedEntities.includes(entity)) &&
+          predicted?.focusEntityResolved !== false;
         if (matched) {
           caseEntityMatched += 1;
           entityMatchedCount += 1;

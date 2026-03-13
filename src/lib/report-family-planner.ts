@@ -62,6 +62,17 @@ export type SlideChunk = {
   score: number;
 };
 
+export type EvidenceBundleMatch = {
+  bundleId: string;
+  documentId: string;
+  fileName: string;
+  title: string;
+  pageNumber: number | null;
+  summary: string;
+  segmentIds: string[];
+  score: number;
+};
+
 export type SectionPromptPlan = {
   tocEntryId: string;
   tocTitle: string;
@@ -71,7 +82,9 @@ export type SectionPromptPlan = {
   evidenceExpectation: ReportFamilyEvidenceExpectation;
   outputScaffold: string[];
   prompt: string;
+  chunkingStrategy: "slide" | "slide_entity";
   supportingChunks: SlideChunk[];
+  evidenceBundles: EvidenceBundleMatch[];
   maskedDocumentIds: string[];
   alignmentStrategy: "heuristic" | "registered_mapping";
   alignmentReasons: string[];
@@ -111,6 +124,7 @@ export type ReportFamilyPlanQuality = {
   status: "pass" | "retry";
   registeredSectionCount: number;
   mappedSectionCount: number;
+  evidenceBundleCount: number;
   mappingCoverage: number;
   sectionTypeAlignment: number;
   appendixEvidenceReadiness: number;
@@ -525,6 +539,16 @@ type RawSlideChunk = {
   segmentIds: string[];
 };
 
+type RawEvidenceChunk = {
+  bundleId: string;
+  documentId: string;
+  fileName: string;
+  title: string;
+  pageNumber: number | null;
+  summary: string;
+  segmentIds: string[];
+};
+
 function buildSlideChunks(document: ReportFamilyDocumentInput): RawSlideChunk[] {
   const chunks: RawSlideChunk[] = [];
   let current: RawSlideChunk | null = null;
@@ -571,7 +595,104 @@ function buildSlideChunks(document: ReportFamilyDocumentInput): RawSlideChunk[] 
   return chunks;
 }
 
-function scoreAgainstTerms(chunk: RawSlideChunk, terms: string[]): number {
+function splitIntoSentenceLikeUnits(value: string): string[] {
+  return value
+    .split(/(?<=[.!?])\s+|(?<=다)\s+|\n+/)
+    .map((item) => normalizeWhitespace(item))
+    .filter(Boolean);
+}
+
+function buildEntityAwareSlideChunks(
+  chunk: RawSlideChunk,
+  focusEntities: string[],
+): RawSlideChunk[] {
+  if (!focusEntities.length) {
+    return [chunk];
+  }
+
+  const derived: RawSlideChunk[] = [chunk];
+  const sentenceUnits = splitIntoSentenceLikeUnits(chunk.summary);
+
+  for (const entity of focusEntities) {
+    const normalizedEntity = normalizeWhitespace(entity);
+    if (!normalizedEntity) {
+      continue;
+    }
+
+    const matchingUnits = sentenceUnits.filter((sentence) =>
+      sentence.toLowerCase().includes(normalizedEntity.toLowerCase()),
+    );
+
+    if (!matchingUnits.length) {
+      continue;
+    }
+
+    derived.push({
+      ...chunk,
+      chunkId: `${chunk.chunkId}::entity::${normalizedEntity}`,
+      title:
+        normalizeWhitespace(chunk.title).toLowerCase() === normalizedEntity.toLowerCase()
+          ? chunk.title
+          : `${normalizedEntity} · ${chunk.title}`,
+      summary: normalizeWhitespace(matchingUnits.join(" ")).slice(0, 500),
+    });
+  }
+
+  return derived;
+}
+
+function buildEvidenceDocumentChunks(document: ReportFamilyDocumentInput): RawEvidenceChunk[] {
+  const chunks: RawEvidenceChunk[] = [];
+  let current: RawEvidenceChunk | null = null;
+
+  const pushCurrent = () => {
+    if (!current) {
+      return;
+    }
+    current.summary = normalizeWhitespace(current.summary).slice(0, 800);
+    chunks.push(current);
+    current = null;
+  };
+
+  for (const segment of document.segments) {
+    const text = normalizeWhitespace(segment.text);
+    if (!text) {
+      continue;
+    }
+
+    const isHeading = segment.type === "heading" || looksLikeHeading(text);
+    const isNewPage =
+      segment.pageNumber !== null &&
+      segment.pageNumber !== undefined &&
+      current &&
+      current.pageNumber !== segment.pageNumber;
+
+    if (!current || isHeading || isNewPage) {
+      pushCurrent();
+      current = {
+        bundleId: `${document.documentId}::${segment.id}`,
+        documentId: document.documentId,
+        fileName: document.fileName,
+        title: isHeading ? text : `${document.fileName}${segment.pageNumber ? ` p.${segment.pageNumber}` : ""}`,
+        pageNumber: segment.pageNumber ?? null,
+        summary: text,
+        segmentIds: [segment.id],
+      };
+      continue;
+    }
+
+    current.summary += ` ${text}`;
+    current.segmentIds.push(segment.id);
+  }
+
+  pushCurrent();
+  return chunks;
+}
+
+function scoreAgainstTerms(
+  chunk: { title: string; summary: string },
+  terms: string[],
+): number {
   if (!terms.length) {
     return 0;
   }
@@ -585,7 +706,10 @@ function scoreAgainstTerms(chunk: RawSlideChunk, terms: string[]): number {
   );
 }
 
-function exactContainmentBoost(chunk: RawSlideChunk, terms: string[]): number {
+function exactContainmentBoost(
+  chunk: { title: string; summary: string },
+  terms: string[],
+): number {
   const haystack = normalizeWhitespace(`${chunk.title} ${chunk.summary}`).toLowerCase();
   return terms.some((term) => haystack.includes(normalizeWhitespace(term).toLowerCase())) ? 0.35 : 0;
 }
@@ -596,6 +720,7 @@ function buildSupportingChunksForEntry(params: {
   registeredPacket: RegisteredBenchmarkPacket | null;
 }): {
   supportingChunks: SlideChunk[];
+  chunkingStrategy: "slide" | "slide_entity";
   alignmentStrategy: "heuristic" | "registered_mapping";
   alignmentReasons: string[];
 } {
@@ -605,7 +730,15 @@ function buildSupportingChunksForEntry(params: {
   const focusEntities = inferFocusEntities(params.entry.title, mapping);
 
   const alignmentReasons: string[] = [];
-  const rankedChunks = params.allowedSlideChunks
+  let usedEntityChunks = false;
+  const candidateChunks = params.allowedSlideChunks.flatMap((chunk) => {
+    const expanded = buildEntityAwareSlideChunks(chunk, focusEntities);
+    if (expanded.length > 1) {
+      usedEntityChunks = true;
+    }
+    return expanded;
+  });
+  const rankedChunks = candidateChunks
     .map((chunk) => {
       const entryScore = Math.max(
         scoreTokenOverlap(params.entry.title, chunk.title),
@@ -627,7 +760,8 @@ function buildSupportingChunksForEntry(params: {
       const boost =
         exactContainmentBoost(chunk, focusEntities) +
         exactContainmentBoost(chunk, mappingTopics) +
-        exactContainmentBoost(chunk, mappingKeywords);
+        exactContainmentBoost(chunk, mappingKeywords) +
+        (focusEntities.length && chunk.chunkId.includes("::entity::") ? 0.45 : 0);
 
       return {
         ...chunk,
@@ -638,6 +772,9 @@ function buildSupportingChunksForEntry(params: {
 
   if (focusEntities.length) {
     alignmentReasons.push(`focus entities: ${focusEntities.join(", ")}`);
+  }
+  if (usedEntityChunks) {
+    alignmentReasons.push("entity-aware chunking enabled");
   }
   if (mapping?.sourceTopics?.length) {
     alignmentReasons.push(`mapped source topics: ${mapping.sourceTopics.join(", ")}`);
@@ -667,9 +804,64 @@ function buildSupportingChunksForEntry(params: {
 
   return {
     supportingChunks: selected,
+    chunkingStrategy: usedEntityChunks ? "slide_entity" : "slide",
     alignmentStrategy: mapping ? "registered_mapping" : "heuristic",
     alignmentReasons,
   };
+}
+
+function buildEvidenceBundlesForEntry(params: {
+  entry: TocEntry;
+  evidenceDocuments: ReportFamilyDocumentInput[];
+  registeredPacket: RegisteredBenchmarkPacket | null;
+  focusEntities: string[];
+  evidenceExpectation: ReportFamilyEvidenceExpectation;
+}): EvidenceBundleMatch[] {
+  if (params.evidenceExpectation !== "appendix_bundle_required") {
+    return [];
+  }
+
+  const mapping = params.registeredPacket
+    ? packetSectionMapping(params.registeredPacket, params.entry.title)
+    : null;
+  const mappingTopics = (mapping?.sourceTopics || []).map(normalizeWhitespace).filter(Boolean);
+  const mappingKeywords = (mapping?.sourceKeywords || []).map(normalizeWhitespace).filter(Boolean);
+  const candidateBundles = params.evidenceDocuments.flatMap((document) =>
+    buildEvidenceDocumentChunks(document),
+  );
+
+  const rankedBundles = candidateBundles
+    .map((bundle) => {
+      const entryScore = Math.max(
+        scoreTokenOverlap(params.entry.title, bundle.title),
+        scoreTokenOverlap(params.entry.title, bundle.summary),
+      );
+      const topicScore = scoreAgainstTerms(bundle, mappingTopics);
+      const keywordScore = scoreAgainstTerms(bundle, mappingKeywords);
+      const entityScore = scoreAgainstTerms(bundle, params.focusEntities);
+      const boost =
+        exactContainmentBoost(bundle, mappingTopics) +
+        exactContainmentBoost(bundle, mappingKeywords) +
+        exactContainmentBoost(bundle, params.focusEntities);
+
+      return {
+        ...bundle,
+        score: Math.max(entryScore, topicScore * 1.1, keywordScore, entityScore * 1.3) + boost,
+      };
+    })
+    .filter((bundle) => bundle.score > 0)
+    .sort((left, right) => right.score - left.score);
+
+  return rankedBundles.slice(0, MAX_SECTION_CHUNKS).map((bundle) => ({
+    bundleId: bundle.bundleId,
+    documentId: bundle.documentId,
+    fileName: bundle.fileName,
+    title: bundle.title,
+    pageNumber: bundle.pageNumber,
+    summary: bundle.summary,
+    segmentIds: bundle.segmentIds,
+    score: Math.round(bundle.score * 1000) / 1000,
+  }));
 }
 
 export function buildSourcePolicy(
@@ -709,6 +901,7 @@ export function buildSectionPromptPlans(
   const allowedSlideChunks = sourceDocuments
     .filter((document) => sourcePolicy.allowedSourceIds.includes(document.documentId))
     .flatMap((document) => buildSlideChunks(document));
+  const evidenceDocuments = sourceDocuments.filter((document) => document.role === "evidence_doc");
   const registeredPacket =
     options?.schemaSource === "registered_packet"
       ? resolveRegisteredReportFamilyPacketByFamilyId(options.familyId)
@@ -726,12 +919,20 @@ export function buildSectionPromptPlans(
     });
     const {
       supportingChunks,
+      chunkingStrategy,
       alignmentStrategy,
       alignmentReasons,
     } = buildSupportingChunksForEntry({
       entry,
       allowedSlideChunks,
       registeredPacket,
+    });
+    const evidenceBundles = buildEvidenceBundlesForEntry({
+      entry,
+      evidenceDocuments,
+      registeredPacket,
+      focusEntities,
+      evidenceExpectation,
     });
 
     const chunkText = supportingChunks.length
@@ -743,6 +944,17 @@ export function buildSectionPromptPlans(
           })
           .join("\n")
       : "- 매칭된 슬라이드 청크가 없습니다. reviewer가 section-source alignment를 먼저 확인해야 합니다.";
+    const evidenceBundleText =
+      evidenceExpectation === "appendix_bundle_required"
+        ? evidenceBundles.length
+          ? evidenceBundles
+              .map((bundle) => {
+                const pageLabel = bundle.pageNumber !== null ? `p.${bundle.pageNumber}` : "page ?";
+                return `- ${bundle.fileName} | ${pageLabel} | ${bundle.title}\n  ${bundle.summary}`;
+              })
+              .join("\n")
+          : "- 매칭된 appendix evidence bundle이 없습니다. reviewer가 증빙 문서를 추가해야 합니다."
+        : "";
 
     const prompt = [
       `너는 ${familyName} 보고서의 "${entry.title}" 섹션 작성 보조 AI다.`,
@@ -766,11 +978,16 @@ export function buildSectionPromptPlans(
       "",
       "허용된 슬라이드 근거:",
       chunkText,
+      evidenceExpectation === "appendix_bundle_required" ? "첨부 근거 후보 (appendix-only):" : "",
+      evidenceExpectation === "appendix_bundle_required" ? evidenceBundleText : "",
       "",
       "출력 규칙:",
       "- 한국어 보고서 문체로 작성",
       "- sectionType에 맞는 구조를 우선 유지",
       "- 슬라이드에 없는 사실은 쓰지 않음",
+      evidenceExpectation === "appendix_bundle_required"
+        ? "- evidence bundle은 첨부 항목명과 필요한 증빙 힌트로만 사용하고 narrative 사실 확장에는 사용하지 않음"
+        : "",
       "- 마지막에 `근거 슬라이드:` 라인으로 사용한 slide title을 나열",
     ].filter(Boolean).join("\n");
 
@@ -783,7 +1000,9 @@ export function buildSectionPromptPlans(
       evidenceExpectation,
       outputScaffold,
       prompt,
+      chunkingStrategy,
       supportingChunks,
+      evidenceBundles,
       maskedDocumentIds: sourcePolicy.maskedSourceIds,
       alignmentStrategy,
       alignmentReasons,
@@ -809,6 +1028,7 @@ function buildRegisteredSectionPlanCases(params: {
           mapping.sectionType === "appendix_evidence"
             ? "appendix_bundle_required"
             : "slide_grounded",
+        minEvidenceBundleCount: mapping.sectionType === "appendix_evidence" ? 1 : 0,
         focusEntities: mapping.focusEntities || [],
         required: true,
       })),
@@ -816,7 +1036,17 @@ function buildRegisteredSectionPlanCases(params: {
         tocTitle: section.tocTitle,
         sectionType: section.sectionType,
         evidenceExpectation: section.evidenceExpectation,
+        evidenceBundleCount: section.evidenceBundles.length,
         focusEntities: section.focusEntities,
+        focusEntityResolved:
+          !section.focusEntities.length ||
+          section.focusEntities.every((entity) =>
+            section.supportingChunks.some((chunk) =>
+              normalizeWhitespace(`${chunk.title} ${chunk.summary}`)
+                .toLowerCase()
+                .includes(normalizeWhitespace(entity).toLowerCase()),
+            ),
+          ),
         required: true,
       })),
     },
@@ -848,6 +1078,10 @@ function buildReportFamilyPlanQuality(params: {
   const appendixEvidenceReadiness =
     params.sectionPlanSummary?.appendixEvidenceReadinessRate ?? 1;
   const entityCoverage = params.sectionPlanSummary?.entityFocusCoverageRate ?? 1;
+  const evidenceBundleCount = params.sectionPlans.reduce(
+    (sum, section) => sum + section.evidenceBundles.length,
+    0,
+  );
   const mappingCoverage =
     registeredTitles.length > 0
       ? (registeredTitles.length - missingMappings.length) / registeredTitles.length
@@ -863,6 +1097,7 @@ function buildReportFamilyPlanQuality(params: {
         : "retry",
     registeredSectionCount: registeredTitles.length,
     mappedSectionCount: registeredTitles.length - missingMappings.length,
+    evidenceBundleCount,
     mappingCoverage,
     sectionTypeAlignment,
     appendixEvidenceReadiness,
@@ -1003,6 +1238,7 @@ export function buildPptxReportFamilyPlanPayload(params: {
   fileName: string;
   segments: EditorSegment[];
   outline: OutlineItem[];
+  additionalSourceDocuments?: ReportFamilyDocumentInput[];
   benchmarkRun?: ReportFamilyBenchmarkRun | null;
 }): ReportFamilyPlanRequestPayload {
   const registeredPacket = resolveRegisteredReportFamilyPacket({
@@ -1031,6 +1267,7 @@ export function buildPptxReportFamilyPlanPayload(params: {
         role: "slide_deck",
         segments: params.segments,
       }),
+      ...(params.additionalSourceDocuments || []),
     ],
     benchmarkRun: params.benchmarkRun ?? null,
   };
