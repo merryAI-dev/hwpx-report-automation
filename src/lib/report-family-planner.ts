@@ -3,9 +3,12 @@ import {
   type ReportFamilyRalphPlan,
 } from "./report-template-ralph-loop";
 import {
+  evaluateSectionPlanBenchmarkCases,
   evaluateReportFamilyBenchmark,
   type ReportFamilyBenchmarkEvaluation,
   type ReportFamilyBenchmarkRun,
+  type SectionPlanBenchmarkCase,
+  type SectionPlanSummary,
   type TocBenchmarkEntry,
 } from "./report-template-benchmark";
 import type { EditorSegment } from "@/lib/editor/hwpx-to-prosemirror";
@@ -63,6 +66,10 @@ export type SectionPromptPlan = {
   tocEntryId: string;
   tocTitle: string;
   numbering: string | null;
+  sectionType: ReportFamilySectionType;
+  focusEntities: string[];
+  evidenceExpectation: ReportFamilyEvidenceExpectation;
+  outputScaffold: string[];
   prompt: string;
   supportingChunks: SlideChunk[];
   maskedDocumentIds: string[];
@@ -77,6 +84,7 @@ export type ReportFamilyPlan = {
   toc: TocEntry[];
   sourcePolicy: SourcePolicy;
   sectionPlans: SectionPromptPlan[];
+  planQuality: ReportFamilyPlanQuality | null;
   benchmarkEvaluation: ReportFamilyBenchmarkEvaluation | null;
   retryPlan: ReportFamilyRalphPlan | null;
 };
@@ -85,6 +93,33 @@ export type ReportFamilySchemaSource =
   | "target_document"
   | "synthetic_outline"
   | "registered_packet";
+
+export type ReportFamilySectionType =
+  | "narrative"
+  | "summary_table"
+  | "operations_timeline"
+  | "case_study"
+  | "survey_summary"
+  | "strategy"
+  | "appendix_evidence";
+
+export type ReportFamilyEvidenceExpectation =
+  | "slide_grounded"
+  | "appendix_bundle_required";
+
+export type ReportFamilyPlanQuality = {
+  status: "pass" | "retry";
+  registeredSectionCount: number;
+  mappedSectionCount: number;
+  mappingCoverage: number;
+  sectionTypeAlignment: number;
+  appendixEvidenceReadiness: number;
+  entityCoverage: number;
+  missingMappings: string[];
+  typeMismatches: string[];
+  appendixGaps: string[];
+  entityGaps: string[];
+};
 
 export type ReportFamilyPlanRequestPayload = {
   familyId?: string | null;
@@ -101,6 +136,8 @@ type RegisteredBenchmarkPacketCase = {
 };
 
 type RegisteredSectionMapping = {
+  sectionType?: ReportFamilySectionType;
+  focusEntities?: string[];
   sourceTopics?: string[];
   sourceKeywords?: string[];
   note?: string;
@@ -295,6 +332,111 @@ function packetSectionMapping(
   return matched?.[1] || null;
 }
 
+function inferSectionType(
+  tocTitle: string,
+  mapping: RegisteredSectionMapping | null,
+): ReportFamilySectionType {
+  if (mapping?.sectionType) {
+    return mapping.sectionType;
+  }
+  const title = normalizeWhitespace(tocTitle);
+  if (/총괄표|성과 요약|성과관리/.test(title)) {
+    return "summary_table";
+  }
+  if (/제언|전략/.test(title)) {
+    return "strategy";
+  }
+  if (/만족도/.test(title)) {
+    return "survey_summary";
+  }
+  if (/기본 정보|\[첨부|결과$/.test(title)) {
+    return "appendix_evidence";
+  }
+  if (/로비고스|저크|사례/.test(title)) {
+    return "case_study";
+  }
+  if (/프로그램 운영|모집|홍보|일정|세부추진/.test(title)) {
+    return "operations_timeline";
+  }
+  return "narrative";
+}
+
+function inferFocusEntities(
+  tocTitle: string,
+  mapping: RegisteredSectionMapping | null,
+): string[] {
+  if (mapping?.focusEntities?.length) {
+    return mapping.focusEntities.map(normalizeWhitespace).filter(Boolean);
+  }
+  const normalizedTitle = normalizeWhitespace(tocTitle);
+  if (/^[가-힣A-Za-z0-9]+$/.test(normalizedTitle) && normalizedTitle.length <= 12) {
+    if (!/프로그램|성과|조사|전략|제언|내용|현황/.test(normalizedTitle)) {
+      return [normalizedTitle];
+    }
+  }
+  return [];
+}
+
+function inferEvidenceExpectation(
+  sectionType: ReportFamilySectionType,
+): ReportFamilyEvidenceExpectation {
+  return sectionType === "appendix_evidence"
+    ? "appendix_bundle_required"
+    : "slide_grounded";
+}
+
+function buildSectionOutputScaffold(params: {
+  sectionType: ReportFamilySectionType;
+  focusEntities: string[];
+  evidenceExpectation: ReportFamilyEvidenceExpectation;
+}): string[] {
+  switch (params.sectionType) {
+    case "summary_table":
+      return [
+        "표 우선 섹션으로 작성",
+        "행 후보: 지표명 | 목표치 | 달성치 | 달성률/상태 | 근거 슬라이드",
+        "표 아래에는 한 단락으로 핵심 해석만 덧붙임",
+      ];
+    case "operations_timeline":
+      return [
+        "운영 흐름을 단계 또는 시간순 bullet로 정리",
+        "각 bullet에는 활동명, 목적, 수행 내용, 확인 가능한 결과를 포함",
+        "중복 활동은 묶고, 실행 근거가 약한 항목은 제외",
+      ];
+    case "case_study":
+      return [
+        `기업 사례 섹션으로 작성${params.focusEntities.length ? ` (${params.focusEntities.join(", ")})` : ""}`,
+        "블록 순서: 기업 개요 | 해결 과제 | 지원/프로그램 개입 | 성과/후속 변화",
+        "근거가 불충분하면 과장하지 말고 확인된 사실만 요약",
+      ];
+    case "survey_summary":
+      return [
+        "만족도 조사 결과를 요약하는 섹션으로 작성",
+        "핵심 수치, 긍정/부정 시사점, 개선 포인트를 분리해서 기술",
+        "슬라이드에 수치가 없으면 정성 결과만 작성",
+      ];
+    case "strategy":
+      return [
+        "다음 연도 전략/제언 섹션으로 작성",
+        "구성: 핵심 방향 | 실행 과제 | 기대 효과/리스크",
+        "현재 성과와 직접 연결되는 전략만 제안 수준으로 정리",
+      ];
+    case "appendix_evidence":
+      return [
+        "부록/증빙용 섹션 구조만 작성",
+        "항목 후보: 증빙명 | 관련 기업/지표 | 필요한 첨부 근거",
+        params.evidenceExpectation === "appendix_bundle_required"
+          ? "현재는 slide-grounded 개요만 작성하고, 실제 제출에는 appendix evidence bundle 연결이 필요함을 명시"
+          : "첨부 근거가 필요한 항목은 별도 표시",
+      ];
+    case "narrative":
+      return [
+        "2~4개 짧은 문단으로 핵심 맥락을 정리",
+        "문단 순서: 배경 | 실행/성과 | 시사점",
+      ];
+  }
+}
+
 export function resolveRegisteredReportFamilyPacket(params: {
   familyName: string;
   fileName: string;
@@ -460,6 +602,7 @@ function buildSupportingChunksForEntry(params: {
   const mapping = params.registeredPacket
     ? packetSectionMapping(params.registeredPacket, params.entry.title)
     : null;
+  const focusEntities = inferFocusEntities(params.entry.title, mapping);
 
   const alignmentReasons: string[] = [];
   const rankedChunks = params.allowedSlideChunks
@@ -478,19 +621,24 @@ function buildSupportingChunksForEntry(params: {
 
       const mappingTopics = (mapping.sourceTopics || []).map(normalizeWhitespace).filter(Boolean);
       const mappingKeywords = (mapping.sourceKeywords || []).map(normalizeWhitespace).filter(Boolean);
+      const entityScore = scoreAgainstTerms(chunk, focusEntities);
       const topicScore = scoreAgainstTerms(chunk, mappingTopics);
       const keywordScore = scoreAgainstTerms(chunk, mappingKeywords);
       const boost =
+        exactContainmentBoost(chunk, focusEntities) +
         exactContainmentBoost(chunk, mappingTopics) +
         exactContainmentBoost(chunk, mappingKeywords);
 
       return {
         ...chunk,
-        score: Math.max(entryScore, topicScore * 1.2, keywordScore) + boost,
+        score: Math.max(entryScore, topicScore * 1.2, keywordScore, entityScore * 1.4) + boost,
       };
     })
     .sort((left, right) => right.score - left.score);
 
+  if (focusEntities.length) {
+    alignmentReasons.push(`focus entities: ${focusEntities.join(", ")}`);
+  }
   if (mapping?.sourceTopics?.length) {
     alignmentReasons.push(`mapped source topics: ${mapping.sourceTopics.join(", ")}`);
   }
@@ -567,6 +715,15 @@ export function buildSectionPromptPlans(
       : null;
 
   return toc.map((entry) => {
+    const mapping = registeredPacket ? packetSectionMapping(registeredPacket, entry.title) : null;
+    const sectionType = inferSectionType(entry.title, mapping);
+    const focusEntities = inferFocusEntities(entry.title, mapping);
+    const evidenceExpectation = inferEvidenceExpectation(sectionType);
+    const outputScaffold = buildSectionOutputScaffold({
+      sectionType,
+      focusEntities,
+      evidenceExpectation,
+    });
     const {
       supportingChunks,
       alignmentStrategy,
@@ -597,24 +754,34 @@ export function buildSectionPromptPlans(
       "",
       `섹션 번호: ${entry.numbering || "(없음)"}`,
       `섹션 제목: ${entry.title}`,
+      `섹션 타입: ${sectionType}`,
+      `근거 기대치: ${evidenceExpectation === "appendix_bundle_required" ? "appendix evidence bundle required" : "slide grounded"}`,
+      focusEntities.length ? `중점 엔티티: ${focusEntities.join(", ")}` : "",
       "",
       alignmentReasons.length
         ? `섹션 정렬 힌트:\n${alignmentReasons.map((reason) => `- ${reason}`).join("\n")}\n`
         : "",
+      "출력 스캐폴드:",
+      ...outputScaffold.map((line) => `- ${line}`),
+      "",
       "허용된 슬라이드 근거:",
       chunkText,
       "",
       "출력 규칙:",
       "- 한국어 보고서 문체로 작성",
-      "- 2~4개 짧은 문단 또는 bullet로 정리",
+      "- sectionType에 맞는 구조를 우선 유지",
       "- 슬라이드에 없는 사실은 쓰지 않음",
       "- 마지막에 `근거 슬라이드:` 라인으로 사용한 slide title을 나열",
-    ].join("\n");
+    ].filter(Boolean).join("\n");
 
     return {
       tocEntryId: entry.id,
       tocTitle: entry.title,
       numbering: entry.numbering,
+      sectionType,
+      focusEntities,
+      evidenceExpectation,
+      outputScaffold,
       prompt,
       supportingChunks,
       maskedDocumentIds: sourcePolicy.maskedSourceIds,
@@ -622,6 +789,89 @@ export function buildSectionPromptPlans(
       alignmentReasons,
     };
   });
+}
+
+function buildRegisteredSectionPlanCases(params: {
+  packet: RegisteredBenchmarkPacket | null;
+  sectionPlans: SectionPromptPlan[];
+}): SectionPlanBenchmarkCase[] {
+  if (!params.packet?.sectionMappings) {
+    return [];
+  }
+
+  return [
+    {
+      caseId: `${params.packet.familyId}-section-plan`,
+      expectedSections: Object.entries(params.packet.sectionMappings).map(([tocTitle, mapping]) => ({
+        tocTitle,
+        sectionType: mapping.sectionType || null,
+        evidenceExpectation:
+          mapping.sectionType === "appendix_evidence"
+            ? "appendix_bundle_required"
+            : "slide_grounded",
+        focusEntities: mapping.focusEntities || [],
+        required: true,
+      })),
+      predictedSections: params.sectionPlans.map((section) => ({
+        tocTitle: section.tocTitle,
+        sectionType: section.sectionType,
+        evidenceExpectation: section.evidenceExpectation,
+        focusEntities: section.focusEntities,
+        required: true,
+      })),
+    },
+  ];
+}
+
+function buildReportFamilyPlanQuality(params: {
+  packet: RegisteredBenchmarkPacket | null;
+  sectionPlans: SectionPromptPlan[];
+  sectionPlanSummary: SectionPlanSummary | null;
+}): ReportFamilyPlanQuality | null {
+  if (!params.packet?.sectionMappings) {
+    return null;
+  }
+
+  const registeredTitles = Object.keys(params.packet.sectionMappings).map(normalizeWhitespace);
+  const mappedTitles = new Set(
+    params.sectionPlans
+      .filter(
+        (section) =>
+          section.alignmentStrategy === "registered_mapping" &&
+          section.supportingChunks.length > 0,
+      )
+      .map((section) => normalizeWhitespace(section.tocTitle)),
+  );
+  const missingMappings = registeredTitles.filter((title) => !mappedTitles.has(title));
+  const firstCase = params.sectionPlanSummary?.caseResults[0] || null;
+  const sectionTypeAlignment = params.sectionPlanSummary?.sectionTypeExactMatchRate ?? 1;
+  const appendixEvidenceReadiness =
+    params.sectionPlanSummary?.appendixEvidenceReadinessRate ?? 1;
+  const entityCoverage = params.sectionPlanSummary?.entityFocusCoverageRate ?? 1;
+  const mappingCoverage =
+    registeredTitles.length > 0
+      ? (registeredTitles.length - missingMappings.length) / registeredTitles.length
+      : 1;
+
+  return {
+    status:
+      mappingCoverage === 1 &&
+      sectionTypeAlignment === 1 &&
+      appendixEvidenceReadiness === 1 &&
+      entityCoverage === 1
+        ? "pass"
+        : "retry",
+    registeredSectionCount: registeredTitles.length,
+    mappedSectionCount: registeredTitles.length - missingMappings.length,
+    mappingCoverage,
+    sectionTypeAlignment,
+    appendixEvidenceReadiness,
+    entityCoverage,
+    missingMappings,
+    typeMismatches: firstCase?.typeMismatches || [],
+    appendixGaps: firstCase?.appendixGaps || [],
+    entityGaps: firstCase?.entityGaps || [],
+  };
 }
 
 export function buildReportFamilyPlan(params: {
@@ -634,6 +884,10 @@ export function buildReportFamilyPlan(params: {
 }): ReportFamilyPlan {
   const toc = extractTableOfContents(params.targetDocument);
   const sourcePolicy = buildSourcePolicy(params.targetDocument, params.sourceDocuments);
+  const registeredPacket =
+    params.schemaSource === "registered_packet"
+      ? resolveRegisteredReportFamilyPacketByFamilyId(params.familyId)
+      : null;
   const sectionPlans = buildSectionPromptPlans(
     params.familyName,
     toc,
@@ -645,9 +899,30 @@ export function buildReportFamilyPlan(params: {
       schemaSource: params.schemaSource,
     },
   );
+  const sectionPlanCases = buildRegisteredSectionPlanCases({
+    packet: registeredPacket,
+    sectionPlans,
+  });
+  const sectionPlanSummary = sectionPlanCases.length
+    ? evaluateSectionPlanBenchmarkCases(sectionPlanCases)
+    : null;
+  const planQuality = buildReportFamilyPlanQuality({
+    packet: registeredPacket,
+    sectionPlans,
+    sectionPlanSummary,
+  });
+  const effectiveBenchmarkRun = params.benchmarkRun
+    ? {
+        ...params.benchmarkRun,
+        sectionPlanCases: [
+          ...(params.benchmarkRun.sectionPlanCases || []),
+          ...sectionPlanCases,
+        ],
+      }
+    : null;
 
-  const benchmarkEvaluation = params.benchmarkRun
-    ? evaluateReportFamilyBenchmark(params.benchmarkRun)
+  const benchmarkEvaluation = effectiveBenchmarkRun
+    ? evaluateReportFamilyBenchmark(effectiveBenchmarkRun)
     : null;
   const retryPlan = benchmarkEvaluation
     ? buildReportFamilyRalphPlan(benchmarkEvaluation)
@@ -660,6 +935,7 @@ export function buildReportFamilyPlan(params: {
     toc,
     sourcePolicy,
     sectionPlans,
+    planQuality,
     benchmarkEvaluation,
     retryPlan,
   };

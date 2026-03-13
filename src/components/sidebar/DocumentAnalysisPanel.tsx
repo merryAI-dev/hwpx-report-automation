@@ -237,6 +237,22 @@ export function DocumentAnalysisPanel({
                 <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#fef3c7", color: "#92400e", fontWeight: 600 }}>
                   Mapped {reportFamilyPlanState.plan.sectionPlans.filter((section) => section.alignmentStrategy === "registered_mapping").length}
                 </span>
+                {reportFamilyPlanState.plan.planQuality ? (
+                  <>
+                    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#ecfeff", color: "#155e75", fontWeight: 600 }}>
+                      Mapping {Math.round(reportFamilyPlanState.plan.planQuality.mappingCoverage * 100)}%
+                    </span>
+                    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#eef2ff", color: "#3730a3", fontWeight: 600 }}>
+                      Type {Math.round(reportFamilyPlanState.plan.planQuality.sectionTypeAlignment * 100)}%
+                    </span>
+                    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#fff7ed", color: "#9a3412", fontWeight: 600 }}>
+                      Appendix {Math.round(reportFamilyPlanState.plan.planQuality.appendixEvidenceReadiness * 100)}%
+                    </span>
+                    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#f0fdf4", color: "#166534", fontWeight: 600 }}>
+                      Entity {Math.round(reportFamilyPlanState.plan.planQuality.entityCoverage * 100)}%
+                    </span>
+                  </>
+                ) : null}
               </div>
 
               <div style={{ display: "grid", gap: 4 }}>
@@ -261,6 +277,94 @@ export function DocumentAnalysisPanel({
                 </ul>
               </div>
 
+              {reportFamilyPlanState.plan.planQuality ? (
+                <div style={{ display: "grid", gap: 4 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>패밀리 schema 품질</div>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      padding: "8px 10px",
+                      background: "#fff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 8,
+                      color: "#334155",
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    등록 섹션 {reportFamilyPlanState.plan.planQuality.registeredSectionCount}개 중 {reportFamilyPlanState.plan.planQuality.mappedSectionCount}개가 현재 slide cluster에 연결됐습니다.
+                    <br />
+                    상태: {reportFamilyPlanState.plan.planQuality.status === "pass" ? "family schema aligned" : "retry required"}
+                  </div>
+                  {reportFamilyPlanState.plan.planQuality.missingMappings.length ||
+                  reportFamilyPlanState.plan.planQuality.typeMismatches.length ||
+                  reportFamilyPlanState.plan.planQuality.appendixGaps.length ||
+                  reportFamilyPlanState.plan.planQuality.entityGaps.length ? (
+                    <ul style={{ listStyle: "none", display: "grid", gap: 4 }}>
+                      {reportFamilyPlanState.plan.planQuality.missingMappings.slice(0, 3).map((title) => (
+                        <li
+                          key={`missing-${title}`}
+                          style={{
+                            fontSize: 12,
+                            padding: "6px 8px",
+                            background: "#f8fafc",
+                            border: "1px solid #e2e8f0",
+                            borderRadius: 8,
+                            color: "#475569",
+                          }}
+                        >
+                          missing mapping: {title}
+                        </li>
+                      ))}
+                      {reportFamilyPlanState.plan.planQuality.typeMismatches.slice(0, 2).map((issue) => (
+                        <li
+                          key={`type-${issue}`}
+                          style={{
+                            fontSize: 12,
+                            padding: "6px 8px",
+                            background: "#eef2ff",
+                            border: "1px solid #c7d2fe",
+                            borderRadius: 8,
+                            color: "#3730a3",
+                          }}
+                        >
+                          type mismatch: {issue}
+                        </li>
+                      ))}
+                      {reportFamilyPlanState.plan.planQuality.appendixGaps.slice(0, 2).map((title) => (
+                        <li
+                          key={`appendix-${title}`}
+                          style={{
+                            fontSize: 12,
+                            padding: "6px 8px",
+                            background: "#fff7ed",
+                            border: "1px solid #fed7aa",
+                            borderRadius: 8,
+                            color: "#9a3412",
+                          }}
+                        >
+                          appendix gap: {title}
+                        </li>
+                      ))}
+                      {reportFamilyPlanState.plan.planQuality.entityGaps.slice(0, 2).map((title) => (
+                        <li
+                          key={`entity-${title}`}
+                          style={{
+                            fontSize: 12,
+                            padding: "6px 8px",
+                            background: "#f0fdf4",
+                            border: "1px solid #bbf7d0",
+                            borderRadius: 8,
+                            color: "#166534",
+                          }}
+                        >
+                          entity gap: {title}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+
               <div style={{ display: "grid", gap: 4 }}>
                 <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>대표 섹션 매핑</div>
                 <ul style={{ listStyle: "none", display: "grid", gap: 6 }}>
@@ -279,10 +383,25 @@ export function DocumentAnalysisPanel({
                           color: "#334155",
                         }}
                       >
-                        <strong style={{ color: "#0f172a" }}>{section.tocTitle}</strong>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <strong style={{ color: "#0f172a" }}>{section.tocTitle}</strong>
+                          <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#ede9fe", color: "#6d28d9", fontWeight: 700 }}>
+                            {section.sectionType}
+                          </span>
+                          {section.evidenceExpectation === "appendix_bundle_required" ? (
+                            <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#fee2e2", color: "#991b1b", fontWeight: 700 }}>
+                              appendix bundle
+                            </span>
+                          ) : null}
+                        </div>
                         <div style={{ marginTop: 2 }}>
                           {section.supportingChunks.map((chunk) => chunk.title).join(", ")}
                         </div>
+                        {section.focusEntities.length ? (
+                          <div style={{ marginTop: 2, color: "#64748b" }}>
+                            entity: {section.focusEntities.join(", ")}
+                          </div>
+                        ) : null}
                       </li>
                     ))}
                 </ul>

@@ -28,4 +28,45 @@ describe("buildReportFamilyRalphPlan", () => {
     expect(plan.actions.some((action) => action.bucket === "strengthen_slide_grounding_prompt")).toBe(true);
     expect(plan.actions.some((action) => action.bucket === "promote_reviewer_feedback")).toBe(true);
   });
+
+  it("adds a family slot alignment action when section type or appendix rules fail", () => {
+    const evaluation = evaluateReportFamilyBenchmark({
+      familyId: "mysc-final-report",
+      sampleCount: 3,
+      tocExtractionAccuracy: 1,
+      sectionCoverage: 0.96,
+      sectionPlanCases: [
+        {
+          caseId: "section-plan-1",
+          expectedSections: [
+            {
+              tocTitle: "보육기업 기본 정보",
+              sectionType: "appendix_evidence",
+              evidenceExpectation: "appendix_bundle_required",
+            },
+          ],
+          predictedSections: [
+            {
+              tocTitle: "보육기업 기본 정보",
+              sectionType: "narrative",
+              evidenceExpectation: "slide_grounded",
+            },
+          ],
+        },
+      ],
+      slideGroundingCoverage: 0.92,
+      documentMaskingCoverage: 1,
+      maskedSourceLeakageRate: 0,
+      layoutSimilarity: 0.91,
+      tableStructureAccuracy: 0.9,
+      promptIterationWinRate: 0.77,
+      reviewerEditRate: 0.08,
+      criticalHallucinationRate: 0,
+      manualCorrectionMinutes: 20,
+    });
+
+    const plan = buildReportFamilyRalphPlan(evaluation);
+
+    expect(plan.actions.some((action) => action.bucket === "align_family_section_slots")).toBe(true);
+  });
 });

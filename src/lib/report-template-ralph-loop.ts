@@ -6,6 +6,7 @@ import type {
 export type RalphRetryBucket =
   | "collect_benchmark_packets"
   | "improve_toc_extractor"
+  | "align_family_section_slots"
   | "tighten_document_masking"
   | "strengthen_slide_grounding_prompt"
   | "improve_layout_renderer"
@@ -27,6 +28,7 @@ export type ReportFamilyRalphPlan = {
 const ACTION_ORDER: RalphRetryBucket[] = [
   "collect_benchmark_packets",
   "improve_toc_extractor",
+  "align_family_section_slots",
   "tighten_document_masking",
   "strengthen_slide_grounding_prompt",
   "improve_layout_renderer",
@@ -41,6 +43,13 @@ function bucketsFromFailedMetrics(failedMetricIds: Set<BenchmarkMetricId>): Set<
   }
   if (failedMetricIds.has("toc_extraction_accuracy") || failedMetricIds.has("section_coverage")) {
     buckets.add("improve_toc_extractor");
+  }
+  if (
+    failedMetricIds.has("section_type_alignment") ||
+    failedMetricIds.has("appendix_evidence_readiness") ||
+    failedMetricIds.has("entity_focus_coverage")
+  ) {
+    buckets.add("align_family_section_slots");
   }
   if (
     failedMetricIds.has("document_masking_coverage") ||
@@ -86,6 +95,16 @@ function actionForBucket(bucket: RalphRetryBucket): RalphRetryAction {
         steps: [
           "cover, 목차, 본문 페이지를 분리해서 section detector를 다시 학습시킵니다.",
           "required section, numbering, 순서까지 gold TOC와 exact match 하도록 section map을 구축합니다.",
+        ],
+      };
+    case "align_family_section_slots":
+      return {
+        bucket,
+        title: "패밀리 section slot 정렬 강화",
+        reason: "제출형 보고서는 섹션 타입, 부록 증빙, 기업 focus가 family schema와 맞아야 합니다.",
+        steps: [
+          "family packet에 section type, appendix evidence requirement, focus entity를 명시합니다.",
+          "planner output을 slot type별 scaffold와 evaluator에 연결해 registered schema와 exact match 되도록 맞춥니다.",
         ],
       };
     case "tighten_document_masking":

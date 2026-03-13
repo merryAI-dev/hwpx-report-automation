@@ -2,9 +2,12 @@ export type BenchmarkMetricId =
   | "sample_count"
   | "toc_extraction_accuracy"
   | "section_coverage"
+  | "section_type_alignment"
   | "slide_grounding_coverage"
   | "document_masking_coverage"
   | "masked_source_leakage_rate"
+  | "appendix_evidence_readiness"
+  | "entity_focus_coverage"
   | "layout_similarity"
   | "table_structure_accuracy"
   | "prompt_iteration_win_rate"
@@ -18,6 +21,7 @@ export type ReportFamilyBenchmarkRun = {
   tocExtractionAccuracy: number;
   tocBenchmarkCases?: TocBenchmarkCase[];
   sectionCoverage: number;
+  sectionPlanCases?: SectionPlanBenchmarkCase[];
   slideGroundingCoverage: number;
   documentMaskingCoverage: number;
   maskedSourceLeakageRate: number;
@@ -33,9 +37,12 @@ export type BenchmarkThresholds = {
   minSampleCount: number;
   tocExtractionAccuracy: number;
   sectionCoverage: number;
+  sectionTypeAlignment: number;
   slideGroundingCoverage: number;
   documentMaskingCoverage: number;
   maskedSourceLeakageRate: number;
+  appendixEvidenceReadiness: number;
+  entityFocusCoverage: number;
   layoutSimilarity: number;
   tableStructureAccuracy: number;
   promptIterationWinRate: number;
@@ -70,6 +77,7 @@ export type ReportFamilyBenchmarkEvaluation = {
   blockers: BenchmarkMetricResult[];
   nextFocusAreas: string[];
   tocSummary: TocBenchmarkSummary | null;
+  sectionPlanSummary: SectionPlanSummary | null;
 };
 
 export type TocBenchmarkEntry = {
@@ -100,6 +108,38 @@ export type TocBenchmarkSummary = {
   caseResults: TocBenchmarkCaseResult[];
 };
 
+export type SectionPlanBenchmarkEntry = {
+  tocTitle: string;
+  sectionType?: string | null;
+  evidenceExpectation?: string | null;
+  focusEntities?: string[];
+  required?: boolean;
+};
+
+export type SectionPlanBenchmarkCase = {
+  caseId: string;
+  expectedSections: SectionPlanBenchmarkEntry[];
+  predictedSections: SectionPlanBenchmarkEntry[];
+};
+
+export type SectionPlanCaseResult = {
+  caseId: string;
+  sectionTypeMatchRate: number;
+  appendixReadinessRate: number;
+  entityCoverageRate: number;
+  missingRequiredSections: string[];
+  typeMismatches: string[];
+  appendixGaps: string[];
+  entityGaps: string[];
+};
+
+export type SectionPlanSummary = {
+  sectionTypeExactMatchRate: number;
+  appendixEvidenceReadinessRate: number;
+  entityFocusCoverageRate: number;
+  caseResults: SectionPlanCaseResult[];
+};
+
 type MetricDefinition = {
   id: BenchmarkMetricId;
   label: string;
@@ -114,9 +154,12 @@ export const DEFAULT_REPORT_FAMILY_THRESHOLDS: BenchmarkThresholds = {
   minSampleCount: 3,
   tocExtractionAccuracy: 1,
   sectionCoverage: 0.9,
+  sectionTypeAlignment: 1,
   slideGroundingCoverage: 0.85,
   documentMaskingCoverage: 0.95,
   maskedSourceLeakageRate: 0.02,
+  appendixEvidenceReadiness: 1,
+  entityFocusCoverage: 0.9,
   layoutSimilarity: 0.85,
   tableStructureAccuracy: 0.85,
   promptIterationWinRate: 0.6,
@@ -133,7 +176,7 @@ const METRIC_DEFINITIONS: MetricDefinition[] = [
     comparator: "gte",
     thresholdKey: "minSampleCount",
     critical: true,
-    weight: 0.06,
+    weight: 0.05,
     suggestedAction: "같은 report family에 대해 exemplar packet을 더 수집하세요.",
   },
   {
@@ -142,7 +185,7 @@ const METRIC_DEFINITIONS: MetricDefinition[] = [
     comparator: "gte",
     thresholdKey: "tocExtractionAccuracy",
     critical: true,
-    weight: 0.14,
+    weight: 0.13,
     suggestedAction: "목차 detector가 required section, numbering, 순서를 전부 맞추도록 exact-match 기준으로 강화하세요.",
   },
   {
@@ -151,8 +194,17 @@ const METRIC_DEFINITIONS: MetricDefinition[] = [
     comparator: "gte",
     thresholdKey: "sectionCoverage",
     critical: false,
-    weight: 0.08,
+    weight: 0.06,
     suggestedAction: "section planner와 slot filler를 강화하세요.",
+  },
+  {
+    id: "section_type_alignment",
+    label: "Section type alignment",
+    comparator: "gte",
+    thresholdKey: "sectionTypeAlignment",
+    critical: true,
+    weight: 0.07,
+    suggestedAction: "family packet의 section type과 planner output scaffold를 exact-match 수준으로 맞추세요.",
   },
   {
     id: "slide_grounding_coverage",
@@ -160,7 +212,7 @@ const METRIC_DEFINITIONS: MetricDefinition[] = [
     comparator: "gte",
     thresholdKey: "slideGroundingCoverage",
     critical: true,
-    weight: 0.14,
+    weight: 0.12,
     suggestedAction: "슬라이드 chunk retrieval과 section별 grounding prompt를 강화하세요.",
   },
   {
@@ -169,7 +221,7 @@ const METRIC_DEFINITIONS: MetricDefinition[] = [
     comparator: "gte",
     thresholdKey: "documentMaskingCoverage",
     critical: true,
-    weight: 0.12,
+    weight: 0.11,
     suggestedAction: "슬라이드 외 source를 generation context에서 더 강하게 masking하세요.",
   },
   {
@@ -178,8 +230,26 @@ const METRIC_DEFINITIONS: MetricDefinition[] = [
     comparator: "lte",
     thresholdKey: "maskedSourceLeakageRate",
     critical: true,
-    weight: 0.1,
+    weight: 0.09,
     suggestedAction: "leakage detector와 source allowlist를 넣어 masked 문서 유입을 차단하세요.",
+  },
+  {
+    id: "appendix_evidence_readiness",
+    label: "Appendix evidence readiness",
+    comparator: "gte",
+    thresholdKey: "appendixEvidenceReadiness",
+    critical: true,
+    weight: 0.05,
+    suggestedAction: "부록/증빙 섹션은 appendix bundle requirement까지 family schema에 맞춰 강제하세요.",
+  },
+  {
+    id: "entity_focus_coverage",
+    label: "Entity focus coverage",
+    comparator: "gte",
+    thresholdKey: "entityFocusCoverage",
+    critical: false,
+    weight: 0.04,
+    suggestedAction: "사례형 섹션은 기업 단위 entity retrieval과 section focus rules를 보강하세요.",
   },
   {
     id: "layout_similarity",
@@ -187,7 +257,7 @@ const METRIC_DEFINITIONS: MetricDefinition[] = [
     comparator: "gte",
     thresholdKey: "layoutSimilarity",
     critical: true,
-    weight: 0.1,
+    weight: 0.08,
     suggestedAction: "report blueprint와 visual diff gate를 강화하세요.",
   },
   {
@@ -196,7 +266,7 @@ const METRIC_DEFINITIONS: MetricDefinition[] = [
     comparator: "gte",
     thresholdKey: "tableStructureAccuracy",
     critical: false,
-    weight: 0.08,
+    weight: 0.06,
     suggestedAction: "표 component와 row/col merge rules를 보강하세요.",
   },
   {
@@ -205,7 +275,7 @@ const METRIC_DEFINITIONS: MetricDefinition[] = [
     comparator: "gte",
     thresholdKey: "promptIterationWinRate",
     critical: false,
-    weight: 0.08,
+    weight: 0.07,
     suggestedAction: "reviewer correction과 failure packet을 prompt memory로 되먹이세요.",
   },
   {
@@ -214,7 +284,7 @@ const METRIC_DEFINITIONS: MetricDefinition[] = [
     comparator: "lte",
     thresholdKey: "reviewerEditRate",
     critical: false,
-    weight: 0.04,
+    weight: 0.02,
     suggestedAction: "reviewer가 반복 수정하는 section을 benchmark goldset에 편입하세요.",
   },
   {
@@ -232,7 +302,7 @@ const METRIC_DEFINITIONS: MetricDefinition[] = [
     comparator: "lte",
     thresholdKey: "manualCorrectionMinutes",
     critical: false,
-    weight: 0.02,
+    weight: 0.01,
     suggestedAction: "교정 시간이 긴 구간을 section template 수준에서 자동화하세요.",
   },
 ];
@@ -261,6 +331,14 @@ function normalizeTocToken(value: string | null | undefined): string {
     .replace(/[.)]+$/g, "")
     .trim()
     .toLowerCase();
+}
+
+function normalizeSectionTitle(value: string | null | undefined): string {
+  return normalizeTocToken(value);
+}
+
+function normalizeEntities(values: string[] | null | undefined): string[] {
+  return (values || []).map(normalizeSectionTitle).filter(Boolean).sort();
 }
 
 function toTocEntryKey(entry: TocBenchmarkEntry): string {
@@ -336,10 +414,138 @@ export function evaluateTocBenchmarkCases(cases: TocBenchmarkCase[]): TocBenchma
   };
 }
 
+function formatExpectedSectionLabel(entry: SectionPlanBenchmarkEntry): string {
+  return entry.tocTitle.trim();
+}
+
+export function evaluateSectionPlanBenchmarkCases(
+  cases: SectionPlanBenchmarkCase[],
+): SectionPlanSummary {
+  if (!cases.length) {
+    return {
+      sectionTypeExactMatchRate: 1,
+      appendixEvidenceReadinessRate: 1,
+      entityFocusCoverageRate: 1,
+      caseResults: [],
+    };
+  }
+
+  let sectionTypeExpectedCount = 0;
+  let sectionTypeMatchedCount = 0;
+  let appendixExpectedCount = 0;
+  let appendixMatchedCount = 0;
+  let entityExpectedCount = 0;
+  let entityMatchedCount = 0;
+
+  const caseResults = cases.map((testCase) => {
+    const predictedByTitle = new Map(
+      testCase.predictedSections.map((entry) => [normalizeSectionTitle(entry.tocTitle), entry]),
+    );
+
+    const missingRequiredSections: string[] = [];
+    const typeMismatches: string[] = [];
+    const appendixGaps: string[] = [];
+    const entityGaps: string[] = [];
+
+    let caseSectionTypeExpected = 0;
+    let caseSectionTypeMatched = 0;
+    let caseAppendixExpected = 0;
+    let caseAppendixMatched = 0;
+    let caseEntityExpected = 0;
+    let caseEntityMatched = 0;
+
+    for (const expected of testCase.expectedSections) {
+      const predicted = predictedByTitle.get(normalizeSectionTitle(expected.tocTitle));
+
+      if ((expected.required ?? true) && !predicted) {
+        missingRequiredSections.push(formatExpectedSectionLabel(expected));
+      }
+
+      if (expected.sectionType) {
+        caseSectionTypeExpected += 1;
+        sectionTypeExpectedCount += 1;
+        const matched =
+          normalizeSectionTitle(predicted?.sectionType) === normalizeSectionTitle(expected.sectionType);
+        if (matched) {
+          caseSectionTypeMatched += 1;
+          sectionTypeMatchedCount += 1;
+        } else {
+          typeMismatches.push(
+            `${formatExpectedSectionLabel(expected)}: expected ${expected.sectionType}, got ${predicted?.sectionType || "missing"}`,
+          );
+        }
+      }
+
+      if (expected.evidenceExpectation === "appendix_bundle_required") {
+        caseAppendixExpected += 1;
+        appendixExpectedCount += 1;
+        const matched = normalizeSectionTitle(predicted?.evidenceExpectation) === "appendix_bundle_required";
+        if (matched) {
+          caseAppendixMatched += 1;
+          appendixMatchedCount += 1;
+        } else {
+          appendixGaps.push(formatExpectedSectionLabel(expected));
+        }
+      }
+
+      const expectedEntities = normalizeEntities(expected.focusEntities);
+      if (expectedEntities.length) {
+        caseEntityExpected += 1;
+        entityExpectedCount += 1;
+        const predictedEntities = normalizeEntities(predicted?.focusEntities);
+        const matched = expectedEntities.every((entity) => predictedEntities.includes(entity));
+        if (matched) {
+          caseEntityMatched += 1;
+          entityMatchedCount += 1;
+        } else {
+          entityGaps.push(formatExpectedSectionLabel(expected));
+        }
+      }
+    }
+
+    return {
+      caseId: testCase.caseId,
+      sectionTypeMatchRate:
+        caseSectionTypeExpected > 0
+          ? clampPercent(caseSectionTypeMatched / caseSectionTypeExpected)
+          : 1,
+      appendixReadinessRate:
+        caseAppendixExpected > 0
+          ? clampPercent(caseAppendixMatched / caseAppendixExpected)
+          : 1,
+      entityCoverageRate:
+        caseEntityExpected > 0
+          ? clampPercent(caseEntityMatched / caseEntityExpected)
+          : 1,
+      missingRequiredSections,
+      typeMismatches,
+      appendixGaps,
+      entityGaps,
+    } satisfies SectionPlanCaseResult;
+  });
+
+  return {
+    sectionTypeExactMatchRate:
+      sectionTypeExpectedCount > 0
+        ? clampPercent(sectionTypeMatchedCount / sectionTypeExpectedCount)
+        : 1,
+    appendixEvidenceReadinessRate:
+      appendixExpectedCount > 0
+        ? clampPercent(appendixMatchedCount / appendixExpectedCount)
+        : 1,
+    entityFocusCoverageRate:
+      entityExpectedCount > 0
+        ? clampPercent(entityMatchedCount / entityExpectedCount)
+        : 1,
+    caseResults,
+  };
+}
+
 function metricValue(
   metricId: BenchmarkMetricId,
   run: ReportFamilyBenchmarkRun,
   tocSummary: TocBenchmarkSummary | null,
+  sectionPlanSummary: SectionPlanSummary | null,
 ): number {
   switch (metricId) {
     case "sample_count":
@@ -348,12 +554,20 @@ function metricValue(
       return tocSummary ? clampPercent(tocSummary.exactMatchRate) : clampPercent(run.tocExtractionAccuracy);
     case "section_coverage":
       return clampPercent(run.sectionCoverage);
+    case "section_type_alignment":
+      return sectionPlanSummary ? clampPercent(sectionPlanSummary.sectionTypeExactMatchRate) : 1;
     case "slide_grounding_coverage":
       return clampPercent(run.slideGroundingCoverage);
     case "document_masking_coverage":
       return clampPercent(run.documentMaskingCoverage);
     case "masked_source_leakage_rate":
       return clampPercent(run.maskedSourceLeakageRate);
+    case "appendix_evidence_readiness":
+      return sectionPlanSummary
+        ? clampPercent(sectionPlanSummary.appendixEvidenceReadinessRate)
+        : 1;
+    case "entity_focus_coverage":
+      return sectionPlanSummary ? clampPercent(sectionPlanSummary.entityFocusCoverageRate) : 1;
     case "layout_similarity":
       return clampPercent(run.layoutSimilarity);
     case "table_structure_accuracy":
@@ -399,9 +613,12 @@ export function evaluateReportFamilyBenchmark(
   const tocSummary = run.tocBenchmarkCases?.length
     ? evaluateTocBenchmarkCases(run.tocBenchmarkCases)
     : null;
+  const sectionPlanSummary = run.sectionPlanCases?.length
+    ? evaluateSectionPlanBenchmarkCases(run.sectionPlanCases)
+    : null;
 
   const metrics = METRIC_DEFINITIONS.map((definition) => {
-    const value = metricValue(definition.id, run, tocSummary);
+    const value = metricValue(definition.id, run, tocSummary, sectionPlanSummary);
     const threshold = thresholds[definition.thresholdKey] as number;
     return {
       id: definition.id,
@@ -445,5 +662,6 @@ export function evaluateReportFamilyBenchmark(
     blockers,
     nextFocusAreas: sortedFailures.slice(0, 5).map((metric) => metric.suggestedAction),
     tocSummary,
+    sectionPlanSummary,
   };
 }

@@ -57,6 +57,12 @@ function makeMyscSlideDocument(): ReportFamilyDocumentInput {
       { id: "m10", text: "참여 기업 만족도 조사와 설문 결과를 정리한다.", type: "paragraph", slideNumber: 5 },
       { id: "m11", text: "프로그램 제언", type: "heading", slideNumber: 6 },
       { id: "m12", text: "다음 연도 추진 전략과 개선 제언을 정리한다.", type: "paragraph", slideNumber: 6 },
+      { id: "m13", text: "기업별 상세내용", type: "heading", slideNumber: 7 },
+      { id: "m14", text: "로비고스와 저크 기업의 육성 현황 및 성과를 정리한다.", type: "paragraph", slideNumber: 7 },
+      { id: "m15", text: "로비고스", type: "heading", slideNumber: 8 },
+      { id: "m16", text: "로비고스는 직접 투자와 후속 연계 성과가 두드러진다.", type: "paragraph", slideNumber: 8 },
+      { id: "m17", text: "저크", type: "heading", slideNumber: 9 },
+      { id: "m18", text: "저크는 글로벌 디스커버리 및 후속 투자 사례가 핵심이다.", type: "paragraph", slideNumber: 9 },
     ],
   };
 }
@@ -107,6 +113,7 @@ describe("buildSectionPromptPlans", () => {
 
     expect(plans[0].tocTitle).toBe("운영사 소개");
     expect(plans[0].supportingChunks[0].title).toContain("운영사 소개");
+    expect(plans[0].sectionType).toBe("narrative");
     expect(plans[0].prompt).toContain("masked source");
     expect(plans[0].prompt).toContain("슬라이드");
   });
@@ -260,15 +267,33 @@ describe("registered MYSC packet", () => {
     });
 
     const overviewSection = plan.sectionPlans.find((section) => section.tocTitle === "프로그램 개요");
+    const scoreTableSection = plan.sectionPlans.find((section) => section.tocTitle === "프로그램 추진 결과 총괄표");
     const prSection = plan.sectionPlans.find((section) => section.tocTitle === "홍보 및 보도자료 요약정리");
     const strategySection = plan.sectionPlans.find((section) => section.tocTitle === "2026년도 사업 추진 전략");
+    const caseSection = plan.sectionPlans.find((section) => section.tocTitle === "로비고스");
+    const appendixSection = plan.sectionPlans.find((section) => section.tocTitle === "보육기업 기본 정보");
 
+    expect(plan.planQuality?.status).toBe("pass");
+    expect(plan.planQuality?.sectionTypeAlignment).toBe(1);
+    expect(plan.planQuality?.appendixEvidenceReadiness).toBe(1);
+    expect(plan.planQuality?.entityCoverage).toBe(1);
     expect(overviewSection?.alignmentStrategy).toBe("registered_mapping");
+    expect(overviewSection?.sectionType).toBe("narrative");
     expect(overviewSection?.supportingChunks.some((chunk) => chunk.title === "운영사 소개")).toBe(true);
     expect(overviewSection?.supportingChunks.some((chunk) => chunk.title === "프로그램 핵심 전략")).toBe(true);
     expect(overviewSection?.alignmentReasons.join(" ")).toContain("운영사 소개");
 
+    expect(scoreTableSection?.sectionType).toBe("summary_table");
+    expect(scoreTableSection?.prompt).toContain("행 후보: 지표명 | 목표치 | 달성치 | 달성률/상태 | 근거 슬라이드");
     expect(prSection?.supportingChunks[0]?.title).toBe("사업 홍보");
+    expect(strategySection?.sectionType).toBe("strategy");
     expect(strategySection?.supportingChunks.some((chunk) => chunk.title === "프로그램 제언")).toBe(true);
+    expect(caseSection?.sectionType).toBe("case_study");
+    expect(caseSection?.focusEntities).toEqual(["로비고스"]);
+    expect(caseSection?.supportingChunks.some((chunk) => chunk.title === "로비고스")).toBe(true);
+    expect(caseSection?.prompt).toContain("기업 개요 | 해결 과제 | 지원/프로그램 개입 | 성과/후속 변화");
+    expect(appendixSection?.sectionType).toBe("appendix_evidence");
+    expect(appendixSection?.evidenceExpectation).toBe("appendix_bundle_required");
+    expect(appendixSection?.prompt).toContain("appendix evidence bundle required");
   });
 });
