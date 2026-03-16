@@ -26,6 +26,7 @@ import {
 import type { ReportFamilyPlan, SectionPromptPlan } from "@/lib/report-family-planner";
 import { prisma } from "@/lib/persistence/client";
 import type { AuthenticatedSession } from "@/lib/auth/with-api-auth";
+import { buildPromptMemoryContext } from "@/lib/feedback/prompt-memory-builder";
 
 type RequestBody = {
   plan?: ReportFamilyPlan | null;
@@ -115,12 +116,22 @@ async function requestDraftBatch(params: {
   plan: ReportFamilyPlan;
   sections: SectionPromptPlan[];
   retryIssuesBySectionId?: Record<string, string[]>;
+  promptMemoryContextBySectionType?: Record<string, string>;
 }): Promise<{
   content: RawDraftResponse;
   usage: UsageTotals;
 }> {
+  // Merge prompt memory contexts for this batch's section types
+  const memoryContexts = params.promptMemoryContextBySectionType;
+  const batchSectionTypes = [...new Set(params.sections.map((s) => s.sectionType))];
+  const memoryLines = batchSectionTypes
+    .map((t) => memoryContexts?.[t])
+    .filter((c): c is string => !!c);
+  const promptMemoryContext = memoryLines.length ? memoryLines.join("\n\n") : undefined;
+
   const prompt = buildReportFamilyDraftPrompt(params.plan, params.sections, {
     retryIssuesBySectionId: params.retryIssuesBySectionId,
+    promptMemoryContext,
   });
 
   const completion = await log.time(
@@ -200,6 +211,22 @@ async function buildDraftWithAi(params: {
   let aiSuccessCount = 0;
   const usageTotals: UsageTotals = { inputTokens: 0, outputTokens: 0 };
 
+  // Load PromptMemory contexts keyed by sectionType
+  const promptMemoryContextBySectionType: Record<string, string> = {};
+  if (params.plan.familyId) {
+    const sectionTypes = [...new Set(params.plan.sectionPlans.map((s) => s.sectionType))];
+    await Promise.all(
+      sectionTypes.map(async (sectionType) => {
+        const ctx = await buildPromptMemoryContext({
+          familyId: params.plan.familyId,
+          sectionType,
+          maxMemories: 3,
+        });
+        if (ctx) promptMemoryContextBySectionType[sectionType] = ctx;
+      }),
+    );
+  }
+
   for (const batch of chunkSections(params.plan.sectionPlans, SECTION_BATCH_SIZE)) {
     try {
       const response = await requestDraftBatch({
@@ -207,6 +234,7 @@ async function buildDraftWithAi(params: {
         model: params.model,
         plan: params.plan,
         sections: batch,
+        promptMemoryContextBySectionType,
       });
       usageTotals.inputTokens += response.usage.inputTokens;
       usageTotals.outputTokens += response.usage.outputTokens;

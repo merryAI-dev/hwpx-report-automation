@@ -233,3 +233,39 @@ model PreferenceData {
   @@index([familyId, sectionType])
   @@index([createdAt])
 }
+
+// ─── RLHF Prompt Optimization Infrastructure ─────────────────────────────────
+
+/// A distilled memory entry injected into generation prompts to guide AI output.
+/// Built from accumulated human feedback: few-shot examples, negative examples,
+/// and instruction rules derived from recurring correction patterns.
+model PromptMemory {
+  id          String  @id @default(cuid())
+  /// null = cross-family (applies to all families)
+  familyId    String?
+  sectionType String
+
+  /// "few_shot_example" | "negative_example" | "instruction_rule"
+  memoryType String
+
+  /// JSON: memory content (varies by type)
+  /// few_shot_example: {input: SectionPromptPlan, output: ReportFamilyDraftSection}
+  /// negative_example: {badExample: ReportFamilyDraftSection, reason: string}
+  /// instruction_rule: {rule: string, rationale: string}
+  contentJson String
+
+  /// JSON: source HumanFeedback/PreferenceData IDs this was derived from
+  sourceFeedbackIds String @default("[]")
+
+  /// Higher = inject first (more important)
+  priority Int @default(0)
+
+  /// "active" | "deprecated"
+  status String @default("active")
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@index([familyId, sectionType, status])
+  @@index([memoryType, status])
+}
