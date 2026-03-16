@@ -231,7 +231,7 @@ describe("extractPatterns — full pipeline", () => {
       familyId: "generic-program-eval",
       packetId: "generic-eval-001",
       sourceArtifacts: {
-        slideDeckFileName: "generic-slides.pptx",
+        sourceDeckFileName: "generic-slides.pptx",
         targetReportFileName: "generic-report.pdf",
       },
       sectionMappings: {

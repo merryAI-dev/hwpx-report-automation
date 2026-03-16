@@ -87,8 +87,9 @@ model ReportFamily {
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
-  packets TrainingPacket[]
-  schemas FamilySchemaVersion[]
+  packets        TrainingPacket[]
+  schemas        FamilySchemaVersion[]
+  generationRuns GenerationRun[]
 
   @@index([name])
 }
@@ -143,5 +144,92 @@ model TrainingPacket {
   family ReportFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
 
   @@index([familyId, status])
+  @@index([createdAt])
+}
+
+// ─── RLHF Human Feedback Infrastructure ─────────────────────────────────────
+
+/// Records a single AI draft generation attempt.
+/// Linked to HumanFeedback entries when the user edits the output.
+model GenerationRun {
+  id       String @id @default(cuid())
+  familyId String
+
+  /// JSON: ReportFamilyPlan used for generation
+  planJson       String
+  /// JSON: ReportFamilyDraft produced
+  draftJson      String
+  /// JSON: ReportFamilyDraftEvaluation (automatic quality metrics)
+  evaluationJson String @default("{}")
+  /// Model used (e.g. "gpt-4.1-mini")
+  model          String @default("")
+
+  inputTokens  Int @default(0)
+  outputTokens Int @default(0)
+
+  /// "pending_review" | "accepted" | "rejected" | "superseded"
+  status    String   @default("pending_review")
+  createdAt DateTime @default(now())
+
+  family    ReportFamily  @relation(fields: [familyId], references: [id], onDelete: Cascade)
+  feedbacks HumanFeedback[]
+
+  @@index([familyId, status])
+  @@index([createdAt])
+}
+
+/// Captures a single human correction to an AI-generated section.
+/// The diff between aiContentJson and humanContentJson is the learning signal.
+model HumanFeedback {
+  id              String  @id @default(cuid())
+  generationRunId String?
+
+  /// "section_edit" | "section_accept" | "section_reject" | "global_note"
+  feedbackType String
+  /// tocEntryId of the section this feedback applies to
+  sectionId    String?
+
+  /// JSON: the AI-generated section content (before edit)
+  aiContentJson    String?
+  /// JSON: the human-edited section content (after edit)
+  humanContentJson String?
+  /// JSON: structured diff (added/removed paragraphs, table changes)
+  diffJson         String?
+  /// JSON: abstract correction pattern (e.g. "removed_hallucination", "added_context_paragraph")
+  correctionPatternJson String?
+
+  /// 1-5 quality rating for the AI output (1=very bad, 5=perfect)
+  qualityScore  Int?
+  reviewerEmail String
+  notes         String @default("")
+
+  createdAt DateTime @default(now())
+
+  generationRun GenerationRun? @relation(fields: [generationRunId], references: [id], onDelete: SetNull)
+
+  @@index([generationRunId, createdAt])
+  @@index([sectionId, feedbackType])
+  @@index([createdAt])
+}
+
+/// Stores a (chosen, rejected) preference pair derived from human feedback.
+/// "chosen" = human-edited version, "rejected" = original AI output.
+/// Used in Phase 3 for prompt memory building.
+model PreferenceData {
+  id          String @id @default(cuid())
+  familyId    String
+  sectionType String
+
+  /// JSON: the preferred (human-edited) section content
+  chosenJson  String
+  /// JSON: the rejected (AI-generated) section content
+  rejectedJson String
+  /// JSON: abstract correction pattern(s) describing the difference
+  correctionPatternJson String
+
+  sourceFeedbackId String?
+  createdAt        DateTime @default(now())
+
+  @@index([familyId, sectionType])
   @@index([createdAt])
 }
