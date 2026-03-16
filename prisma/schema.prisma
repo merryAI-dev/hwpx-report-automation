@@ -75,3 +75,73 @@ model AuditLog {
   @@index([userEmail, createdAt])
   @@index([action, createdAt])
 }
+
+// ─── RLHF Training Infrastructure ──────────────────────────────────────────
+
+/// A named family of reports sharing the same PPTX→Report transformation pattern.
+/// e.g. "accelerator-final-report", "impact-investment-review"
+model ReportFamily {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String   @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  packets TrainingPacket[]
+  schemas FamilySchemaVersion[]
+
+  @@index([name])
+}
+
+/// Versioned schema capturing the abstract TOC + transformation rules for a family.
+/// Allows evolution without losing history.
+model FamilySchemaVersion {
+  id       String @id @default(cuid())
+  familyId String
+  version  Int    @default(1)
+
+  /// Normalized TOC structure JSON (array of {id, title, sectionType})
+  tocSchemaJson String
+  /// JSON: SlideTypePattern[] — abstract slide type definitions for this family
+  slideTypePatternsJson String @default("[]")
+  /// JSON: TransformationRule[] — slide_type → report_section mappings
+  transformationRulesJson String @default("[]")
+
+  /// "draft" | "active" | "deprecated"
+  status    String   @default("draft")
+  createdAt DateTime @default(now())
+
+  family ReportFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@unique([familyId, version])
+  @@index([familyId, status])
+}
+
+/// A single PPTX+Report pair used as a training/benchmark example.
+/// Contains extracted slide classifications and transformation pairs.
+model TrainingPacket {
+  id       String @id @default(cuid())
+  familyId String
+
+  /// JSON: {slideDeckFile: string, reportFile: string, uploadedAt: string}
+  sourceArtifactsJson String
+
+  /// JSON: SlideClassification[] — per-slide abstract type classifications
+  slideClassificationsJson String @default("[]")
+  /// JSON: ReportSectionClassification[] — per-section abstract type classifications
+  reportSectionClassificationsJson String @default("[]")
+  /// JSON: TransformationPair[] — aligned (slideType → sectionType) pairs with metadata
+  transformationPairsJson String @default("[]")
+
+  /// "pending" | "reviewed" | "gold"
+  /// gold = human-verified, used as ground truth for evaluation
+  status        String    @default("pending")
+  reviewerEmail String?
+  reviewedAt    DateTime?
+  createdAt     DateTime  @default(now())
+
+  family ReportFamily @relation(fields: [familyId], references: [id], onDelete: Cascade)
+
+  @@index([familyId, status])
+  @@index([createdAt])
+}
