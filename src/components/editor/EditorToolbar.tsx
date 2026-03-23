@@ -50,6 +50,7 @@ type EditorToolbarProps = {
   onExport: () => void;
   onExportPdf: () => void;
   onExportDocx: () => void;
+  onExportMarkdown: () => void;
   /** Optional: called when user exports from the ExportModal with format + options */
   onExportWithOptions?: (format: ExportFormat, options: ExportOptions) => void;
   /** Current document file name (used as default in ExportModal) */
@@ -201,6 +202,7 @@ export const EditorToolbar = memo(function EditorToolbar({
   onExport,
   onExportPdf,
   onExportDocx,
+  onExportMarkdown,
   onExportWithOptions,
   currentFileName,
   onSave,
@@ -408,6 +410,15 @@ export const EditorToolbar = memo(function EditorToolbar({
                     title="DOCX 내보내기"
                   >
                     DOCX
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.btn}
+                    disabled={globalDisabled}
+                    onClick={onExportMarkdown}
+                    title="마크다운(.md) 내보내기"
+                  >
+                    MD
                   </button>
                 </>
               )

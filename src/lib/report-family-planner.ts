@@ -88,6 +88,8 @@ export type SectionPromptPlan = {
   maskedDocumentIds: string[];
   alignmentStrategy: "heuristic" | "registered_mapping";
   alignmentReasons: string[];
+  /** Optional free-text instruction injected directly into this section's prompt */
+  customInstruction?: string;
 };
 
 export type ReportFamilyPlan = {
@@ -557,7 +559,7 @@ function buildSlideChunks(document: ReportFamilyDocumentInput): RawSlideChunk[] 
     if (!current) {
       return;
     }
-    current.summary = normalizeWhitespace(current.summary).slice(0, 800);
+    current.summary = normalizeWhitespace(current.summary).slice(0, 1800);
     chunks.push(current);
     current = null;
   };
@@ -649,7 +651,7 @@ function buildEvidenceDocumentChunks(document: ReportFamilyDocumentInput): RawEv
     if (!current) {
       return;
     }
-    current.summary = normalizeWhitespace(current.summary).slice(0, 800);
+    current.summary = normalizeWhitespace(current.summary).slice(0, 1800);
     chunks.push(current);
     current = null;
   };

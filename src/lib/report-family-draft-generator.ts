@@ -656,19 +656,20 @@ function buildPromptSectionPacket(
   }
   if (section.supportingChunks.length) {
     lines.push("supporting_slide_chunks:");
-    for (const chunk of section.supportingChunks.slice(0, 4)) {
-      lines.push(
-        `- ${chunk.chunkId} | slide ${chunk.slideNumber ?? "?"} | ${chunk.title} | ${normalizeWhitespace(chunk.summary)}`,
-      );
+    for (const chunk of section.supportingChunks.slice(0, 10)) {
+      lines.push(`[slide ${chunk.slideNumber ?? "?"}] ${chunk.title}`);
+      lines.push(normalizeWhitespace(chunk.summary));
     }
   }
   if (section.evidenceBundles.length) {
     lines.push("appendix_evidence_bundles:");
-    for (const bundle of section.evidenceBundles.slice(0, 3)) {
-      lines.push(
-        `- ${bundle.bundleId} | ${bundle.fileName} | ${bundle.title} | ${normalizeWhitespace(bundle.summary)}`,
-      );
+    for (const bundle of section.evidenceBundles.slice(0, 6)) {
+      lines.push(`[${bundle.fileName} p.${bundle.bundleId}] ${bundle.title}`);
+      lines.push(normalizeWhitespace(bundle.summary));
     }
+  }
+  if (section.customInstruction?.trim()) {
+    lines.push(`custom_instruction: ${section.customInstruction.trim()}`);
   }
   if (options?.retryIssues?.length) {
     lines.push("retry_issues:");
@@ -687,6 +688,8 @@ export function buildReportFamilyDraftPrompt(
     retryIssuesBySectionId?: Record<string, string[]>;
     /** PromptMemory context string injected from human feedback history */
     promptMemoryContext?: string | null;
+    /** Free-text global instruction from the user (e.g. "표는 기업명 순으로 정렬") */
+    userGlobalInstruction?: string | null;
   },
 ): string {
   const lines: string[] = [
@@ -704,6 +707,11 @@ export function buildReportFamilyDraftPrompt(
   // Inject PromptMemory context from accumulated human feedback
   if (options?.promptMemoryContext) {
     lines.push(options.promptMemoryContext);
+  }
+
+  // Inject user-supplied global instruction
+  if (options?.userGlobalInstruction?.trim()) {
+    lines.push(`[사용자 추가 지시]\n${options.userGlobalInstruction.trim()}`);
   }
 
   for (const section of sections) {
