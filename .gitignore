@@ -1,0 +1,8 @@
+# examples - may contain private documents
+examples/
+
+# hancom verification screenshots
+screenshots/
+
+# compiled Swift helpers
+scripts/hancom-verify/.build/
