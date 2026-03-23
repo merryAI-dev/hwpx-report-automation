@@ -36,7 +36,7 @@ describe("preferences", () => {
     });
 
     it("loads saved preferences from localStorage", () => {
-      store["hwpx-editor-preferences"] = JSON.stringify({
+      store["hwpx-studio-preferences"] = JSON.stringify({
         anthropicModel: "claude-sonnet-4-20250514",
         openaiModel: "gpt-4.1",
         monthlyCostLimitUsd: 50,
@@ -49,7 +49,7 @@ describe("preferences", () => {
     });
 
     it("merges partial saved data with defaults", () => {
-      store["hwpx-editor-preferences"] = JSON.stringify({ anthropicModel: "custom" });
+      store["hwpx-studio-preferences"] = JSON.stringify({ anthropicModel: "custom" });
 
       const prefs = loadPreferences();
       expect(prefs.anthropicModel).toBe("custom");
@@ -58,7 +58,7 @@ describe("preferences", () => {
     });
 
     it("returns defaults on malformed JSON", () => {
-      store["hwpx-editor-preferences"] = "not-json";
+      store["hwpx-studio-preferences"] = "not-json";
 
       const prefs = loadPreferences();
       expect(prefs.anthropicModel).toBe("");
@@ -71,7 +71,7 @@ describe("preferences", () => {
       expect(result.anthropicModel).toBe("new-model");
       expect(result.openaiModel).toBe("");
 
-      const stored = JSON.parse(store["hwpx-editor-preferences"]);
+      const stored = JSON.parse(store["hwpx-studio-preferences"]);
       expect(stored.anthropicModel).toBe("new-model");
     });
 

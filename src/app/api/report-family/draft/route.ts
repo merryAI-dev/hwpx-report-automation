@@ -38,6 +38,10 @@ type RequestBody = {
   saveGenerationRun?: boolean;
   /** Required when saveGenerationRun=true */
   familyId?: string;
+  /** Free-text instruction applied to every section */
+  globalInstruction?: string;
+  /** Per-section instructions keyed by tocEntryId */
+  sectionInstructions?: Record<string, string>;
 };
 
 type UsageTotals = {
@@ -61,6 +65,15 @@ type RawDraftResponse = {
 };
 
 const SECTION_BATCH_SIZE = 6;
+
+function sendSSE(
+  controller: ReadableStreamDefaultController,
+  encoder: TextEncoder,
+  event: string,
+  data: unknown,
+) {
+  controller.enqueue(encoder.encode(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`));
+}
 
 function chunkSections<T>(items: T[], size: number): T[][] {
   const chunks: T[][] = [];
@@ -117,6 +130,7 @@ async function requestDraftBatch(params: {
   sections: SectionPromptPlan[];
   retryIssuesBySectionId?: Record<string, string[]>;
   promptMemoryContextBySectionType?: Record<string, string>;
+  userGlobalInstruction?: string;
 }): Promise<{
   content: RawDraftResponse;
   usage: UsageTotals;
@@ -132,6 +146,7 @@ async function requestDraftBatch(params: {
   const prompt = buildReportFamilyDraftPrompt(params.plan, params.sections, {
     retryIssuesBySectionId: params.retryIssuesBySectionId,
     promptMemoryContext,
+    userGlobalInstruction: params.userGlobalInstruction,
   });
 
   const completion = await log.time(
@@ -140,13 +155,13 @@ async function requestDraftBatch(params: {
       withTimeout(
         params.client.chat.completions.create({
           model: params.model,
-          temperature: 0.25,
+          temperature: 0.05,
           response_format: { type: "json_object" },
           messages: [
             {
               role: "system",
               content:
-                "너는 슬라이드 근거만으로 제출형 한국어 보고서 초안을 생성하는 AI다. 응답은 반드시 JSON 하나만 반환한다. 슬라이드 bullet을 그대로 복제하지 말고 보고서 문체로 재구성하되, packet에 없는 내용을 지어내지 않는다.",
+                "너는 제출형 한국어 보고서 초안을 작성하는 AI다. 응답은 반드시 JSON 하나만 반환한다.\n\n[엄격한 규칙]\n1. 오직 supporting_slide_chunks와 appendix_evidence_bundles에 명시된 내용만 사용한다.\n2. 슬라이드 근거에 없는 수치, 사실, 평가, 인용을 절대 생성하지 않는다.\n3. 근거가 부족한 항목은 해당 내용을 쓰지 말고 생략한다.\n4. bullet을 그대로 복사하지 않고 보고서 문체로 재구성하되, 의미를 바꾸지 않는다.\n5. 위 규칙 위반은 치명적 오류다.",
             },
             {
               role: "user",
@@ -181,6 +196,8 @@ async function buildDraftWithAi(params: {
   plan: ReportFamilyPlan;
   model: string;
   maxAttempts: number;
+  userGlobalInstruction?: string;
+  onSectionComplete?: (title: string, completed: number, total: number) => void;
 }): Promise<{
   draft: ReportFamilyDraft;
   usage: UsageTotals;
@@ -209,6 +226,8 @@ async function buildDraftWithAi(params: {
   );
   const warnings: string[] = [];
   let aiSuccessCount = 0;
+  let completedCount = 0;
+  const totalCount = params.plan.sectionPlans.length;
   const usageTotals: UsageTotals = { inputTokens: 0, outputTokens: 0 };
 
   // Load PromptMemory contexts keyed by sectionType
@@ -235,6 +254,7 @@ async function buildDraftWithAi(params: {
         plan: params.plan,
         sections: batch,
         promptMemoryContextBySectionType,
+        userGlobalInstruction: params.userGlobalInstruction,
       });
       usageTotals.inputTokens += response.usage.inputTokens;
       usageTotals.outputTokens += response.usage.outputTokens;
@@ -245,16 +265,18 @@ async function buildDraftWithAi(params: {
           items.find((item) => String(item.tocEntryId || "").trim() === section.tocEntryId) || null;
         if (!payload) {
           warnings.push(`${section.tocTitle}: AI 응답에서 섹션 초안을 찾지 못해 fallback을 유지했습니다.`);
-          continue;
+        } else {
+          sectionsById.set(
+            section.tocEntryId,
+            materializeDraftSection(section, payload, {
+              attempts: 1,
+              usedFallback: false,
+            }),
+          );
+          aiSuccessCount += 1;
         }
-        sectionsById.set(
-          section.tocEntryId,
-          materializeDraftSection(section, payload, {
-            attempts: 1,
-            usedFallback: false,
-          }),
-        );
-        aiSuccessCount += 1;
+        completedCount += 1;
+        params.onSectionComplete?.(section.tocTitle, completedCount, totalCount);
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : "AI batch draft generation failed";
@@ -279,6 +301,7 @@ async function buildDraftWithAi(params: {
           model: params.model,
           plan: params.plan,
           sections: [section],
+          userGlobalInstruction: params.userGlobalInstruction,
           retryIssuesBySectionId: {
             [section.tocEntryId]: current.evaluation.issues,
           },
@@ -323,90 +346,123 @@ async function buildDraftWithAi(params: {
 
 async function handlePost(request: Request, session: AuthenticatedSession) {
   const rateLimitResp = checkRateLimit(getClientIp(request));
-  if (rateLimitResp) {
-    return rateLimitResp;
+  if (rateLimitResp) return rateLimitResp;
+
+  const rawBody = await request.text();
+  const bodySizeResp = validateBodySize(rawBody);
+  if (bodySizeResp) return bodySizeResp;
+
+  let body: RequestBody;
+  try {
+    body = JSON.parse(rawBody) as RequestBody;
+  } catch {
+    return NextResponse.json({ error: "요청 본문이 올바른 JSON이 아닙니다." }, { status: 400 });
   }
 
+  let basePlan: ReportFamilyPlan;
   try {
-    const rawBody = await request.text();
-    const bodySizeResp = validateBodySize(rawBody);
-    if (bodySizeResp) {
-      return bodySizeResp;
-    }
-
-    const body = JSON.parse(rawBody) as RequestBody;
-    const plan = validatePlan(body.plan);
-    const model = String(body.model || process.env.OPENAI_MODEL || "gpt-4.1-mini").trim();
-    const maxAttempts = Math.max(1, Math.min(3, Number(body.maxAttempts || 2)));
-    const preferAi = body.preferAi !== false;
-
-    const costLimitResp = await checkMonthlyCostLimit(body.monthlyCostLimitUsd ?? 0);
-    if (costLimitResp) {
-      return costLimitResp;
-    }
-
-    const result = preferAi
-      ? await buildDraftWithAi({
-          plan,
-          model,
-          maxAttempts,
-        })
-      : {
-          draft: buildReportFamilyDraft(plan, {
-            engine: "fallback",
-            warnings: ["preferAi=false로 deterministic fallback draft를 생성했습니다."],
-          }),
-          usage: {
-            inputTokens: 0,
-            outputTokens: 0,
-          },
-        };
-
-    const estimatedCostUsd =
-      result.usage.inputTokens || result.usage.outputTokens
-        ? estimateCost(model, result.usage.inputTokens, result.usage.outputTokens).estimatedCostUsd
-        : 0;
-
-    // Optionally persist a GenerationRun for RLHF feedback capture
-    let generationRunId: string | undefined;
-    if (body.saveGenerationRun && body.familyId) {
-      try {
-        const run = await prisma.generationRun.create({
-          data: {
-            familyId: body.familyId,
-            planJson: JSON.stringify(plan),
-            draftJson: JSON.stringify(result.draft),
-            model: result.draft.engine === "openai" ? model : "fallback",
-            inputTokens: result.usage.inputTokens,
-            outputTokens: result.usage.outputTokens,
-            status: "pending_review",
-          },
-        });
-        generationRunId = run.id;
-        log.info("GenerationRun saved", {
-          generationRunId: run.id,
-          familyId: body.familyId,
-          email: session.email,
-        });
-      } catch (err) {
-        // Non-fatal: don't fail the draft if run persistence fails
-        log.warn("Failed to save GenerationRun", { error: String(err) });
-      }
-    }
-
-    return NextResponse.json({
-      draft: result.draft,
-      ...(generationRunId ? { generationRunId } : {}),
-      usage: {
-        model: result.draft.engine === "openai" ? model : null,
-        inputTokens: result.usage.inputTokens,
-        outputTokens: result.usage.outputTokens,
-        estimatedCostUsd,
-      },
-    } satisfies DraftRouteResponse);
+    basePlan = validatePlan(body.plan);
   } catch (error) {
     return handleApiError(error, "/api/report-family/draft");
   }
+
+  const model = String(body.model || process.env.OPENAI_MODEL || "gpt-4.1-mini").trim();
+  const maxAttempts = Math.max(1, Math.min(3, Number(body.maxAttempts || 2)));
+  const preferAi = body.preferAi !== false;
+
+  const sectionInstructions = body.sectionInstructions ?? {};
+  const plan = Object.keys(sectionInstructions).length
+    ? {
+        ...basePlan,
+        sectionPlans: basePlan.sectionPlans.map((sp) =>
+          sectionInstructions[sp.tocEntryId]
+            ? { ...sp, customInstruction: sectionInstructions[sp.tocEntryId] }
+            : sp,
+        ),
+      }
+    : basePlan;
+
+  const costLimitResp = await checkMonthlyCostLimit(body.monthlyCostLimitUsd ?? 0);
+  if (costLimitResp) return costLimitResp;
+
+  const encoder = new TextEncoder();
+  const stream = new ReadableStream({
+    async start(controller) {
+      try {
+        const result = preferAi
+          ? await buildDraftWithAi({
+              plan,
+              model,
+              maxAttempts,
+              userGlobalInstruction: body.globalInstruction,
+              onSectionComplete: (title, completed, total) => {
+                sendSSE(controller, encoder, "section_complete", {
+                  currentTitle: title,
+                  completedCount: completed,
+                  totalCount: total,
+                });
+              },
+            })
+          : {
+              draft: buildReportFamilyDraft(plan, {
+                engine: "fallback",
+                warnings: ["preferAi=false로 deterministic fallback draft를 생성했습니다."],
+              }),
+              usage: { inputTokens: 0, outputTokens: 0 },
+            };
+
+        const estimatedCostUsd =
+          result.usage.inputTokens || result.usage.outputTokens
+            ? estimateCost(model, result.usage.inputTokens, result.usage.outputTokens).estimatedCostUsd
+            : 0;
+
+        let generationRunId: string | undefined;
+        if (body.saveGenerationRun && body.familyId) {
+          try {
+            const run = await prisma.generationRun.create({
+              data: {
+                familyId: body.familyId,
+                planJson: JSON.stringify(plan),
+                draftJson: JSON.stringify(result.draft),
+                model: result.draft.engine === "openai" ? model : "fallback",
+                inputTokens: result.usage.inputTokens,
+                outputTokens: result.usage.outputTokens,
+                status: "pending_review",
+              },
+            });
+            generationRunId = run.id;
+            log.info("GenerationRun saved", { generationRunId: run.id, familyId: body.familyId, email: session.email });
+          } catch (err) {
+            log.warn("Failed to save GenerationRun", { error: String(err) });
+          }
+        }
+
+        sendSSE(controller, encoder, "done", {
+          draft: result.draft,
+          ...(generationRunId ? { generationRunId } : {}),
+          usage: {
+            model: result.draft.engine === "openai" ? model : null,
+            inputTokens: result.usage.inputTokens,
+            outputTokens: result.usage.outputTokens,
+            estimatedCostUsd,
+          },
+        });
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "초안 생성 중 오류가 발생했습니다.";
+        sendSSE(controller, encoder, "error", { message });
+      } finally {
+        controller.close();
+      }
+    },
+  });
+
+  return new Response(stream, {
+    headers: {
+      "Content-Type": "text/event-stream",
+      "Cache-Control": "no-cache",
+      Connection: "keep-alive",
+    },
+  });
 }
 
 export const POST = withApiAuth(handlePost);

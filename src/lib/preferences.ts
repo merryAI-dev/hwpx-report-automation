@@ -2,7 +2,7 @@
  * Client-side user preferences stored in localStorage.
  */
 
-const STORAGE_KEY = "hwpx-editor-preferences";
+const STORAGE_KEY = "hwpx-studio-preferences";
 
 export type UserPreferences = {
   anthropicModel: string;

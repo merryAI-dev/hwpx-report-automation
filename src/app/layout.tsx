@@ -19,8 +19,8 @@ const ibmMono = IBM_Plex_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "HWPX Editor",
-  description: "Style-safe HWPX editing and AI suggestions on Vercel",
+  title: "HWPX Studio",
+  description: "Style-safe HWPX editing and AI suggestions",
 };
 
 export default function RootLayout({

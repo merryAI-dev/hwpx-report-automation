@@ -13,7 +13,7 @@ type RecentFileSnapshotRecord = RecentFileSnapshotMeta & {
   blob: Blob;
 };
 
-const DB_NAME = "hwpx-editor-local";
+const DB_NAME = "hwpx-studio-local";
 const STORE_NAME = "recent-file-snapshots";
 const DB_VERSION = 1;
 const MAX_RECENT_ENTRIES = 30;

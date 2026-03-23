@@ -1,4 +1,4 @@
-# HWPX Editor (Vercel)
+# HWPX Studio
 
 Vercel에 바로 배포 가능한 HWPX 편집기입니다.
 

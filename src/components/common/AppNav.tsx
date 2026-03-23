@@ -28,7 +28,7 @@ export function AppNav() {
             href="/"
             className="mr-2 text-sm font-semibold tracking-tight text-[var(--color-notion-text)]"
           >
-            HWPX Editor
+            HWPX Studio
           </Link>
           {/* Desktop nav */}
           <div className="hidden items-center gap-0.5 sm:flex">

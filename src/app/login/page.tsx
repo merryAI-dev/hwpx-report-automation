@@ -117,7 +117,7 @@ export default function LoginPage() {
     <main className={styles.page}>
       <section className={styles.card}>
         <div className={styles.header}>
-          <p className={styles.eyebrow}>HWPX Editor</p>
+          <p className={styles.eyebrow}>HWPX Studio</p>
           <h1 className={styles.title}>로그인</h1>
           <p className={styles.subtitle}>
             인증된 사용자만 편집기와 AI API에 접근할 수 있습니다. OIDC provider와 tenant seed가 설정되면

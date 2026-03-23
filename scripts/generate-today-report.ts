@@ -16,7 +16,7 @@ async function main() {
   const reportLines = [
     "오늘 작업 보고서",
     `${today}`,
-    "프로젝트: HWPX Editor for Vercel",
+    "프로젝트: HWPX Studio",
     "목표: HWPX 자동 편집 시스템의 실사용 가능성 검증",
     "1. 구현 요약",
     "- HWPX 업로드/노드 탐색/스타일 카탈로그 UI 구현",

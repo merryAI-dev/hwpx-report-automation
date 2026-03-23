@@ -35,7 +35,7 @@ export async function exportToDocx(
 ): Promise<{ blob: Blob; fileName: string }> {
   const children = (doc.content || []).flatMap(convertNode);
   const title = fileName.replace(/\.(hwpx|docx|pptx)$/i, "");
-  const author = options?.author ?? "HWPX Editor";
+  const author = options?.author ?? "HWPX Studio";
   const includePageNumbers = options?.includePageNumbers ?? false;
 
   const footers = includePageNumbers
