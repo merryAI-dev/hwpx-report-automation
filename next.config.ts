@@ -34,6 +34,7 @@ const nextConfig: NextConfig = {
             "img-src 'self' data: blob:",
             "font-src 'self' data:",
             "connect-src 'self'",
+            "frame-src https://view.officeapps.live.com",
             "frame-ancestors 'none'",
           ].join("; "),
         },

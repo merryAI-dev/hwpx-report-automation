@@ -310,6 +310,7 @@ function TocStep({
   error,
   globalInstruction,
   sectionPlans,
+  pptxPreviewUrl,
   onTocChange,
   onGlobalInstructionChange,
   onNext,
@@ -320,6 +321,7 @@ function TocStep({
   error: string | null;
   globalInstruction: string;
   sectionPlans?: SectionPromptPlan[];
+  pptxPreviewUrl?: string | null;
   onTocChange: (toc: EditableTocEntry[]) => void;
   onGlobalInstructionChange: (val: string) => void;
   onNext: () => void;
@@ -329,6 +331,7 @@ function TocStep({
   const [editValue, setEditValue] = useState("");
   const [expandedInstructionId, setExpandedInstructionId] = useState<string | null>(null);
   const [expandedSlideId, setExpandedSlideId] = useState<string | null>(null);
+  const [showPreview, setShowPreview] = useState(!!pptxPreviewUrl);
 
   const chunksByTocId = useMemo<Record<string, SlideChunk[]>>(() => {
     if (!sectionPlans) return {};
@@ -365,12 +368,50 @@ function TocStep({
   };
 
   return (
-    <div className="flex flex-col gap-6 w-full max-w-2xl mx-auto">
+    <div className={["flex gap-6 w-full", showPreview && pptxPreviewUrl ? "flex-row items-start" : "flex-col max-w-2xl mx-auto"].join(" ")}>
+      {/* PPTX Office Online Viewer panel */}
+      {showPreview && pptxPreviewUrl && (
+        <div className="sticky top-4 flex-1 min-w-0 flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-medium text-notion-text-secondary">슬라이드 미리보기</span>
+            <button
+              type="button"
+              onClick={() => setShowPreview(false)}
+              className="text-xs text-notion-text-tertiary hover:text-notion-text px-2 py-1 rounded hover:bg-notion-bg-active transition-colors"
+            >
+              닫기 ×
+            </button>
+          </div>
+          <iframe
+            src={`https://view.officeapps.live.com/op/embed.aspx?src=${encodeURIComponent(pptxPreviewUrl)}`}
+            className="w-full rounded-lg border border-notion-border bg-notion-bg-hover"
+            style={{ height: "70vh" }}
+            title="PPTX 미리보기"
+          />
+          {pptxPreviewUrl.includes("localhost") && (
+            <p className="text-[10px] text-notion-text-tertiary text-center">
+              로컬 환경에서는 Microsoft Viewer가 파일에 접근할 수 없어 미리보기가 제한됩니다. Vercel 배포 후 정상 동작합니다.
+            </p>
+          )}
+        </div>
+      )}
+
+      {/* TOC panel */}
+      <div className={["flex flex-col gap-6", showPreview && pptxPreviewUrl ? "w-96 shrink-0" : "w-full"].join(" ")}>
       <div className="text-center">
         <h2 className="text-2xl font-semibold text-notion-text mb-2">목차 확정</h2>
         <p className="text-notion-text-secondary text-sm">
           AI가 제안한 보고서 목차입니다. 순서 조정, 이름 변경, 삭제 후 확정하세요.
         </p>
+        {pptxPreviewUrl && !showPreview && (
+          <button
+            type="button"
+            onClick={() => setShowPreview(true)}
+            className="mt-2 text-xs px-3 py-1.5 rounded-lg border border-blue-200 bg-blue-50 text-blue-600 hover:bg-blue-100 transition-colors"
+          >
+            슬라이드 미리보기 열기 →
+          </button>
+        )}
       </div>
 
       {/* Global instruction */}
@@ -584,6 +625,7 @@ function TocStep({
           목차 확정 → 초안 생성
         </button>
       </div>
+      </div>{/* end TOC panel */}
     </div>
   );
 }
@@ -1247,6 +1289,9 @@ export default function ReportFamilyWizardPage() {
   const [tocError, setTocError] = useState<string | null>(null);
   const [globalInstruction, setGlobalInstruction] = useState("");
 
+  // PPTX preview
+  const [pptxPreviewUrl, setPptxPreviewUrl] = useState<string | null>(null);
+
   // Generating step
   const [draft, setDraft] = useState<ReportFamilyDraft | null>(null);
   const [genProgress, setGenProgress] = useState({ completed: 0, total: 0, currentTitle: "" });
@@ -1270,6 +1315,25 @@ export default function ReportFamilyWizardPage() {
     setStep("toc");
     setTocLoading(true);
     setTocError(null);
+    setPptxPreviewUrl(null);
+
+    // Fire-and-forget: upload PPTX for Office Online Viewer preview
+    void (async () => {
+      try {
+        const fd = new FormData();
+        fd.append("file", file);
+        fd.append("fileName", file.name);
+        const uploadRes = await fetch("/api/blob/upload", { method: "POST", body: fd });
+        if (uploadRes.ok) {
+          const data = (await uploadRes.json()) as { downloadUrl?: string };
+          if (data.downloadUrl) {
+            setPptxPreviewUrl(`${window.location.origin}${data.downloadUrl}`);
+          }
+        }
+      } catch {
+        // preview unavailable — silently ignore
+      }
+    })();
 
     try {
       const buffer = await file.arrayBuffer();
@@ -1656,6 +1720,7 @@ export default function ReportFamilyWizardPage() {
             error={tocError}
             globalInstruction={globalInstruction}
             sectionPlans={plan?.sectionPlans}
+            pptxPreviewUrl={pptxPreviewUrl}
             onTocChange={setToc}
             onGlobalInstructionChange={setGlobalInstruction}
             onNext={() => void handleTocConfirm()}
