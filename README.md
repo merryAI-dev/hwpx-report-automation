@@ -5,73 +5,74 @@
 [![Node.js 18+](https://img.shields.io/badge/node-18+-green.svg)](https://nodejs.org/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](https://github.com/merryAI-dev/hwpx-report-automation/issues)
 
-**🌐 Language:** [English](#) | [한국어](README-ko.md)
+**🌐 언어:** [English](README-en.md) | [한국어](#)
 
 ---
 
-The HWPX document automation system for AI-powered report generation.
+AI 기반 보고서 자동 생성을 위한 HWPX 문서 자동화 시스템.
 
-No public API for HWPX? No problem. **HWPX is a ZIP file.** We open it, replace only what you need, and close it — styles intact, zero corruption.
+HWPX 편집 API가 없다고요? 괜찮습니다. **HWPX는 ZIP 파일입니다.** 열고, 필요한 부분만 바꾸고, 닫으면 됩니다 — 서식 그대로, 손상 없이.
 
-> Built at [MYSC](https://mysc.kr) for real-world report automation. Battle-tested on government proposals, investment memos, and meeting minutes.
+> [MYSC](https://mysc.kr)에서 실제 보고서 자동화를 위해 만들었습니다. 공공 제안서, 투자 검토 메모, 회의록에서 검증됐습니다.
 
 ---
 
-## What is this?
+## 이게 뭔가요?
 
-Hancom Office (HWP/HWPX) is the dominant document format in Korea — used in virtually every government agency, public institution, and enterprise. Yet there's **no public programmatic API** to edit `.hwpx` files.
+한글(HWP/HWPX)은 한국의 지배적인 문서 포맷입니다 — 사실상 모든 정부 기관, 공공기관, 기업에서 사용됩니다. 하지만 `.hwpx` 파일을 코드로 편집할 수 있는 **공개 API는 존재하지 않습니다.**
 
-Every workaround either:
-- Opens Hancom Office via automation (requires a license, breaks on servers)
-- Re-serializes the entire XML (corrupts styles, loses fonts)
-- Exports to DOCX (destroys the original formatting)
+기존 우회책들은 모두 문제가 있습니다:
+- 한글 오피스를 자동화로 열기 → 라이선스 필요, 서버에서 동작 불가
+- XML 전체 재직렬화 → 스타일 깨짐, 폰트 손실
+- DOCX로 내보내기 → 원본 서식 파괴
 
-This project does none of that. It treats HWPX as what it actually is — **a ZIP archive of XML files** — and surgically edits only the text nodes you specify. Everything else is untouched, byte for byte.
+이 프로젝트는 다릅니다. HWPX의 실체에서 출발합니다 — **XML 파일들을 담은 ZIP 아카이브** — 그리고 지정한 텍스트 노드만 정밀하게 교체합니다. 나머지는 바이트 수준까지 그대로입니다.
 
 ```
 template.hwpx  →  fill_hwpx_template.py  →  output.hwpx
                         ↑
-                  {"TITLE": "2025 Annual Report",
-                   "AUTHOR": "Jane Doe"}
+                  {"TITLE": "2025 연간 보고서",
+                   "AUTHOR": "홍길동"}
 ```
 
 ---
 
-## What's Inside
+## 구성
 
 ```
 hwpx-report-automation/
 ├── scripts/
-│   ├── fill_hwpx_template.py   Template placeholder substitution ({{KEY}} → value)
-│   ├── hwpx_editor.py          Low-level text node inspection and editing
-│   ├── build_report.py         AI-powered report generation pipeline
-│   └── hancom-verify/          HWPX integrity verification tools (Swift/macOS)
+│   ├── fill_hwpx_template.py   템플릿 플레이스홀더 치환 ({{KEY}} → 값)
+│   ├── hwpx_editor.py          텍스트 노드 검사 및 편집 (저수준)
+│   ├── build_report.py         AI 기반 보고서 생성 파이프라인
+│   └── hancom-verify/          HWPX 무결성 검증 도구 (Swift/macOS)
 │
-└── web/  (HWPX Studio)         Next.js web application — deploy to Vercel in minutes
-    ├── src/app/                Pages and API routes (27 endpoints)
-    ├── src/lib/                Business logic — HWPX processing, AI integration
-    └── prisma/                 SQLite database schema (via LibSQL)
+└── web/                        Next.js 웹 애플리케이션
+    ├── src/app/                페이지 및 API 라우트 (엔드포인트 27개)
+    ├── src/lib/                비즈니스 로직 — HWPX 처리, AI 연동
+    └── prisma/                 SQLite 데이터베이스 스키마 (LibSQL)
 ```
 
 ---
 
-## Quick Start
+## 빠른 시작
 
-### Template Filling (Python, no dependencies)
+### 템플릿 채우기 (Python, 의존성 없음)
 
 ```bash
-# 1. Mark placeholders in your .hwpx file as {{KEY}}
+# 1. 한글 오피스에서 .hwpx 파일의 원하는 위치에 {{KEY}} 형식으로 표시
+#    (일반 텍스트처럼 입력하면 됩니다)
 
-# 2. Create your data file
+# 2. 데이터 파일 작성
 cat > data.json << 'EOF'
 {
-  "TITLE": "2025 Annual Report",
-  "SUMMARY": "Key highlights from Q1–Q4.",
-  "AUTHOR": "Jane Doe"
+  "TITLE": "2025 연간 보고서",
+  "SUMMARY": "1~4분기 주요 내용입니다.",
+  "AUTHOR": "홍길동"
 }
 EOF
 
-# 3. Fill and export
+# 3. 채우고 내보내기
 python scripts/fill_hwpx_template.py \
   --template template.hwpx \
   --data-json data.json \
@@ -79,17 +80,20 @@ python scripts/fill_hwpx_template.py \
 # → Created: output.hwpx
 ```
 
-No Hancom Office. No COM automation. No Docker. Just Python's standard library.
+한글 오피스 불필요. COM 자동화 불필요. Docker 불필요. Python 표준 라이브러리만으로 동작합니다.
 
 ---
 
-### Inspect & Edit Text Nodes (Python)
+### 텍스트 노드 검사 및 직접 편집 (Python)
 
 ```bash
-# See every text node with its index and style attributes
+# 모든 텍스트 노드를 인덱스·스타일 속성과 함께 출력
 python scripts/hwpx_editor.py --input report.hwpx --list
 
-# Apply targeted edits by node index
+# 출력 예시:
+# [{"file_name": "Contents/content0.xml", "text_index": 3, "text": "제목 입력", ...}]
+
+# 인덱스 기반으로 특정 노드 직접 편집
 python scripts/hwpx_editor.py \
   --input report.hwpx \
   --edits-json edits.json \
@@ -98,184 +102,126 @@ python scripts/hwpx_editor.py \
 
 ---
 
-### AI Report Generation
+### AI 보고서 생성 (Python + OpenAI/Anthropic)
 
 ```bash
 pip install requests
+
 export OPENAI_API_KEY=sk-...
 
 python scripts/build_report.py \
   --template template.hwpx \
-  --prompt "Write a Q3 business review for a SaaS company" \
+  --prompt "SaaS 기업의 3분기 사업 검토 보고서를 작성해줘" \
   --output report.hwpx
 ```
 
 ---
 
-### HWPX Studio — Web UI
-
-A full-featured web editor deployable to Vercel.
-
-**Features:**
-- Upload HWPX → browse and edit text nodes
-- Legacy `.hwp` upload with external converter integration
-- Style attribute catalog viewer
-- Style-preserving edit queue with undo/redo
-- AI suggestions (`/api/suggest`) and batch section rewriting (`/api/suggest-batch`)
-- Original / suggestion diff preview
-- `{{PLACEHOLDER}}` substitution
-- Filesystem-based blob storage + signed download URLs
-- Template metatag catalog extraction (`{{TITLE}}`, `{{date:report_date|required|label=보고일}}`)
-
-**Local run:**
+### 웹 UI (Next.js)
 
 ```bash
 cd web
-cp .env.example .env.local
+cp .env.example .env.local   # API 키 입력
 npm install
 npm run dev
 # → http://localhost:3000
 ```
 
-**Deploy to Fly.io:**
-
-```bash
-cd web
-fly launch --no-deploy   # picks up fly.toml automatically
-fly secrets set OPENAI_API_KEY=sk-...
-fly secrets set AUTH_SECRET=your-secret
-fly secrets set BLOB_SIGNING_SECRET=your-secret
-fly volumes create hwpx_data --region nrt --size 1
-fly deploy
-```
-
-- Region: `nrt` (Tokyo) — closest to Korea
-- Blob storage is persisted to a Fly volume at `/data/blob-storage`
-- `auto_stop_machines = "off"` keeps the app always-on
-
-**Deploy to Vercel (serverless, no persistent storage):**
-
-1. Push this repo to GitHub
-2. Import `hwpx-report-automation/web` in Vercel
-3. Add `OPENAI_API_KEY` to Environment Variables
-4. Deploy
-
-> Note: Vercel doesn't support persistent filesystem volumes. Use Fly.io if you need blob storage to survive across requests.
-
-**Optional environment variables:**
-
-```bash
-BLOB_STORAGE_FS_ROOT=/absolute/path/to/blob-storage
-BLOB_SIGNING_SECRET=replace-this-in-production
-BLOB_SIGNED_URL_TTL_SECONDS=900
-AUTH_SECRET=replace-this-in-production
-```
-
-For OIDC authentication and multi-tenant setup, see [`web/README.md`](web/README.md).
-
-**Legacy `.hwp` conversion:**
-
-```bash
-export HWP_CONVERTER_COMMAND='["node","scripts/mock-hwp-converter.mjs","{input}","{output}"]'
-npm run dev
-```
-
-In production, point `HWP_CONVERTER_COMMAND` to a commercial or in-house converter. The command must include `{input}` and `{output}` placeholders.
-
-**Tests:**
-
-```bash
-npm run lint
-npm run test    # undo/redo, section selection, HWPX integrity
-npm run build
-```
-
-Key test coverage: undo/redo queue consistency (`editor-workflows.test.ts`), section auto-selection, HWPX integrity after edits — `mimetype`, `version.xml`, `Contents/content.hpf` preserved, XML parseable (`hwpx.test.ts`).
+웹 UI는 리치 에디터, 문서 배치 생성, AI 제안, HWPX 무결성 검사, 사용자/쿼터 관리를 제공합니다.
 
 ---
 
-## When to Use What
+## 상황별 도구 선택
 
-| Task | Tool |
-|------|------|
-| Fill a template once | `scripts/fill_hwpx_template.py` |
-| Inspect what's inside an HWPX | `scripts/hwpx_editor.py --list` |
-| Generate report content with AI | `scripts/build_report.py` |
-| Interactive editing / batch generation | `web/` (HWPX Studio) |
-| Verify HWPX file integrity | `scripts/hancom-verify/` |
-| Integrate into a pipeline | Import `apply_placeholders()` |
-
----
-
-## Design Philosophy
-
-> "Don't re-serialize. Don't re-open. Just find the node and swap the text."
-
-HWPX stores every paragraph, run, and style definition as XML inside a ZIP archive. Most tools re-serialize the entire document tree — risking corrupt style references, lost embedded fonts, or broken layout hints.
-
-Our approach:
-
-1. **Open** the ZIP — read all file entries into memory
-2. **Parse** only XML files — leave binary assets untouched
-3. **Find** text nodes matching your `{{PLACEHOLDER}}` pattern or target index
-4. **Replace** the `.text` property only — attributes, siblings, parent structure: unchanged
-5. **Repack** — write each entry back with its original metadata intact
-
-The output `.hwpx` is byte-for-byte identical to the template except for the characters you replaced.
+| 하고 싶은 것 | 도구 | 명령어 |
+|-------------|------|--------|
+| 템플릿 한 번 채우기 | Python 스크립트 | `fill_hwpx_template.py` |
+| HWPX 내부 구조 확인 | Python 스크립트 | `hwpx_editor.py --list` |
+| AI로 보고서 내용 생성 | Python 스크립트 | `build_report.py` |
+| 문서 대량 생성 | 웹 UI | `npm run dev` |
+| HWPX 파일 무결성 검증 | hancom-verify | `scripts/hancom-verify/` 참고 |
+| 파이프라인에 통합 | Python API | `apply_placeholders()` import |
 
 ---
 
-## Requirements
+## 설계 철학
 
-| Component | Requirement |
-|-----------|-------------|
-| `fill_hwpx_template.py` | Python 3.8+ (stdlib only) |
-| `hwpx_editor.py` | Python 3.8+ (stdlib only) |
-| `build_report.py` | Python 3.8+, `requests`, OpenAI/Anthropic key |
-| Web UI | Node.js 18+, npm |
-| `hancom-verify` | macOS + Hancom Office installed |
+> "재직렬화하지 마세요. 다시 열지 마세요. 노드를 찾아서 텍스트만 바꾸세요."
 
----
+HWPX는 ZIP 아카이브 안에 XML로 모든 단락, 텍스트 런, 스타일 정의를 담고 있습니다. 대부분의 도구들은 문서 트리 전체를 재직렬화하는데 — 이 과정에서 한글만의 독점 스타일 참조가 깨지거나, 임베디드 폰트가 유실되거나, 렌더러 힌트가 손상될 수 있습니다.
 
-## FAQ
+우리의 접근:
 
-**Does this work with HWP (not HWPX)?**
-Not natively. HWP uses a legacy binary format. For `.hwp` support, connect an external converter via `HWP_CONVERTER_COMMAND` in the web UI.
+1. **ZIP 열기** — 모든 파일 엔트리를 메모리로 읽기
+2. **XML만 파싱** — 이미지, 폰트 등 바이너리 에셋은 건드리지 않음
+3. **텍스트 노드 찾기** — `{{PLACEHOLDER}}` 패턴 또는 지정 인덱스 매칭
+4. **`.text` 속성만 교체** — 속성값, 형제 노드, 부모 구조: 모두 그대로
+5. **재압축** — 원래 메타데이터(파일명, 압축 방식, 타임스탬프)와 함께 각 엔트리 기록
 
-**Will the output open correctly in Hancom Office?**
-Yes. The output is structurally identical to the input — only the replaced text has changed.
-
-**Can I use this on Linux / in CI?**
-Yes, for the Python scripts. No Hancom Office required. `hancom-verify` requires macOS.
-
-**Does this handle tables, headers, footers?**
-Yes. `--list` shows all text nodes across all XML files in the HWPX, including tables, headers, and footers. Placeholder substitution works document-wide.
-
-**What's the difference between `fill_hwpx_template.py` and `hwpx_editor.py`?**
-`fill_hwpx_template.py` is the high-level tool — mark `{{PLACEHOLDERS}}` in your template, provide a JSON file, done. `hwpx_editor.py` is the low-level tool — inspect every text node by index and apply surgical edits. Use the latter when you need precise control or don't want to modify the template itself.
+출력된 `.hwpx`는 교체한 글자를 제외하면 템플릿과 바이트 수준에서 동일합니다. 한글에서 열면 원본과 똑같이 보입니다 — 구조적으로 실제로 같으니까요.
 
 ---
 
-## Background
+## 요구사항
 
-Built at [MYSC](https://mysc.kr) to automate Korean-format reports — proposals, investment memos, impact assessments — that teams were filling out by hand.
-
-The trigger: watching someone copy-paste ChatGPT output into a Hancom template for 45 minutes every week. There had to be a better way.
-
----
-
-## Contributing
-
-Issues and PRs welcome. For larger changes, open an issue first.
-
-Ideas:
-- Native HWP binary format support
-- Better multi-paragraph placeholder values
-- CLI wrapper (`hwpx fill template.hwpx data.json`)
-- GitHub Actions example for CI-based document generation
+| 구성 요소 | 요구사항 |
+|-----------|----------|
+| `fill_hwpx_template.py` | Python 3.8+ (표준 라이브러리만) |
+| `hwpx_editor.py` | Python 3.8+ (표준 라이브러리만) |
+| `build_report.py` | Python 3.8+, `requests`, OpenAI/Anthropic 키 |
+| 웹 UI | Node.js 18+, npm |
+| `hancom-verify` | macOS + 한글 오피스 설치 필요 |
 
 ---
 
-## License
+## 활용 사례
+
+- **정부·공공기관** — 표준 보고서 양식 자동 작성
+- **투자사** — 구조화된 데이터로 투자 검토 메모 자동 생성
+- **컨설팅** — 마스터 템플릿 기반 납품물 대량 생산
+- **HR·총무팀** — 반복적인 문서 작업 자동화
+- **AI 파이프라인** — LLM 출력을 포맷된 HWPX로 직접 연결
+
+---
+
+## 기여하기
+
+이슈와 PR 모두 환영합니다.
+
+큰 변경사항은 먼저 이슈로 방향을 논의해주세요. 위 프로젝트 구조를 참고해서 수정할 파일을 찾아보세요.
+
+기여 아이디어:
+- HWP(구 바이너리 포맷) 지원 추가
+- 다단락 플레이스홀더 값 처리 개선
+- CLI 래퍼 (`hwpx fill template.hwpx data.json`)
+- CI 기반 문서 생성 GitHub Actions 예제
+
+---
+
+## 자주 묻는 질문
+
+**HWP(HWPX가 아닌 구 포맷)도 되나요?**
+아직 지원하지 않습니다. HWP는 바이너리 포맷이고, HWPX는 한글 오피스 2014+의 ZIP+XML 포맷입니다.
+
+**출력 파일이 한글에서 제대로 열리나요?**
+네. 출력 파일은 구조적으로 입력과 동일합니다 — 교체한 텍스트만 달라졌을 뿐입니다.
+
+**Linux나 CI 환경에서도 쓸 수 있나요?**
+Python 스크립트는 가능합니다. 한글 오피스 설치 불필요. `hancom-verify` 도구만 macOS가 필요합니다.
+
+**표, 머리글, 바닥글도 처리되나요?**
+`hwpx_editor.py --list`는 머리글, 바닥글, 표 안의 텍스트 노드를 포함한 모든 XML 파일의 노드를 보여줍니다. `fill_hwpx_template.py`는 문서 전체에 걸쳐 `{{PLACEHOLDERS}}`를 찾아 교체합니다.
+
+---
+
+## 배경
+
+[MYSC](https://mysc.kr)에서 한글 형식의 보고서 — 제안서, 투자 검토 메모, 임팩트 평가서 — 를 팀이 매번 수작업으로 작성하던 것을 자동화하기 위해 만들었습니다.
+
+계기: 누군가가 ChatGPT 결과물을 한글 템플릿에 복사붙여넣기 하는 데 매주 45분을 쓰는 걸 보고 나서.
+
+---
+
+## 라이선스
 
 [MIT](LICENSE) © 2025 MYSC
