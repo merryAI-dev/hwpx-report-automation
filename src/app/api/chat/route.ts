@@ -4,7 +4,7 @@ import type {
   DocumentContext,
   DocumentContextSegment,
 } from "@/types/chat";
-import { withApiAuth } from "@/lib/auth/with-api-auth";
+import { withApiAuth, type AuthenticatedSession } from "@/lib/auth/with-api-auth";
 import { requireApiKey } from "@/lib/api-utils";
 import { extractErrorMessage } from "@/lib/errors";
 import { log } from "@/lib/logger";
@@ -237,7 +237,15 @@ function sendSSE(
 
 /* ── Route handler ── */
 
-async function handlePost(request: Request) {
+async function handlePost(request: Request, session: AuthenticatedSession) {
+  // ── Auth check — reject unauthenticated / guest callers ──
+  if (session.sub === "guest") {
+    return new Response(
+      JSON.stringify({ error: "인증이 필요합니다.", code: "UNAUTHORIZED" }),
+      { status: 401, headers: { "Content-Type": "application/json" } },
+    );
+  }
+
   // ── Rate limiting ──
   const rateLimitResp = checkRateLimit(getClientIp(request));
   if (rateLimitResp) return rateLimitResp;
