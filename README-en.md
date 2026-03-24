@@ -47,7 +47,7 @@ hwpx-report-automation/
 │   ├── build_report.py         AI-powered report generation pipeline
 │   └── hancom-verify/          HWPX integrity verification tools (Swift/macOS)
 │
-├── src/app/                    Next.js pages and API routes (27 endpoints)
+├── src/app/                    Next.js pages and API routes (64 endpoints)
 ├── src/lib/                    Business logic — HWPX processing, AI integration
 ├── scripts/                    Node.js utility scripts
 └── prisma/                     SQLite database schema (via LibSQL)
@@ -119,7 +119,7 @@ A full-featured web editor deployable to Vercel or Fly.io.
 **Features:**
 - Upload HWPX → browse and edit text nodes with undo/redo
 - Legacy `.hwp` upload with external converter integration
-- AI chat sidebar — rendered markdown, section rewriting, diff preview
+- AI chat sidebar — rendered markdown, section rewriting, diff preview (Anthropic / OpenAI / Google Gemini BYOK)
 - PPTX → HWPX report generation wizard (upload → outline → format → export)
 - `{{PLACEHOLDER}}` substitution and batch document generation
 - Document vault and dashboard (Notion-style design system)
