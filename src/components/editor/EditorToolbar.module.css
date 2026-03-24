@@ -1,25 +1,19 @@
 .toolbar {
   display: flex;
   flex-direction: column;
-  padding: 10px 16px 9px;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.9) 0%, rgba(248, 251, 255, 0.72) 100%);
-  backdrop-filter: blur(18px) saturate(150%);
-  -webkit-backdrop-filter: blur(18px) saturate(150%);
-  border-bottom: 1px solid rgba(148, 163, 184, 0.35);
-  box-shadow:
-    0 8px 24px rgba(15, 23, 42, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.7);
+  padding: 6px 12px 5px;
+  background: var(--color-notion-bg);
+  border-bottom: 1px solid var(--color-notion-border);
   position: sticky;
   top: 0;
   z-index: 100;
-  gap: 8px;
+  gap: 4px;
 }
 
 .toolbarRow {
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 2px;
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
@@ -34,88 +28,92 @@
 .group {
   display: flex;
   align-items: center;
-  gap: 4px;
-  background: rgba(255, 255, 255, 0.62);
-  border: 1px solid rgba(148, 163, 184, 0.24);
-  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.65);
-  padding: 4px;
-  border-radius: 10px;
+  gap: 1px;
+  padding: 2px;
 }
 
 .sep {
   width: 1px;
-  height: 20px;
-  background: linear-gradient(
-    180deg,
-    rgba(148, 163, 184, 0.05) 0%,
-    rgba(148, 163, 184, 0.45) 50%,
-    rgba(148, 163, 184, 0.05) 100%
-  );
+  height: 18px;
+  background: var(--color-notion-border);
+  margin: 0 4px;
+  flex-shrink: 0;
 }
 
 .btn {
-  border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.2);
+  border: none;
+  background: transparent;
   padding: 3px 8px;
   font-size: 12px;
   font-weight: 500;
-  color: #334155;
-  border-radius: 7px;
+  color: var(--color-notion-text);
+  border-radius: 4px;
   cursor: pointer;
-  transition: all 0.16s ease;
+  transition: background 0.1s ease;
   white-space: nowrap;
 }
 
 .btn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.82);
-  border-color: rgba(125, 150, 180, 0.35);
-  color: #0f172a;
-  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.08);
+  background: var(--color-notion-bg-hover);
+  color: var(--color-notion-text);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
 
 .btnActive {
-  background: rgba(255, 255, 255, 0.96) !important;
-  border-color: rgba(59, 130, 246, 0.4) !important;
-  color: #0f4f8a !important;
-  box-shadow:
-    0 6px 14px rgba(37, 99, 235, 0.16),
-    inset 0 1px 0 rgba(255, 255, 255, 0.8) !important;
+  background: var(--color-notion-accent-light) !important;
+  color: var(--color-notion-accent) !important;
 }
 
 .fontSelect {
-  border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.22);
+  border: none;
+  background: transparent;
   padding: 3px 4px;
   font-size: 12px;
-  color: #1e293b;
+  color: var(--color-notion-text);
   outline: none;
   cursor: pointer;
   max-width: 90px;
-  border-radius: 6px;
+  border-radius: 4px;
+}
+
+.fontSelect:hover {
+  background: var(--color-notion-bg-hover);
 }
 
 .sizeSelect {
-  border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.22);
+  border: none;
+  background: transparent;
   padding: 3px 4px;
   font-size: 12px;
-  color: #1e293b;
+  color: var(--color-notion-text);
   outline: none;
   cursor: pointer;
   max-width: 50px;
-  border-radius: 6px;
+  border-radius: 4px;
+}
+
+.sizeSelect:hover {
+  background: var(--color-notion-bg-hover);
 }
 
 .recentSelect {
-  border: 1px solid transparent;
-  background: rgba(255, 255, 255, 0.22);
+  border: none;
+  background: transparent;
   padding: 3px 6px;
   font-size: 12px;
-  color: #1e293b;
+  color: var(--color-notion-text);
   outline: none;
   cursor: pointer;
   max-width: 220px;
-  border-radius: 6px;
+  border-radius: 4px;
+}
+
+.recentSelect:hover {
+  background: var(--color-notion-bg-hover);
 }
 
 .tenantSelect {
@@ -123,7 +121,7 @@
   background: transparent;
   padding: 4px 8px;
   font-size: 13px;
-  color: #374151;
+  color: var(--color-notion-text);
   outline: none;
   cursor: pointer;
   min-width: 180px;
@@ -132,12 +130,12 @@
 .sessionBadge {
   display: inline-flex;
   align-items: center;
-  padding: 4px 8px;
-  border-radius: 999px;
-  background: rgba(37, 99, 235, 0.1);
-  color: #1d4ed8;
-  font-size: 12px;
-  font-weight: 700;
+  padding: 2px 8px;
+  border-radius: 4px;
+  background: var(--color-notion-accent-light);
+  color: var(--color-notion-accent);
+  font-size: 11px;
+  font-weight: 600;
   white-space: nowrap;
 }
 
@@ -147,32 +145,32 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
-  color: #374151;
+  color: var(--color-notion-text-secondary);
   padding: 0 6px;
 }
 
 .navShortcuts {
   display: inline-flex;
   align-items: center;
-  gap: 4px;
+  gap: 2px;
 }
 
 .navShortcut {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 5px 10px;
-  border-radius: 6px;
-  color: #334155;
+  padding: 4px 8px;
+  border-radius: 4px;
+  color: var(--color-notion-text-secondary);
   text-decoration: none;
   font-size: 13px;
-  font-weight: 600;
+  font-weight: 500;
   white-space: nowrap;
 }
 
 .navShortcut:hover {
-  background: rgba(255, 255, 255, 0.8);
-  color: #2563eb;
+  background: var(--color-notion-bg-hover);
+  color: var(--color-notion-text);
 }
 
 .panelToggleRow {
@@ -182,17 +180,17 @@
 
 .panelToggleGroup {
   display: flex;
-  gap: 4px;
+  gap: 2px;
   flex-wrap: wrap;
   justify-content: flex-end;
   max-width: 100%;
 }
 
 .downloadLink {
-  font-size: 16px;
-  color: #0f4f8a;
+  font-size: 14px;
+  color: var(--color-notion-accent);
   padding: 0 8px;
-  font-weight: bold;
+  font-weight: 600;
 }
 
 .linkButton {
@@ -204,13 +202,12 @@
 
 @media (max-width: 900px) {
   .toolbar {
-    padding: 8px 10px 7px;
-    gap: 6px;
+    padding: 5px 8px 4px;
+    gap: 3px;
   }
 
   .group {
-    padding: 3px;
-    border-radius: 8px;
+    padding: 2px;
   }
 
   .btn {

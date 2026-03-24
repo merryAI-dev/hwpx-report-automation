@@ -57,6 +57,7 @@ import {
 import type { SessionIdentityProvider, SessionTenantMembership } from "@/lib/auth/session";
 import { evaluateQualityGate, type QualityGateResult } from "@/lib/quality-gates";
 import { recordPilotMetricEvent } from "@/lib/pilot-metrics";
+import { getApiKeyHeaders } from "@/lib/client-api-keys";
 import { hasComplexObjectSignal } from "@/lib/editor/hwpx-complex-objects";
 import {
   listRecentFileSnapshots,
@@ -1012,7 +1013,7 @@ export default function Home() {
 
         const response = await fetch("/api/report-family/plan", {
           method: "POST",
-          headers: { "Content-Type": "application/json" },
+          headers: { "Content-Type": "application/json", ...getApiKeyHeaders() },
           body: JSON.stringify(payload),
         });
         const result = (await response.json()) as ReportFamilyPlan & { error?: string };
@@ -1069,7 +1070,7 @@ export default function Home() {
     try {
       const response = await fetch("/api/report-family/draft", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getApiKeyHeaders() },
         body: JSON.stringify({
           plan: reportFamilyPlanState.plan,
         }),
@@ -1616,7 +1617,7 @@ export default function Home() {
     try {
       const response = await fetch("/api/suggest", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...getApiKeyHeaders() },
         body: JSON.stringify({
           text,
           instruction,

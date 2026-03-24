@@ -227,7 +227,7 @@
   margin: 0;
 }
 
-kbd {
+:global(kbd) {
   background: #f1f5f9;
   border: 1px solid #cbd5e1;
   border-radius: 3px;

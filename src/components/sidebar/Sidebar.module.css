@@ -1,10 +1,8 @@
 /* ── Sidebar panel wrapper ── */
 .panel {
   height: 100%;
-  background: rgba(255, 255, 255, 0.6);
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-left: 1px solid rgba(229, 231, 235, 0.5);
+  background: var(--color-notion-bg);
+  border-left: 1px solid var(--color-notion-border);
   display: flex;
   flex-direction: column;
   overflow: hidden;
@@ -34,15 +32,14 @@
 /* ── Title bar ── */
 .panelTitleBar {
   padding: 8px 14px;
-  border-bottom: 1px solid rgba(209, 213, 219, 0.6);
+  border-bottom: 1px solid var(--color-notion-border);
   font-size: 11px;
   font-weight: 700;
-  color: #374151;
+  color: var(--color-notion-text-secondary);
   text-transform: uppercase;
   letter-spacing: 0.06em;
   flex-shrink: 0;
   user-select: none;
-  font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
 }
 
 /* ── Content area (scrollable, fixed height) ── */

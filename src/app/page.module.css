@@ -4,11 +4,8 @@
   flex-direction: column;
   height: 100vh;
   overflow: hidden;
-  background:
-    radial-gradient(1400px 500px at 50% -200px, rgba(191, 219, 254, 0.5), transparent 70%),
-    linear-gradient(180deg, #eef2f7 0%, #dde3ea 100%);
-  color: #1a1a1a;
-  font-family: '맑은 고딕', 'Malgun Gothic', 'Apple SD Gothic Neo', sans-serif;
+  background: var(--color-notion-bg-secondary);
+  color: var(--color-notion-text);
 }
 
 /* ── Main workspace: canvas + sidebar ── */
@@ -44,26 +41,23 @@
 /* ── Warning banners ── */
 .warning,
 .warningSoft {
-  border-radius: 12px;
+  border-radius: 6px;
   padding: 8px 14px;
   font-size: 12px;
   flex-shrink: 0;
   margin: 8px 0 0;
   width: min(794px, calc(100vw - 24px));
-  backdrop-filter: blur(10px) saturate(140%);
-  -webkit-backdrop-filter: blur(10px) saturate(140%);
-  box-shadow: 0 6px 18px rgba(15, 23, 42, 0.08);
 }
 
 .warning {
-  border: 1px solid rgba(251, 146, 60, 0.4);
-  background: rgba(255, 241, 237, 0.72);
+  border: 1px solid #fca57a;
+  background: #fff3ee;
   color: #7c2d12;
 }
 
 .warningSoft {
-  border: 1px solid rgba(245, 158, 11, 0.35);
-  background: rgba(255, 251, 235, 0.7);
+  border: 1px solid #f5c842;
+  background: #fffbeb;
   color: #7c4a03;
 }
 
@@ -84,29 +78,24 @@
   display: flex;
   gap: 0;
   flex-shrink: 0;
-  background: rgba(255, 255, 255, 0.64);
-  border: 1px solid rgba(148, 163, 184, 0.28);
-  backdrop-filter: blur(10px) saturate(140%);
-  -webkit-backdrop-filter: blur(10px) saturate(140%);
-  box-shadow:
-    0 10px 26px rgba(15, 23, 42, 0.08),
-    inset 0 1px 0 rgba(255, 255, 255, 0.75);
+  background: var(--color-notion-bg);
+  border: 1px solid var(--color-notion-border);
   width: 794px;
   margin: 6px 0 0;
-  border-radius: 10px 10px 0 0;
+  border-radius: 4px 4px 0 0;
   overflow: hidden;
 }
 
 .viewTabBtn {
   padding: 6px 18px;
   border: none;
-  border-right: 1px solid rgba(148, 163, 184, 0.28);
+  border-right: 1px solid var(--color-notion-border);
   background: transparent;
-  color: #475569;
+  color: var(--color-notion-text-secondary);
   font-size: 12px;
   font-family: inherit;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: background 0.1s ease;
 }
 
 .previewTabLabel {
@@ -149,20 +138,20 @@
 }
 
 .viewTabBtn:hover:not(:disabled) {
-  background: rgba(255, 255, 255, 0.72);
-  color: #0f172a;
+  background: var(--color-notion-bg-hover);
+  color: var(--color-notion-text);
 }
 
 .viewTabBtn:disabled {
-  opacity: 0.45;
+  opacity: 0.4;
   cursor: not-allowed;
 }
 
 .viewTabBtnActive {
-  background: rgba(255, 255, 255, 0.95) !important;
-  color: #1a4880;
-  font-weight: 700;
-  border-bottom: 2px solid #1a4880;
+  background: var(--color-notion-bg) !important;
+  color: var(--color-notion-accent) !important;
+  font-weight: 600;
+  border-bottom: 2px solid var(--color-notion-accent);
 }
 
 /* ── Java HTML preview pane inside the paper ── */
@@ -230,43 +219,17 @@
   }
 }
 
-/* ── Dark mode ── */
-:global(.dark) .page {
-  background: #1a1a1a;
-  color: #e8e8e8;
-}
-
+/* ── Dark mode — tokens handle most of it automatically ── */
 :global(.dark) .warning {
-  border-color: rgba(251, 146, 60, 0.25);
-  background: rgba(60, 25, 5, 0.8);
-  color: #fdba74;
-}
-
-:global(.dark) .warningSoft {
-  border-color: rgba(245, 158, 11, 0.25);
-  background: rgba(50, 28, 0, 0.8);
+  border-color: #7c4a03;
+  background: #2a1f00;
   color: #fcd34d;
 }
 
-:global(.dark) .viewTabs {
-  background: rgba(28, 28, 28, 0.9);
-  border-color: rgba(60, 60, 60, 0.45);
-  box-shadow: 0 10px 26px rgba(0, 0, 0, 0.35), inset 0 1px 0 rgba(255,255,255,0.04);
-}
-
-:global(.dark) .viewTabBtn {
-  color: #8899aa;
-}
-
-:global(.dark) .viewTabBtn:hover:not(:disabled) {
-  background: rgba(45, 45, 45, 0.9);
-  color: #e2e8f0;
-}
-
-:global(.dark) .viewTabBtnActive {
-  background: rgba(35, 35, 35, 0.98) !important;
-  color: #60a5fa !important;
-  border-bottom-color: #60a5fa !important;
+:global(.dark) .warningSoft {
+  border-color: #92400e;
+  background: #1f1500;
+  color: #fde68a;
 }
 
 :global(.dark) .previewTabBadgeIdle {

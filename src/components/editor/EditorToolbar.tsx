@@ -71,6 +71,8 @@ type EditorToolbarProps = {
   formMode: boolean;
   onToggleFormMode: () => void;
   onToggleSidebar?: () => void;
+  onOpenStartWizard?: () => void;
+  onExportMarkdown?: () => void;
 };
 
 function getCurrentFontFamily(editor: Editor | null): string {
