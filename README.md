@@ -47,7 +47,7 @@ hwpx-report-automation/
 │   ├── build_report.py         AI-powered report generation pipeline
 │   └── hancom-verify/          HWPX integrity verification tools (Swift/macOS)
 │
-└── web/                        Next.js web application
+└── web/  (HWPX Studio)         Next.js web application — deploy to Vercel in minutes
     ├── src/app/                Pages and API routes (27 endpoints)
     ├── src/lib/                Business logic — HWPX processing, AI integration
     └── prisma/                 SQLite database schema (via LibSQL)
@@ -61,7 +61,6 @@ hwpx-report-automation/
 
 ```bash
 # 1. Mark placeholders in your .hwpx file as {{KEY}}
-#    (edit in Hancom Office, save as .hwpx)
 
 # 2. Create your data file
 cat > data.json << 'EOF'
@@ -80,7 +79,7 @@ python scripts/fill_hwpx_template.py \
 # → Created: output.hwpx
 ```
 
-That's it. No Hancom Office. No COM automation. No Docker. Just Python's standard library.
+No Hancom Office. No COM automation. No Docker. Just Python's standard library.
 
 ---
 
@@ -90,10 +89,7 @@ That's it. No Hancom Office. No COM automation. No Docker. Just Python's standar
 # See every text node with its index and style attributes
 python scripts/hwpx_editor.py --input report.hwpx --list
 
-# Output:
-# [{"file_name": "Contents/content0.xml", "text_index": 3, "text": "Title Here", ...}]
-
-# Edit specific nodes by index
+# Apply targeted edits by node index
 python scripts/hwpx_editor.py \
   --input report.hwpx \
   --edits-json edits.json \
@@ -102,11 +98,10 @@ python scripts/hwpx_editor.py \
 
 ---
 
-### AI Report Generation (Python + OpenAI/Anthropic)
+### AI Report Generation
 
 ```bash
 pip install requests
-
 export OPENAI_API_KEY=sk-...
 
 python scripts/build_report.py \
@@ -117,30 +112,80 @@ python scripts/build_report.py \
 
 ---
 
-### Web UI (Next.js)
+### HWPX Studio — Web UI
+
+A full-featured web editor deployable to Vercel.
+
+**Features:**
+- Upload HWPX → browse and edit text nodes
+- Legacy `.hwp` upload with external converter integration
+- Style attribute catalog viewer
+- Style-preserving edit queue with undo/redo
+- AI suggestions (`/api/suggest`) and batch section rewriting (`/api/suggest-batch`)
+- Original / suggestion diff preview
+- `{{PLACEHOLDER}}` substitution
+- Filesystem-based blob storage + signed download URLs
+- Template metatag catalog extraction (`{{TITLE}}`, `{{date:report_date|required|label=보고일}}`)
+
+**Local run:**
 
 ```bash
 cd web
-cp .env.example .env.local   # add your API keys
+cp .env.example .env.local
 npm install
 npm run dev
 # → http://localhost:3000
 ```
 
-The web UI provides a rich editor, batch document generation, AI suggestions, HWPX integrity checks, and user/quota management.
+**Deploy to Vercel:**
+
+1. Push this repo to GitHub
+2. Import `hwpx-report-automation/web` in Vercel
+3. Add `OPENAI_API_KEY` to Environment Variables
+4. Deploy
+
+**Optional environment variables:**
+
+```bash
+BLOB_STORAGE_FS_ROOT=/absolute/path/to/blob-storage
+BLOB_SIGNING_SECRET=replace-this-in-production
+BLOB_SIGNED_URL_TTL_SECONDS=900
+AUTH_SECRET=replace-this-in-production
+```
+
+For OIDC authentication and multi-tenant setup, see [`web/README.md`](web/README.md).
+
+**Legacy `.hwp` conversion:**
+
+```bash
+export HWP_CONVERTER_COMMAND='["node","scripts/mock-hwp-converter.mjs","{input}","{output}"]'
+npm run dev
+```
+
+In production, point `HWP_CONVERTER_COMMAND` to a commercial or in-house converter. The command must include `{input}` and `{output}` placeholders.
+
+**Tests:**
+
+```bash
+npm run lint
+npm run test    # undo/redo, section selection, HWPX integrity
+npm run build
+```
+
+Key test coverage: undo/redo queue consistency (`editor-workflows.test.ts`), section auto-selection, HWPX integrity after edits — `mimetype`, `version.xml`, `Contents/content.hpf` preserved, XML parseable (`hwpx.test.ts`).
 
 ---
 
 ## When to Use What
 
-| Task | Tool | Command |
-|------|------|---------|
-| Fill a template once | Python script | `fill_hwpx_template.py` |
-| Inspect what's inside an HWPX | Python script | `hwpx_editor.py --list` |
-| Generate report content with AI | Python script | `build_report.py` |
-| Batch-generate many documents | Web UI | `npm run dev` |
-| Verify HWPX file integrity | hancom-verify | See `scripts/hancom-verify/` |
-| Integrate into a pipeline | Python API | Import `apply_placeholders()` |
+| Task | Tool |
+|------|------|
+| Fill a template once | `scripts/fill_hwpx_template.py` |
+| Inspect what's inside an HWPX | `scripts/hwpx_editor.py --list` |
+| Generate report content with AI | `scripts/build_report.py` |
+| Interactive editing / batch generation | `web/` (HWPX Studio) |
+| Verify HWPX file integrity | `scripts/hancom-verify/` |
+| Integrate into a pipeline | Import `apply_placeholders()` |
 
 ---
 
@@ -148,17 +193,17 @@ The web UI provides a rich editor, batch document generation, AI suggestions, HW
 
 > "Don't re-serialize. Don't re-open. Just find the node and swap the text."
 
-HWPX stores every paragraph, run, and style definition as XML inside a ZIP archive. Most tools that programmatically "edit" HWPX re-serialize the entire document tree — which risks corrupting proprietary style references, losing embedded fonts, or breaking layout hints that only Hancom's renderer understands.
+HWPX stores every paragraph, run, and style definition as XML inside a ZIP archive. Most tools re-serialize the entire document tree — risking corrupt style references, lost embedded fonts, or broken layout hints.
 
 Our approach:
 
 1. **Open** the ZIP — read all file entries into memory
-2. **Parse** only the XML files — leave binary assets (images, fonts) untouched
+2. **Parse** only XML files — leave binary assets untouched
 3. **Find** text nodes matching your `{{PLACEHOLDER}}` pattern or target index
 4. **Replace** the `.text` property only — attributes, siblings, parent structure: unchanged
-5. **Repack** — write each entry back with its original metadata (filename, compression, timestamps)
+5. **Repack** — write each entry back with its original metadata intact
 
-The output `.hwpx` is byte-for-byte identical to the template except for the characters you replaced. Open it in Hancom Office and it looks exactly like the original — because structurally, it is.
+The output `.hwpx` is byte-for-byte identical to the template except for the characters you replaced.
 
 ---
 
@@ -174,51 +219,42 @@ The output `.hwpx` is byte-for-byte identical to the template except for the cha
 
 ---
 
-## Use Cases
-
-- **Government / public sector** — auto-fill standard report templates
-- **Investment firms** — generate investment memos from structured data
-- **Consulting** — batch-produce client deliverables from a master template
-- **HR / admin teams** — automate repetitive document workflows
-- **AI pipelines** — connect LLM output directly to formatted HWPX output
-
----
-
-## Contributing
-
-Issues and PRs are welcome.
-
-For larger changes, open an issue first to align on approach. See the project structure above to find the right file to touch.
-
-Ideas for contributions:
-- Support for HWP (legacy binary format) alongside HWPX
-- Better handling of multi-paragraph placeholder values
-- CLI wrapper (`hwpx fill template.hwpx data.json`)
-- GitHub Actions example for CI-based document generation
-
----
-
 ## FAQ
 
 **Does this work with HWP (not HWPX)?**
-Not currently. HWP uses a binary format; HWPX is the modern ZIP+XML format (Hancom Office 2014+).
+Not natively. HWP uses a legacy binary format. For `.hwp` support, connect an external converter via `HWP_CONVERTER_COMMAND` in the web UI.
 
 **Will the output open correctly in Hancom Office?**
-Yes. The output file is structurally identical to the input — only the text you replaced has changed.
+Yes. The output is structurally identical to the input — only the replaced text has changed.
 
 **Can I use this on Linux / in CI?**
-Yes, for the Python scripts. No Hancom Office installation required. The `hancom-verify` tool requires macOS.
+Yes, for the Python scripts. No Hancom Office required. `hancom-verify` requires macOS.
 
 **Does this handle tables, headers, footers?**
-`hwpx_editor.py --list` shows all text nodes in all XML files, including those in headers, footers, and tables. `fill_hwpx_template.py` replaces `{{PLACEHOLDERS}}` wherever they appear across the entire document.
+Yes. `--list` shows all text nodes across all XML files in the HWPX, including tables, headers, and footers. Placeholder substitution works document-wide.
+
+**What's the difference between `fill_hwpx_template.py` and `hwpx_editor.py`?**
+`fill_hwpx_template.py` is the high-level tool — mark `{{PLACEHOLDERS}}` in your template, provide a JSON file, done. `hwpx_editor.py` is the low-level tool — inspect every text node by index and apply surgical edits. Use the latter when you need precise control or don't want to modify the template itself.
 
 ---
 
 ## Background
 
-Built at [MYSC](https://mysc.kr) to automate the production of Korean-format reports — proposals, investment memos, impact assessments — that teams were previously filling out by hand.
+Built at [MYSC](https://mysc.kr) to automate Korean-format reports — proposals, investment memos, impact assessments — that teams were filling out by hand.
 
 The trigger: watching someone copy-paste ChatGPT output into a Hancom template for 45 minutes every week. There had to be a better way.
+
+---
+
+## Contributing
+
+Issues and PRs welcome. For larger changes, open an issue first.
+
+Ideas:
+- Native HWP binary format support
+- Better multi-paragraph placeholder values
+- CLI wrapper (`hwpx fill template.hwpx data.json`)
+- GitHub Actions example for CI-based document generation
 
 ---
 
