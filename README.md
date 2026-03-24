@@ -151,6 +151,41 @@ npm run dev
 | 문서 대량 생성 | 웹 UI | `npm run dev` |
 | HWPX 파일 무결성 검증 | hancom-verify | `scripts/hancom-verify/` 참고 |
 | 파이프라인에 통합 | Python API | `apply_placeholders()` import |
+| HTTP로 연동 | 공개 REST API | `/api/public/*` (아래 참고) |
+
+---
+
+## 공개 REST API
+
+인증 없이 사용할 수 있는 공개 API 엔드포인트입니다. **Rate limit: IP당 2 req/min, 최대 10 MB.**
+
+### `GET /api/public/health`
+
+```bash
+curl https://YOUR_DOMAIN/api/public/health
+# → {"status":"ok","ts":"2025-01-15T09:00:00.000Z"}
+```
+
+### `POST /api/public/extract`
+
+HWPX 파일의 모든 텍스트 노드를 추출합니다.
+
+```bash
+curl -X POST https://YOUR_DOMAIN/api/public/extract \
+  -F "file=@document.hwpx"
+# → {"nodes":[{"file":"Contents/section0.xml","index":0,"text":"제목 입력"},...], "count":5}
+```
+
+### `POST /api/public/fill`
+
+HWPX 템플릿의 `{{PLACEHOLDER}}`를 치환하고, 완성된 파일을 반환합니다.
+
+```bash
+curl -X POST https://YOUR_DOMAIN/api/public/fill \
+  -F "file=@template.hwpx" \
+  -F 'data={"TITLE":"2026 보고서","AUTHOR":"홍길동"}' \
+  --output output.hwpx
+```
 
 ---
 
