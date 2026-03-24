@@ -137,12 +137,30 @@ npm run dev
 # → http://localhost:3000
 ```
 
-**Deploy to Vercel:**
+**Deploy to Fly.io:**
+
+```bash
+cd web
+fly launch --no-deploy   # picks up fly.toml automatically
+fly secrets set OPENAI_API_KEY=sk-...
+fly secrets set AUTH_SECRET=your-secret
+fly secrets set BLOB_SIGNING_SECRET=your-secret
+fly volumes create hwpx_data --region nrt --size 1
+fly deploy
+```
+
+- Region: `nrt` (Tokyo) — closest to Korea
+- Blob storage is persisted to a Fly volume at `/data/blob-storage`
+- `auto_stop_machines = "off"` keeps the app always-on
+
+**Deploy to Vercel (serverless, no persistent storage):**
 
 1. Push this repo to GitHub
 2. Import `hwpx-report-automation/web` in Vercel
 3. Add `OPENAI_API_KEY` to Environment Variables
 4. Deploy
+
+> Note: Vercel doesn't support persistent filesystem volumes. Use Fly.io if you need blob storage to survive across requests.
 
 **Optional environment variables:**
 
