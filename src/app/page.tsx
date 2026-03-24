@@ -38,6 +38,7 @@ import {
 } from "@/lib/editor/document-templates";
 import { exportToPdf } from "@/lib/editor/export-pdf";
 import { exportToDocx } from "@/lib/editor/export-docx";
+import { exportToMarkdown } from "@/lib/editor/export-markdown";
 import { triggerDiffHighlightUpdate } from "@/lib/editor/diff-highlight-extension";
 import type { DiffHighlightSuggestion } from "@/lib/editor/diff-highlight-extension";
 import { INSTRUCTION_PRESETS } from "@/lib/editor/ai-presets";
@@ -49,6 +50,10 @@ import {
   type ReportFamilyPlan,
 } from "@/lib/report-family-planner";
 import { buildReportFamilyPromptContext } from "@/lib/report-family-prompt-context";
+import {
+  buildReportFamilyDraftEditorArtifacts,
+  type ReportFamilyDraft,
+} from "@/lib/report-family-draft-generator";
 import type { SessionIdentityProvider, SessionTenantMembership } from "@/lib/auth/session";
 import { evaluateQualityGate, type QualityGateResult } from "@/lib/quality-gates";
 import { recordPilotMetricEvent } from "@/lib/pilot-metrics";
@@ -560,6 +565,13 @@ export default function Home() {
   const [authSession, setAuthSession] = useState<AuthSessionResponse | null>(null);
   const [tenantSwitching, setTenantSwitching] = useState(false);
   const [workspaceDocument, setWorkspaceDocument] = useState<WorkspaceDocumentDetail | null>(null);
+  const [reportFamilyDraftState, setReportFamilyDraftState] = useState<{
+    isLoading: boolean;
+    error: string | null;
+  }>({
+    isLoading: false,
+    error: null,
+  });
   const autoSaveInFlightRef = useRef(false);
   const docRevisionRef = useRef(0);
   const lastAutoSavedRevisionRef = useRef(-1);
@@ -1037,6 +1049,91 @@ export default function Home() {
     });
   }, [fileName, fireReportFamilyPlanning, outline, setStatus, sourceSegments]);
 
+  const onGenerateReportFamilyDraft = useCallback(async () => {
+    if (!reportFamilyPlanState.plan) {
+      setStatus("먼저 리포트 패밀리 계획을 계산하세요.");
+      return;
+    }
+
+    const confirmed = window.confirm(
+      "현재 슬라이드 문서를 기반으로 새 보고서 초안을 생성해 편집기에 엽니다. 계속할까요?",
+    );
+    if (!confirmed) {
+      return;
+    }
+
+    setReportFamilyDraftState({ isLoading: true, error: null });
+    setBusy(true);
+    setStatus("슬라이드와 목표 보고서 양식을 기준으로 보고서 초안을 생성 중입니다...");
+
+    try {
+      const response = await fetch("/api/report-family/draft", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          plan: reportFamilyPlanState.plan,
+        }),
+      });
+      const result = (await response.json()) as {
+        draft?: ReportFamilyDraft;
+        error?: string;
+      };
+
+      if (!response.ok || !result.draft) {
+        throw new Error(result.error || "리포트 패밀리 초안 생성 실패");
+      }
+
+      const artifacts = buildReportFamilyDraftEditorArtifacts(result.draft);
+      const templateResp = await fetch("/base.hwpx");
+      if (!templateResp.ok) {
+        throw new Error("기본 HWPX 템플릿을 불러오지 못했습니다.");
+      }
+      const templateBuffer = await templateResp.arrayBuffer();
+      const hwpxDocumentModel = await buildHwpxModelFromDoc(templateBuffer, artifacts.doc);
+      const nextFileName = `${toFileStem(fileName || result.draft.familyName)}-report-draft.hwpx`;
+
+      setLoadedDocument({
+        fileName: nextFileName,
+        buffer: templateBuffer,
+        doc: artifacts.doc,
+        segments: artifacts.segments,
+        extraSegmentsMap: {},
+        integrityIssues: [],
+        complexObjectReport: null,
+        hwpxDocumentModel,
+      });
+      setOutline(buildOutlineFromDoc(artifacts.doc));
+      setTemplateCatalog(buildTemplateCatalogFromDoc(artifacts.doc));
+      setSelectedPreset("custom");
+      setPreviewStatus("unavailable");
+      docRevisionRef.current = 0;
+      lastAutoSavedRevisionRef.current = -1;
+
+      const failedCount = result.draft.evaluation.failedSections.length;
+      setStatus(
+        failedCount
+          ? `보고서 초안 생성 완료 (${result.draft.engine}, 점검 필요 섹션 ${failedCount}개)`
+          : `보고서 초안 생성 완료 (${result.draft.engine})`,
+      );
+      setReportFamilyDraftState({ isLoading: false, error: null });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "리포트 패밀리 초안 생성 실패";
+      setReportFamilyDraftState({ isLoading: false, error: message });
+      setStatus(message);
+    } finally {
+      setBusy(false);
+    }
+  }, [
+    fileName,
+    reportFamilyPlanState.plan,
+    setBusy,
+    setLoadedDocument,
+    setOutline,
+    setSelectedPreset,
+    setStatus,
+    setTemplateCatalog,
+  ]);
+
   /* ── File I/O ── */
   const loadFileIntoEditor = useCallback(
     async (
@@ -1045,6 +1142,7 @@ export default function Home() {
       options?: { workspaceDocument?: WorkspaceDocumentDetail | null },
     ) => {
       setBusy(true);
+      setReportFamilyDraftState({ isLoading: false, error: null });
       setViewMode("editor");
       try {
         const sourceExt = getFileExtension(file.name);
@@ -1217,6 +1315,7 @@ export default function Home() {
       openStartWizard(template ? "template" : "blank");
       clearWorkspaceContext();
       setBusy(true);
+      setReportFamilyDraftState({ isLoading: false, error: null });
       setViewMode("editor");
       setPreviewStatus("unavailable");
       setStatus(
@@ -1323,6 +1422,86 @@ export default function Home() {
     startDocumentFromTemplate,
     templateIdQuery,
   ]);
+
+  // ── Wizard draft handoff ──
+  useEffect(() => {
+    const raw = sessionStorage.getItem("pendingWizardDraft");
+    if (!raw) return;
+    sessionStorage.removeItem("pendingWizardDraft");
+
+    interface WizardFormatSettings { h1FontSize?: number; h2FontSize?: number; bodyFontSize?: number }
+    interface WizardPending { draft: ReportFamilyDraft; fileName?: string; formatSettings?: WizardFormatSettings }
+    let pending: WizardPending | null = null;
+    try {
+      pending = JSON.parse(raw) as WizardPending;
+    } catch {
+      return;
+    }
+    if (!pending?.draft) return;
+
+    /** doc JSON의 텍스트 노드에 fontSize textStyle 마크를 재귀 주입 */
+    const injectFontSizes = (
+      node: import("@tiptap/core").JSONContent,
+      fmt: WizardFormatSettings,
+    ): import("@tiptap/core").JSONContent => {
+      const stamp = (n: import("@tiptap/core").JSONContent, pt: number) => {
+        if (n.type !== "text" || !pt) return n;
+        const marks = (n.marks ?? []).filter((m) => m.type !== "textStyle");
+        return { ...n, marks: [...marks, { type: "textStyle", attrs: { fontSize: `${pt}pt` } }] };
+      };
+      if (node.type === "heading") {
+        const lvl = (node.attrs as { level?: number } | undefined)?.level ?? 1;
+        const pt = lvl === 1 ? (fmt.h1FontSize ?? 0) : (fmt.h2FontSize ?? 0);
+        return { ...node, content: (node.content ?? []).map((c) => stamp(c, pt)) };
+      }
+      if (node.type === "paragraph") {
+        const pt = fmt.bodyFontSize ?? 0;
+        return { ...node, content: (node.content ?? []).map((c) => stamp(c, pt)) };
+      }
+      if (node.content) {
+        return { ...node, content: node.content.map((c) => injectFontSizes(c, fmt)) };
+      }
+      return node;
+    };
+
+    const loadWizardDraft = async () => {
+      setStatus("마법사에서 생성된 초안을 불러오는 중…");
+      try {
+        const rawArtifacts = buildReportFamilyDraftEditorArtifacts(pending!.draft);
+        const fmt = pending!.formatSettings ?? {};
+        const artifacts = {
+          ...rawArtifacts,
+          doc: (fmt.h1FontSize || fmt.h2FontSize || fmt.bodyFontSize)
+            ? injectFontSizes(rawArtifacts.doc, fmt)
+            : rawArtifacts.doc,
+        };
+        const templateResp = await fetch("/base.hwpx");
+        if (!templateResp.ok) throw new Error("기본 HWPX 템플릿을 불러오지 못했습니다.");
+        const templateBuffer = await templateResp.arrayBuffer();
+        const hwpxDocumentModel = await buildHwpxModelFromDoc(templateBuffer, artifacts.doc);
+        const stem = (pending!.fileName ?? pending!.draft.familyName).replace(/\s+/g, "-");
+        setLoadedDocument({
+          fileName: `${stem}-draft.hwpx`,
+          buffer: templateBuffer,
+          doc: artifacts.doc,
+          segments: artifacts.segments,
+          extraSegmentsMap: {},
+          integrityIssues: [],
+          complexObjectReport: null,
+          hwpxDocumentModel,
+        });
+        setOutline(buildOutlineFromDoc(artifacts.doc));
+        setTemplateCatalog(buildTemplateCatalogFromDoc(artifacts.doc));
+        setSelectedPreset("custom");
+        setPreviewStatus("unavailable");
+        setStatus(`"${pending!.draft.familyName}" 초안 로드 완료`);
+      } catch (err) {
+        setStatus(`초안 로드 실패: ${err instanceof Error ? err.message : "알 수 없는 오류"}`);
+      }
+    };
+    void loadWizardDraft();
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const openWorkspaceDocument = useCallback(async (documentId: string) => {
     if (!authSession?.activeTenant || !documentId) {
@@ -1554,7 +1733,7 @@ export default function Home() {
       const result = await applyProseMirrorDocToHwpx(sourceBuffer, editorDoc, sourceSegments, extraSegmentsMap, hwpxDocumentModel);
       const combinedWarnings = Array.from(
         new Set([...(complexObjectReport?.warnings ?? []), ...result.warnings]),
-      );
+      ).filter((w) => !w.includes("HWPX-CHARPR-MISSING"));
       setEditsPreview(result.edits);
       setExportWarnings(Array.from(new Set([...combinedWarnings, ...templateValidationWarnings])));
       if (result.integrityIssues.length) {
@@ -2772,6 +2951,18 @@ export default function Home() {
             setStatus(message);
           }
         }}
+        onExportMarkdown={() => {
+          if (!editorDoc) {
+            setStatus("먼저 문서를 업로드하세요.");
+            return;
+          }
+          try {
+            exportToMarkdown(editorDoc, fileName || "document");
+            setStatus(`마크다운 내보내기 완료`);
+          } catch (error) {
+            setStatus(`마크다운 내보내기 실패: ${error instanceof Error ? error.message : "오류"}`);
+          }
+        }}
         onExportDocx={async () => {
           if (!editorDoc) {
             setStatus("먼저 문서를 업로드하세요.");
@@ -3063,8 +3254,11 @@ export default function Home() {
                     compatibilityWarningCount: exportWarnings.length,
                   }}
                   reportFamilyPlanState={reportFamilyPlanState}
+                  reportFamilyDraftState={reportFamilyDraftState}
                   canGenerateReportFamilyPlan={getFileExtension(fileName) === "pptx" && sourceSegments.length > 0 && outline.length > 0}
                   onGenerateReportFamilyPlan={onRefreshReportFamilyPlan}
+                  canGenerateReportFamilyDraft={Boolean(reportFamilyPlanState.plan?.sectionPlans.length)}
+                  onGenerateReportFamilyDraft={() => void onGenerateReportFamilyDraft()}
                 />
               }
             history={

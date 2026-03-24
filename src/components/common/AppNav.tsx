@@ -7,6 +7,7 @@ import Link from "next/link";
 
 const NAV_ITEMS = [
   { href: "/", label: "편집기" },
+  { href: "/report-family/wizard", label: "보고서 생성" },
   { href: "/documents", label: "문서 관리" },
   { href: "/dashboard", label: "대시보드" },
   { href: "/settings", label: "설정" },
@@ -27,7 +28,7 @@ export function AppNav() {
             href="/"
             className="mr-2 text-sm font-semibold tracking-tight text-[var(--color-notion-text)]"
           >
-            HWPX Editor
+            HWPX Studio
           </Link>
           {/* Desktop nav */}
           <div className="hidden items-center gap-0.5 sm:flex">

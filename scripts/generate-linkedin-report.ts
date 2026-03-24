@@ -12,7 +12,7 @@ function fallbackLines(today: string): string[] {
   return [
     "LinkedIn 공유용 프로젝트 업데이트",
     `${today}`,
-    "프로젝트: HWPX Editor for Vercel",
+    "프로젝트: HWPX Studio",
     "오늘은 HWPX 자동 편집의 실사용성을 검증했습니다.",
     "1. 오늘 완료한 핵심 작업",
     "- HWPX 업로드 후 텍스트 노드 탐색 UI 안정화",
@@ -107,7 +107,7 @@ async function generateLines(
           `- lines 길이: 정확히 25개\n` +
           `- 각 라인은 1문장/짧은 구 형태, XML/마크다운 코드블록 금지\n` +
           `- 톤: 링크드인에 올릴 수 있는 전문적/실무 공유 톤\n` +
-          `- 프로젝트 맥락: HWPX Editor for Vercel, AI 제안 API(/api/suggest, /api/suggest-batch), XML 텍스트 치환, 무결성 검사(mimetype/version.xml/content.hpf), Undo/Redo, 섹션 자동 선택, Diff 프리뷰\n` +
+          `- 프로젝트 맥락: HWPX Studio, AI 제안 API(/api/suggest, /api/suggest-batch), XML 텍스트 치환, 무결성 검사(mimetype/version.xml/content.hpf), Undo/Redo, 섹션 자동 선택, Diff 프리뷰\n` +
           `- 구성: 제목, 날짜(${today}), 핵심성과, 기술포인트, 다음계획, 마지막 해시태그 라인\n` +
           `- 과장 금지, 숫자/성과 중심으로 명확하게 작성`,
       },

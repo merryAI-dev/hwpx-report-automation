@@ -34,8 +34,14 @@ type DocumentAnalysisPanelProps = {
     compatibilityWarningCount: number;
   };
   reportFamilyPlanState: ReportFamilyPlanState;
+  reportFamilyDraftState: {
+    isLoading: boolean;
+    error: string | null;
+  };
   canGenerateReportFamilyPlan: boolean;
   onGenerateReportFamilyPlan: () => void;
+  canGenerateReportFamilyDraft: boolean;
+  onGenerateReportFamilyDraft: () => void;
 };
 
 function ScoreBar({ score }: { score: number }) {
@@ -82,8 +88,11 @@ export function DocumentAnalysisPanel({
   performanceStats,
   qaStats,
   reportFamilyPlanState,
+  reportFamilyDraftState,
   canGenerateReportFamilyPlan,
   onGenerateReportFamilyPlan,
+  canGenerateReportFamilyDraft,
+  onGenerateReportFamilyDraft,
 }: DocumentAnalysisPanelProps) {
   const [expandTerms, setExpandTerms] = useState(true);
   const [expandTemplateFields, setExpandTemplateFields] = useState(true);
@@ -171,23 +180,46 @@ export function DocumentAnalysisPanel({
             <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.6 }}>
               PPTX 기반 보고서 family용 TOC, masking, slide-grounded prompt 계획입니다.
             </div>
-            <button
-              type="button"
-              onClick={onGenerateReportFamilyPlan}
-              disabled={isBusy || reportFamilyPlanState.isLoading || !canGenerateReportFamilyPlan}
-              style={{
-                borderRadius: 10,
-                border: "1px solid #cbd5e1",
-                background: canGenerateReportFamilyPlan ? "#ffffff" : "#f8fafc",
-                color: canGenerateReportFamilyPlan ? "#0f172a" : "#94a3b8",
-                padding: "6px 10px",
-                fontSize: 12,
-                fontWeight: 600,
-                cursor: canGenerateReportFamilyPlan ? "pointer" : "not-allowed",
-              }}
-            >
-              {reportFamilyPlanState.isLoading ? "계획 계산 중..." : "계획 다시 계산"}
-            </button>
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                type="button"
+                onClick={onGenerateReportFamilyPlan}
+                disabled={isBusy || reportFamilyPlanState.isLoading || !canGenerateReportFamilyPlan}
+                style={{
+                  borderRadius: 10,
+                  border: "1px solid #cbd5e1",
+                  background: canGenerateReportFamilyPlan ? "#ffffff" : "#f8fafc",
+                  color: canGenerateReportFamilyPlan ? "#0f172a" : "#94a3b8",
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: canGenerateReportFamilyPlan ? "pointer" : "not-allowed",
+                }}
+              >
+                {reportFamilyPlanState.isLoading ? "계획 계산 중..." : "계획 다시 계산"}
+              </button>
+              <button
+                type="button"
+                onClick={onGenerateReportFamilyDraft}
+                disabled={
+                  isBusy ||
+                  reportFamilyDraftState.isLoading ||
+                  !canGenerateReportFamilyDraft
+                }
+                style={{
+                  borderRadius: 10,
+                  border: "1px solid #1d4ed8",
+                  background: canGenerateReportFamilyDraft ? "#1d4ed8" : "#dbeafe",
+                  color: canGenerateReportFamilyDraft ? "#eff6ff" : "#93c5fd",
+                  padding: "6px 10px",
+                  fontSize: 12,
+                  fontWeight: 700,
+                  cursor: canGenerateReportFamilyDraft ? "pointer" : "not-allowed",
+                }}
+              >
+                {reportFamilyDraftState.isLoading ? "초안 생성 중..." : "보고서 초안 생성"}
+              </button>
+            </div>
           </div>
 
           {reportFamilyPlanState.error ? (
@@ -205,9 +237,30 @@ export function DocumentAnalysisPanel({
             </div>
           ) : null}
 
+          {reportFamilyDraftState.error ? (
+            <div
+              style={{
+                fontSize: 12,
+                padding: "6px 8px",
+                background: "#fff1f2",
+                border: "1px solid #fecdd3",
+                borderRadius: 8,
+                color: "#9f1239",
+              }}
+            >
+              {reportFamilyDraftState.error}
+            </div>
+          ) : null}
+
           {!canGenerateReportFamilyPlan && !reportFamilyPlanState.plan ? (
             <div style={{ fontSize: 12, color: "#64748b" }}>
               현재는 PPTX 문서를 열었을 때만 slide-grounded 계획을 자동 계산합니다.
+            </div>
+          ) : null}
+
+          {canGenerateReportFamilyDraft ? (
+            <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.6 }}>
+              계획이 계산되면 현재 슬라이드 문서를 닫고 target TOC 기준의 새 보고서 초안을 생성합니다.
             </div>
           ) : null}
 
