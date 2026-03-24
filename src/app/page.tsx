@@ -1775,8 +1775,11 @@ export default function Home() {
           expiresAt: uploaded.expiresAt,
         };
       } catch (error) {
-        remoteUploadWarning =
-          error instanceof Error ? error.message : "외부 저장소 업로드에 실패했습니다.";
+        const msg = error instanceof Error ? error.message : "외부 저장소 업로드에 실패했습니다.";
+        // 로컬/게스트 환경에서는 테넌트가 없으므로 업로드 불가 — 경고 없이 무시
+        if (!msg.toLowerCase().includes("active tenant")) {
+          remoteUploadWarning = msg;
+        }
       }
 
       setDownload({
