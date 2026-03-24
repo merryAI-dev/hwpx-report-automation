@@ -47,3 +47,7 @@ prisma/dev.db-journal
 dev.db
 dev.db-journal
 .mcp.json
+.gitnexus
+
+# Internal documents
+*.pdf

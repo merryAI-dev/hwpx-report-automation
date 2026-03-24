@@ -1,0 +1,35 @@
+한컴오피스 HWPX 검증 파이프라인
+================================
+
+사전 준비:
+  1. Hancom Office HWP 설치 (/Applications/Hancom Office HWP.app)
+  2. Terminal.app에 Screen Recording 권한 부여
+     시스템 설정 → 개인정보 보호 및 보안 → 화면 기록 → Terminal 체크
+
+사용법:
+
+  # 단일 파일 검증
+  ./scripts/hancom-verify/verify-hwpx.sh examples/input-sample.hwpx
+
+  # examples/ 전체 일괄 검증
+  ./scripts/hancom-verify/verify-all.sh
+
+  # 라운드트립 비교 (원본 vs 내보내기)
+  ./scripts/hancom-verify/verify-roundtrip.sh examples/original.hwpx /tmp/exported.hwpx
+
+  # Node.js 테스트로 실행 (web/ 디렉토리에서)
+  HANCOM_VERIFY=1 pnpm test:hancom
+
+  # npm 스크립트
+  pnpm verify:hwpx ../examples/input-sample.hwpx
+  pnpm verify:all
+
+출력:
+  스크린샷은 screenshots/ 디렉토리에 저장됩니다.
+  파일명: <원본이름>-<타임스탬프>.png
+
+참고:
+  - 최초 실행 시 Swift 도우미가 자동 컴파일됩니다 (~10초)
+  - 이후 실행은 캐시된 바이너리를 사용합니다
+  - Claude Code 터미널에서는 Screen Recording 권한이 없어 동작하지 않습니다
+  - 반드시 사용자의 일반 Terminal.app에서 실행하세요
