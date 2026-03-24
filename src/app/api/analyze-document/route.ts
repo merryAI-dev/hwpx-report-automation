@@ -2,7 +2,7 @@ import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { withApiAuth } from "@/lib/auth/with-api-auth";
 import {
-  requireApiKey,
+  requireUserApiKey,
   withTimeout,
   handleApiError,
   DEFAULT_API_TIMEOUT_MS,
@@ -37,7 +37,7 @@ async function handlePost(request: Request) {
   if (rateLimitResp) return rateLimitResp;
 
   try {
-    const apiKey = requireApiKey("OPENAI_API_KEY", "OpenAI");
+    const { apiKey } = await requireUserApiKey("openai");
     const baseURL = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
     const defaultModel = process.env.OPENAI_MODEL || "gpt-4.1-mini";
 

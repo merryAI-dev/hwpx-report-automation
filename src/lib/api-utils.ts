@@ -7,6 +7,7 @@
 import { NextResponse } from "next/server";
 import { AppError, ValidationError, ApiKeyError, toErrorResponse } from "./errors";
 import { log } from "./logger";
+import { getApiKey, type ApiProvider } from "./api-keys";
 
 /** Parse and validate a JSON request body. Throws ValidationError on malformed JSON. */
 export async function parseJsonBody<T>(request: Request): Promise<T> {
@@ -29,11 +30,29 @@ export function requireString(
   return str;
 }
 
-/** Require an environment-variable API key. */
+/** Require an environment-variable API key (legacy — prefer requireUserApiKey). */
 export function requireApiKey(envVar: string, providerLabel: string): string {
   const key = process.env[envVar];
   if (!key) throw new ApiKeyError(providerLabel);
   return key;
+}
+
+/**
+ * BYOK: 사용자 DB 키 우선, env 폴백.
+ * 인증 세션에서 userEmail을 가져와 해당 사용자의 암호화된 키를 조회합니다.
+ */
+export async function requireUserApiKey(provider: ApiProvider): Promise<{ apiKey: string; userEmail: string }> {
+  const { auth } = await import("./auth");
+  const session = await auth();
+  const userEmail = session?.user?.email ?? null;
+  const key = await getApiKey(userEmail, provider);
+  if (!key) {
+    const label = provider === "anthropic" ? "Anthropic" : "OpenAI";
+    throw new ApiKeyError(
+      `${label} API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 입력해주세요.`,
+    );
+  }
+  return { apiKey: key, userEmail: userEmail ?? "anonymous" };
 }
 
 /** Wrap a promise with an AbortController timeout. */

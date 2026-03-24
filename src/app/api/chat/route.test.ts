@@ -23,6 +23,14 @@ vi.mock("@/lib/audit", () => ({
   recordAudit: vi.fn(),
 }));
 
+vi.mock("@/lib/api-utils", async () => {
+  const actual = await vi.importActual("@/lib/api-utils");
+  return {
+    ...actual,
+    requireUserApiKey: vi.fn().mockResolvedValue({ apiKey: "test-key", userEmail: "test@example.com" }),
+  };
+});
+
 vi.mock("@/lib/logger", () => ({
   log: {
     debug: vi.fn(),
@@ -34,6 +42,8 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { POST } from "./route";
+import { requireUserApiKey } from "@/lib/api-utils";
+import { ApiKeyError } from "@/lib/errors";
 
 function makeRequest(body: Record<string, unknown>): Request {
   return new Request("http://localhost/api/chat", {
@@ -65,7 +75,7 @@ describe("/api/chat", () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
-    process.env.ANTHROPIC_API_KEY = "test-key";
+    vi.mocked(requireUserApiKey).mockResolvedValue({ apiKey: "test-key", userEmail: "test@example.com" });
     mockMessagesStream.mockClear();
     mockStream.on.mockClear();
     mockStream.finalMessage.mockReset();
@@ -76,7 +86,7 @@ describe("/api/chat", () => {
   });
 
   it("returns 500 JSON when API key is missing", async () => {
-    delete process.env.ANTHROPIC_API_KEY;
+    vi.mocked(requireUserApiKey).mockRejectedValue(new ApiKeyError("Anthropic"));
 
     const res = await POST(makeRequest(VALID_BODY));
 

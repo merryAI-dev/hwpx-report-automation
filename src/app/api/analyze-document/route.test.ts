@@ -17,6 +17,14 @@ vi.mock("@/lib/audit", () => ({
   recordAudit: vi.fn(),
 }));
 
+vi.mock("@/lib/api-utils", async () => {
+  const actual = await vi.importActual("@/lib/api-utils");
+  return {
+    ...actual,
+    requireUserApiKey: vi.fn().mockResolvedValue({ apiKey: "test-key", userEmail: "test@example.com" }),
+  };
+});
+
 vi.mock("@/lib/logger", () => ({
   log: {
     debug: vi.fn(),
@@ -28,6 +36,8 @@ vi.mock("@/lib/logger", () => ({
 }));
 
 import { POST } from "./route";
+import { requireUserApiKey } from "@/lib/api-utils";
+import { ApiKeyError } from "@/lib/errors";
 
 function makeRequest(body: Record<string, unknown>): Request {
   return new Request("http://localhost/api/analyze-document", {
@@ -41,7 +51,7 @@ describe("/api/analyze-document", () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
-    process.env.OPENAI_API_KEY = "test-key";
+    vi.mocked(requireUserApiKey).mockResolvedValue({ apiKey: "test-key", userEmail: "test@example.com" });
     mockCreate.mockReset();
   });
 
@@ -101,7 +111,7 @@ describe("/api/analyze-document", () => {
   });
 
   it("returns 500 when API key is missing", async () => {
-    delete process.env.OPENAI_API_KEY;
+    vi.mocked(requireUserApiKey).mockRejectedValue(new ApiKeyError("OpenAI"));
 
     const res = await POST(makeRequest({
       segments: [{ id: "s1", text: "테스트", type: "paragraph" }],
