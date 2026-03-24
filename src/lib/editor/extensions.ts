@@ -178,6 +178,7 @@ export function createEditorExtensions(options: EditorExtensionOptions = {}) {
   return [
     StarterKit.configure({
       heading: false, // 기본 헤딩 끔
+      underline: false, // 별도 extension으로 등록
     }),
     CustomHeading.configure({
       levels: [1, 2, 3, 4, 5],

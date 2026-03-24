@@ -51,3 +51,4 @@ dev.db-journal
 
 # Internal documents
 *.pdf
+.gstack/

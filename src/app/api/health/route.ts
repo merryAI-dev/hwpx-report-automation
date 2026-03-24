@@ -34,21 +34,9 @@ export async function GET() {
   return NextResponse.json({
     status: allOk ? "ok" : "degraded",
     timestamp: new Date().toISOString(),
-    version: process.env.npm_package_version || "0.0.0",
     checks: {
-      storage: {
-        ok: storage.ok,
-        driver: storage.driver,
-        writable: storage.writable,
-      },
-      ai: {
-        ok: hasAnyAI,
-        anthropic: hasAnthropic,
-        openai: hasOpenAI,
-        model: hasAnthropic
-          ? (process.env.ANTHROPIC_MODEL || "claude-sonnet-4-6")
-          : (process.env.OPENAI_MODEL || "gpt-4.1-mini"),
-      },
+      storage: { ok: storage.ok },
+      ai: { ok: hasAnyAI },
     },
   });
 }

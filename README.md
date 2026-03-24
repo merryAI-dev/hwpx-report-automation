@@ -48,7 +48,7 @@ hwpx-report-automation/
 │   └── hancom-verify/          HWPX 무결성 검증 도구 (Swift/macOS)
 │
 └── web/                        Next.js 웹 애플리케이션
-    ├── src/app/                페이지 및 API 라우트 (엔드포인트 27개)
+    ├── src/app/                페이지 및 API 라우트 (엔드포인트 64개)
     ├── src/lib/                비즈니스 로직 — HWPX 처리, AI 연동
     └── prisma/                 SQLite 데이터베이스 스키마 (LibSQL)
 ```
@@ -124,7 +124,7 @@ python scripts/build_report.py \
 **주요 기능:**
 - HWPX 업로드 → 텍스트 노드 탐색 및 편집
 - 구형 `.hwp` 업로드 (외부 변환기 연동)
-- AI 채팅 사이드바 — 마크다운 렌더링 지원, 섹션 일괄 재작성
+- AI 채팅 사이드바 — 마크다운 렌더링 지원, 섹션 일괄 재작성 (Anthropic / OpenAI / Google Gemini BYOK)
 - PPTX 분석 → HWPX 보고서 생성 마법사 (4단계)
 - `{{PLACEHOLDER}}` 치환, 배치 문서 생성
 - 문서함·대시보드 — Notion 스타일 UI
@@ -151,6 +151,41 @@ npm run dev
 | 문서 대량 생성 | 웹 UI | `npm run dev` |
 | HWPX 파일 무결성 검증 | hancom-verify | `scripts/hancom-verify/` 참고 |
 | 파이프라인에 통합 | Python API | `apply_placeholders()` import |
+| HTTP로 연동 | 공개 REST API | `/api/public/*` (아래 참고) |
+
+---
+
+## 공개 REST API
+
+인증 없이 사용할 수 있는 공개 API 엔드포인트입니다. **Rate limit: IP당 2 req/min, 최대 10 MB.**
+
+### `GET /api/public/health`
+
+```bash
+curl https://YOUR_DOMAIN/api/public/health
+# → {"status":"ok","ts":"2025-01-15T09:00:00.000Z"}
+```
+
+### `POST /api/public/extract`
+
+HWPX 파일의 모든 텍스트 노드를 추출합니다.
+
+```bash
+curl -X POST https://YOUR_DOMAIN/api/public/extract \
+  -F "file=@document.hwpx"
+# → {"nodes":[{"file":"Contents/section0.xml","index":0,"text":"제목 입력"},...], "count":5}
+```
+
+### `POST /api/public/fill`
+
+HWPX 템플릿의 `{{PLACEHOLDER}}`를 치환하고, 완성된 파일을 반환합니다.
+
+```bash
+curl -X POST https://YOUR_DOMAIN/api/public/fill \
+  -F "file=@template.hwpx" \
+  -F 'data={"TITLE":"2026 보고서","AUTHOR":"홍길동"}' \
+  --output output.hwpx
+```
 
 ---
 

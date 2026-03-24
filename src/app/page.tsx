@@ -1775,8 +1775,11 @@ export default function Home() {
           expiresAt: uploaded.expiresAt,
         };
       } catch (error) {
-        remoteUploadWarning =
-          error instanceof Error ? error.message : "외부 저장소 업로드에 실패했습니다.";
+        const msg = error instanceof Error ? error.message : "외부 저장소 업로드에 실패했습니다.";
+        // 로컬/게스트 환경에서는 테넌트가 없으므로 업로드 불가 — 경고 없이 무시
+        if (!msg.toLowerCase().includes("active tenant")) {
+          remoteUploadWarning = msg;
+        }
       }
 
       setDownload({
@@ -2960,8 +2963,8 @@ export default function Home() {
 
   return (
     <div className={styles.page}>
-      {/* ── 로컬 임시저장 복원 배너 ── */}
-      {draftCache && !editorDoc && (
+      {/* ── 로컬 임시저장 복원 배너 — editorDoc & editor가 마운트된 후에만 표시 ── */}
+      {draftCache && editorDoc && editor && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[300] bg-[var(--color-notion-bg)] border border-[var(--color-notion-border)] rounded-xl shadow-lg px-5 py-3 flex items-center gap-4 text-sm whitespace-nowrap">
           <span className="text-[var(--color-notion-text-secondary)]">
             <strong className="text-[var(--color-notion-text)]">{draftCache.fileName}</strong>
@@ -2972,8 +2975,8 @@ export default function Home() {
             type="button"
             className="px-3 py-1.5 rounded-lg bg-[var(--color-notion-accent)] text-white text-xs font-semibold cursor-pointer"
             onClick={() => {
-              editor?.commands.setContent(draftCache.json);
-              setDraftCache(null);
+              editor.commands.setContent(draftCache.json);
+              clearDraftCache();
             }}
           >복원</button>
           <button
@@ -3226,6 +3229,7 @@ export default function Home() {
                 onLoadRecentSnapshot={onLoadRecentSnapshot}
                 onStartBlank={() => void startDocumentFromTemplate(null)}
                 onStartFromTemplate={(template) => void startDocumentFromTemplate(template)}
+                onClose={closeStartWizard}
               />
             </div>
           ) : null}

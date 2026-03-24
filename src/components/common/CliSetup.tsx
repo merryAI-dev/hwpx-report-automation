@@ -17,6 +17,7 @@ type CliSetupProps = {
   onLoadRecentSnapshot: (id: string) => void;
   onStartBlank: () => void;
   onStartFromTemplate: (template: DocumentTemplate) => void;
+  onClose?: () => void;
 };
 
 type Phase =
@@ -229,6 +230,7 @@ export function CliSetup({
   onLoadRecentSnapshot,
   onStartBlank,
   onStartFromTemplate,
+  onClose,
 }: CliSetupProps) {
   const hasAnyKey = PROVIDERS.some((p) => hasStoredApiKey(p.id));
   const [phase, setPhase] = useState<Phase>(hasAnyKey ? "doc-select" : "api-setup");
@@ -723,7 +725,16 @@ export function CliSetup({
       <div className="w-full max-w-2xl flex flex-col max-h-[85vh] rounded-xl overflow-hidden border border-[var(--color-cli-border)] shadow-[0_0_60px_rgba(63,185,80,0.06),0_25px_50px_rgba(0,0,0,0.5)]">
         {/* Title bar */}
         <div className="shrink-0 flex items-center gap-1.5 px-4 py-3 bg-[var(--color-cli-surface)] border-b border-[var(--color-cli-border)]">
-          <span className="h-3 w-3 rounded-full bg-[#ff5f57]" />
+          {onClose ? (
+            <button
+              type="button"
+              onClick={onClose}
+              className="h-3 w-3 rounded-full bg-[#ff5f57] hover:opacity-75 transition-opacity cursor-pointer"
+              title="닫기"
+            />
+          ) : (
+            <span className="h-3 w-3 rounded-full bg-[#ff5f57]" />
+          )}
           <span className="h-3 w-3 rounded-full bg-[#febc2e]" />
           <span className="h-3 w-3 rounded-full bg-[#28c840]" />
           <span className="ml-auto text-[var(--color-cli-dim)] text-xs select-none tracking-wide">
