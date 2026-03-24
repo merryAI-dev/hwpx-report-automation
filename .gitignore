@@ -6,3 +6,24 @@ screenshots/
 
 # compiled Swift helpers
 scripts/hancom-verify/.build/
+
+# GitNexus index
+.gitnexus/
+
+# 환경 변수 파일 (API 키 포함)
+web/.env.local
+web/.env
+web/.env*.local
+
+# Next.js 빌드 캐시
+web/.next/
+
+# Vercel 설정
+web/.vercel/
+
+# Blob 스토리지 캐시
+web/.blob-storage/
+
+# Internal business documents (do not re-add)
+COMMERCIALIZATION_ROADMAP_GANTT_KR.md
+EXECUTIVE_6PAGER_ASIS_TOBE_KR.md
