@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { withApiAuth } from "@/lib/auth/with-api-auth";
-import type { AuthenticatedSession } from "@/lib/auth/with-api-auth";
+import { withApiAuth, type AuthenticatedSession } from "@/lib/auth/with-api-auth";
 import {
   requireString,
   withTimeout,
