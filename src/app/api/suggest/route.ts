@@ -1,13 +1,12 @@
-import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { withApiAuth } from "@/lib/auth/with-api-auth";
 import {
   requireString,
-  requireUserApiKey,
   withTimeout,
   handleApiError,
   DEFAULT_API_TIMEOUT_MS,
 } from "@/lib/api-utils";
+import { requireOpenAIClientFromRequest } from "@/lib/server/openai-client";
 import { ValidationError } from "@/lib/errors";
 import { log } from "@/lib/logger";
 import { validateBodySize, checkRateLimit, checkMonthlyCostLimit, getClientIp } from "@/lib/api-validation";
@@ -32,9 +31,7 @@ async function handlePost(request: Request) {
 
 
   try {
-    const { apiKey } = await requireUserApiKey("openai");
-    const baseURL = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-    const defaultModel = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+    const { client, defaultModel } = requireOpenAIClientFromRequest(request);
 
     // ── Body size validation ──
     const rawBody = await request.text();
@@ -55,7 +52,6 @@ async function handlePost(request: Request) {
     const costLimitResp = await checkMonthlyCostLimit(body.monthlyCostLimitUsd ?? 0);
     if (costLimitResp) return costLimitResp;
 
-    const client = new OpenAI({ apiKey, baseURL });
     const styleContext = JSON.stringify(body.styleHints || {}, null, 0);
 
     const completion = await log.time("suggest.openai", () =>

@@ -31,17 +31,8 @@ export async function proxy(request: NextRequest) {
     return NextResponse.next();
   }
 
-  if (session) {
-    return NextResponse.next();
-  }
-
-  if (pathname.startsWith("/api/")) {
-    return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-  }
-
-  const loginUrl = new URL("/login", request.url);
-  loginUrl.searchParams.set("next", `${pathname}${search}`);
-  return NextResponse.redirect(loginUrl);
+  // Auth is optional — allow access without a session
+  return NextResponse.next();
 }
 
 export const config = {

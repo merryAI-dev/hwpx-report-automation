@@ -1,8 +1,7 @@
-import OpenAI from "openai";
+import { requireOpenAIClientFromRequest } from "@/lib/server/openai-client";
 import { NextResponse } from "next/server";
 import { withApiAuth } from "@/lib/auth/with-api-auth";
 import {
-  requireUserApiKey,
   withTimeout,
   handleApiError,
   DEFAULT_API_TIMEOUT_MS,
@@ -37,9 +36,7 @@ async function handlePost(request: Request) {
   if (rateLimitResp) return rateLimitResp;
 
   try {
-    const { apiKey } = await requireUserApiKey("openai");
-    const baseURL = process.env.OPENAI_BASE_URL || "https://api.openai.com/v1";
-    const defaultModel = process.env.OPENAI_MODEL || "gpt-4.1-mini";
+    const { client, defaultModel } = requireOpenAIClientFromRequest(request);
 
     // ── Body size validation ──
     const rawBody = await request.text();
@@ -71,7 +68,6 @@ async function handlePost(request: Request) {
     const costLimitResp = await checkMonthlyCostLimit(body.monthlyCostLimitUsd ?? 0);
     if (costLimitResp) return costLimitResp;
 
-    const client = new OpenAI({ apiKey, baseURL });
 
     // Truncate each segment text to 200 chars, limit to 100 segments
     const truncated = segments.slice(0, 100).map((s) => ({

@@ -1,4 +1,5 @@
 import type { ChatRequest, ToolCallInfo, ToolResultInfo } from "@/types/chat";
+import { getApiKeyHeaders } from "@/lib/client-api-keys";
 
 export type ChatStreamCallbacks = {
   onTextDelta: (text: string) => void;
@@ -19,7 +20,7 @@ export async function streamChat(
 ): Promise<void> {
   const response = await fetch("/api/chat", {
     method: "POST",
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...getApiKeyHeaders() },
     body: JSON.stringify(request),
   });
 

@@ -16,6 +16,18 @@ export type AuthenticatedRouteHandler<T extends Request = Request, C = unknown> 
   context?: C,
 ) => Promise<Response> | Response;
 
+const GUEST_SESSION: AuthenticatedSession = {
+  sub: "guest",
+  email: "guest@local",
+  displayName: "Guest",
+  provider: { id: "guest", type: "password" as const, displayName: "Local" },
+  memberships: [],
+  activeTenantId: "",
+  iat: 0,
+  exp: 0,
+  activeTenant: null,
+};
+
 export function withApiAuth<T extends Request = Request, C = unknown>(
   handler: AuthenticatedRouteHandler<T, C>,
   options: {
@@ -24,14 +36,10 @@ export function withApiAuth<T extends Request = Request, C = unknown>(
 ) {
   return async (request: T, context?: C) => {
     const session = await readSessionFromRequest(request);
-    if (!session) {
-      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
-    }
 
-    const authenticatedSession: AuthenticatedSession = {
-      ...session,
-      activeTenant: getActiveTenantMembership(session),
-    };
+    const authenticatedSession: AuthenticatedSession = session
+      ? { ...session, activeTenant: getActiveTenantMembership(session) }
+      : GUEST_SESSION;
 
     if (options.requireTenant && !authenticatedSession.activeTenant) {
       return NextResponse.json({ error: "Active tenant is required." }, { status: 403 });

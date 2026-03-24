@@ -4,6 +4,8 @@ import path from "node:path";
 import type {
   CreateWorkspaceDocumentPayload,
   CreateWorkspaceTemplatePayload,
+  TenantInfo,
+  TenantMember,
   WorkspaceAccessRole,
   WorkspaceAuditEvent,
   WorkspaceDocumentDetail,
@@ -1122,4 +1124,125 @@ export async function getTemplateVersionReview(params: {
     params.env,
   );
   return readJsonFile<TemplateVersionReview>(filePath);
+}
+
+// ── Tenant Member Management ──────────────────────────────────────────────────
+
+const MEMBERS_FILE = "members.jsonl";
+
+function membersFilePath(tenantId: string, env?: WorkspaceEnv): string {
+  return path.join(tenantRoot(tenantId, env), MEMBERS_FILE);
+}
+
+async function readAllMembers(filePath: string): Promise<TenantMember[]> {
+  try {
+    const raw = await fs.readFile(filePath, "utf8");
+    const byUserId = new Map<string, TenantMember>();
+    for (const line of raw.split(/\r?\n/)) {
+      const trimmed = line.trim();
+      if (!trimmed) continue;
+      const entry = JSON.parse(trimmed) as TenantMember;
+      byUserId.set(entry.userId, entry);
+    }
+    return Array.from(byUserId.values());
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException)?.code === "ENOENT") {
+      return [];
+    }
+    throw error;
+  }
+}
+
+async function writeAllMembers(filePath: string, members: TenantMember[]): Promise<void> {
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  const content = members.map((m) => JSON.stringify(m)).join("\n") + (members.length > 0 ? "\n" : "");
+  await fs.writeFile(filePath, content, "utf8");
+}
+
+export async function getTenantInfo(
+  tenantId: string,
+  env?: WorkspaceEnv,
+): Promise<TenantInfo> {
+  const root = tenantRoot(tenantId, env);
+  let createdAt: string;
+  try {
+    const stat = await fs.stat(root);
+    createdAt = stat.birthtime.toISOString();
+  } catch {
+    createdAt = new Date().toISOString();
+  }
+
+  const members = await listTenantMembers(tenantId, env);
+  return {
+    tenantId,
+    tenantName: sanitizeId(tenantId, "tenantId"),
+    createdAt,
+    memberCount: members.length,
+  };
+}
+
+export async function listTenantMembers(
+  tenantId: string,
+  env?: WorkspaceEnv,
+): Promise<TenantMember[]> {
+  const filePath = membersFilePath(tenantId, env);
+  return readAllMembers(filePath);
+}
+
+export async function upsertTenantMember(params: {
+  tenantId: string;
+  actorRole: string;
+  member: {
+    userId: string;
+    email: string;
+    displayName: string;
+    role: WorkspaceAccessRole;
+  };
+  actorUserId?: string;
+  env?: WorkspaceEnv;
+  now?: Date;
+}): Promise<TenantMember> {
+  const actorRoleNormalized = params.actorRole.trim().toLowerCase();
+  if (actorRoleNormalized !== "owner" && actorRoleNormalized !== "manager") {
+    throw new Error("Tenant management access denied.");
+  }
+
+  const filePath = membersFilePath(params.tenantId, params.env);
+  const entry: TenantMember = {
+    userId: params.member.userId,
+    email: params.member.email,
+    displayName: params.member.displayName,
+    role: params.member.role,
+    addedAt: (params.now || new Date()).toISOString(),
+    addedBy: params.actorUserId ?? "system",
+  };
+
+  // Append-only: append the new record; readAllMembers dedupes by last write per userId
+  await fs.mkdir(path.dirname(filePath), { recursive: true });
+  await fs.appendFile(filePath, `${JSON.stringify(entry)}\n`, "utf8");
+
+  // Return the fresh deduplicated view
+  const updated = await readAllMembers(filePath);
+  return updated.find((m) => m.userId === entry.userId) ?? entry;
+}
+
+export async function removeTenantMember(params: {
+  tenantId: string;
+  actorRole: string;
+  targetUserId: string;
+  env?: WorkspaceEnv;
+}): Promise<boolean> {
+  const actorRoleNormalized = params.actorRole.trim().toLowerCase();
+  if (actorRoleNormalized !== "owner") {
+    throw new Error("Tenant management access denied.");
+  }
+
+  const filePath = membersFilePath(params.tenantId, params.env);
+  const all = await readAllMembers(filePath);
+  const exists = all.some((m) => m.userId === params.targetUserId);
+  if (!exists) return false;
+
+  const remaining = all.filter((m) => m.userId !== params.targetUserId);
+  await writeAllMembers(filePath, remaining);
+  return true;
 }

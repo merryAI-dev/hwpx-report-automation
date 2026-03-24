@@ -5,8 +5,12 @@ import { toast } from "@/store/toast-store";
 import { INSTRUCTION_PRESETS } from "@/lib/editor/ai-presets";
 import { Breadcrumb } from "@/components/common/Breadcrumb";
 import { loadPreferences, savePreferences } from "@/lib/preferences";
-
-type KeyStatus = { provider: string; configured: boolean };
+import {
+  getStoredApiKey,
+  setStoredApiKey,
+  hasStoredApiKey,
+  type ApiProvider,
+} from "@/lib/client-api-keys";
 
 const MODEL_OPTIONS = {
   anthropic: [
@@ -23,87 +27,54 @@ const MODEL_OPTIONS = {
 export default function SettingsPage() {
   const [anthropicKey, setAnthropicKey] = useState("");
   const [openaiKey, setOpenaiKey] = useState("");
-  const [saving, setSaving] = useState(false);
-  const [keyStatuses, setKeyStatuses] = useState<KeyStatus[]>([]);
-  const [keysLoading, setKeysLoading] = useState(true);
+  const [geminiKey, setGeminiKey] = useState("");
+  const [anthropicConfigured, setAnthropicConfigured] = useState(false);
+  const [openaiConfigured, setOpenaiConfigured] = useState(false);
+  const [geminiConfigured, setGeminiConfigured] = useState(false);
   const [anthropicModel, setAnthropicModel] = useState("");
   const [openaiModel, setOpenaiModel] = useState("");
   const [costLimit, setCostLimit] = useState(0);
 
-  // Load preferences and key statuses on mount
+  // Load preferences and key statuses from localStorage on mount
   useEffect(() => {
     const prefs = loadPreferences();
     setAnthropicModel(prefs.anthropicModel);
     setOpenaiModel(prefs.openaiModel);
     setCostLimit(prefs.monthlyCostLimitUsd);
-
-    fetch("/api/settings/api-keys")
-      .then(async (resp) => {
-        if (resp.ok) {
-          const data = await resp.json();
-          setKeyStatuses(data.keys ?? []);
-        }
-      })
-      .catch(() => {
-        // Silently fail — may not have DB configured
-      })
-      .finally(() => setKeysLoading(false));
+    setAnthropicConfigured(hasStoredApiKey("anthropic"));
+    setOpenaiConfigured(hasStoredApiKey("openai"));
+    setGeminiConfigured(hasStoredApiKey("gemini"));
   }, []);
 
-  const isConfigured = (provider: string) =>
-    keyStatuses.find((k) => k.provider === provider)?.configured ?? false;
+  const PROVIDER_LABEL: Record<ApiProvider, string> = {
+    anthropic: "Anthropic",
+    openai: "OpenAI",
+    gemini: "Google Gemini",
+  };
 
-  const handleSaveKey = async (provider: string, key: string) => {
+  const isConfigured = (provider: ApiProvider) =>
+    provider === "anthropic" ? anthropicConfigured
+    : provider === "openai" ? openaiConfigured
+    : geminiConfigured;
+
+  const handleSaveKey = (provider: ApiProvider, key: string) => {
     if (!key.trim()) {
       toast.warning("API 키를 입력하세요.");
       return;
     }
-    setSaving(true);
-    try {
-      const resp = await fetch("/api/settings/api-keys", {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ provider, apiKey: key }),
-      });
-      if (resp.ok) {
-        toast.success(`${provider === "anthropic" ? "Anthropic" : "OpenAI"} API 키가 저장되었습니다.`);
-        // Refresh status
-        setKeyStatuses((prev) =>
-          prev.map((k) => (k.provider === provider ? { ...k, configured: true } : k)),
-        );
-        if (provider === "anthropic") setAnthropicKey("");
-        else setOpenaiKey("");
-      } else {
-        const data = await resp.json();
-        toast.error(data.error || "API 키 저장 실패");
-      }
-    } catch {
-      toast.error("서버 연결 실패");
-    } finally {
-      setSaving(false);
-    }
+    setStoredApiKey(provider, key.trim());
+    toast.success(`${PROVIDER_LABEL[provider]} API 키가 저장되었습니다.`);
+    if (provider === "anthropic") { setAnthropicConfigured(true); setAnthropicKey(""); }
+    else if (provider === "openai") { setOpenaiConfigured(true); setOpenaiKey(""); }
+    else { setGeminiConfigured(true); setGeminiKey(""); }
   };
 
-  const handleDeleteKey = async (provider: string) => {
-    setSaving(true);
-    try {
-      const resp = await fetch(`/api/settings/api-keys?provider=${provider}`, {
-        method: "DELETE",
-      });
-      if (resp.ok) {
-        toast.success(`${provider === "anthropic" ? "Anthropic" : "OpenAI"} API 키가 삭제되었습니다.`);
-        setKeyStatuses((prev) =>
-          prev.map((k) => (k.provider === provider ? { ...k, configured: false } : k)),
-        );
-      } else {
-        const data = await resp.json();
-        toast.error(data.error || "API 키 삭제 실패");
-      }
-    } catch {
-      toast.error("서버 연결 실패");
-    } finally {
-      setSaving(false);
-    }
+  const handleDeleteKey = (provider: ApiProvider) => {
+    setStoredApiKey(provider, "");
+    toast.success(`${PROVIDER_LABEL[provider]} API 키가 삭제되었습니다.`);
+    if (provider === "anthropic") setAnthropicConfigured(false);
+    else if (provider === "openai") setOpenaiConfigured(false);
+    else setGeminiConfigured(false);
   };
 
   return (
@@ -122,13 +93,10 @@ export default function SettingsPage() {
           <h2 className="mb-4 text-base font-semibold text-gray-900">
             API 키 설정
           </h2>
+          <p className="mb-4 text-xs text-gray-500">
+            API 키는 이 브라우저의 로컬 스토리지에만 저장되며 서버로 전송되지 않습니다.
+          </p>
           <div className="space-y-4">
-            {keysLoading ? (
-              <div className="flex flex-col gap-3">
-                <div className="h-24 animate-pulse rounded-md bg-gray-100" />
-                <div className="h-24 animate-pulse rounded-md bg-gray-100" />
-              </div>
-            ) : (<>
             {/* Anthropic */}
             <div className="rounded-md border border-gray-100 bg-gray-50 p-4">
               <div className="mb-2 flex items-center justify-between">
@@ -141,9 +109,6 @@ export default function SettingsPage() {
                       설정됨
                     </span>
                   )}
-                  <span className="rounded bg-gray-200 px-2 py-0.5 text-xs text-gray-600">
-                    ANTHROPIC_API_KEY
-                  </span>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -153,21 +118,20 @@ export default function SettingsPage() {
                   onChange={(e) => setAnthropicKey(e.target.value)}
                   placeholder={isConfigured("anthropic") ? "새 키로 교체..." : "sk-ant-..."}
                   className="flex-1 rounded border px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                  onKeyDown={(e) => { if (e.key === "Enter") handleSaveKey("anthropic", anthropicKey); }}
                 />
                 <button
                   type="button"
-                  onClick={() => void handleSaveKey("anthropic", anthropicKey)}
-                  disabled={saving}
-                  className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+                  onClick={() => handleSaveKey("anthropic", anthropicKey)}
+                  className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700"
                 >
                   저장
                 </button>
                 {isConfigured("anthropic") && (
                   <button
                     type="button"
-                    onClick={() => void handleDeleteKey("anthropic")}
-                    disabled={saving}
-                    className="rounded border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    onClick={() => handleDeleteKey("anthropic")}
+                    className="rounded border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
                   >
                     삭제
                   </button>
@@ -187,9 +151,6 @@ export default function SettingsPage() {
                       설정됨
                     </span>
                   )}
-                  <span className="rounded bg-gray-200 px-2 py-0.5 text-xs text-gray-600">
-                    OPENAI_API_KEY
-                  </span>
                 </div>
               </div>
               <div className="flex gap-2">
@@ -199,28 +160,72 @@ export default function SettingsPage() {
                   onChange={(e) => setOpenaiKey(e.target.value)}
                   placeholder={isConfigured("openai") ? "새 키로 교체..." : "sk-..."}
                   className="flex-1 rounded border px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                  onKeyDown={(e) => { if (e.key === "Enter") handleSaveKey("openai", openaiKey); }}
                 />
                 <button
                   type="button"
-                  onClick={() => void handleSaveKey("openai", openaiKey)}
-                  disabled={saving}
-                  className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700 disabled:opacity-50"
+                  onClick={() => handleSaveKey("openai", openaiKey)}
+                  className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700"
                 >
                   저장
                 </button>
                 {isConfigured("openai") && (
                   <button
                     type="button"
-                    onClick={() => void handleDeleteKey("openai")}
-                    disabled={saving}
-                    className="rounded border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50 disabled:opacity-50"
+                    onClick={() => handleDeleteKey("openai")}
+                    className="rounded border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
                   >
                     삭제
                   </button>
                 )}
               </div>
             </div>
-            </>)}
+
+            {/* Gemini */}
+            <div className="rounded-md border border-blue-50 bg-blue-50/40 p-4">
+              <div className="mb-2 flex items-center justify-between">
+                <span className="text-sm font-medium text-gray-700">
+                  Google Gemini — 제안/검증 AI
+                  <span className="ml-2 rounded bg-blue-100 px-1.5 py-0.5 text-xs text-blue-700">OpenAI 대체 가능</span>
+                </span>
+                <div className="flex items-center gap-2">
+                  {isConfigured("gemini") && (
+                    <span className="rounded bg-green-100 px-2 py-0.5 text-xs text-green-700">
+                      설정됨
+                    </span>
+                  )}
+                </div>
+              </div>
+              <div className="flex gap-2">
+                <input
+                  type="password"
+                  value={geminiKey}
+                  onChange={(e) => setGeminiKey(e.target.value)}
+                  placeholder={isConfigured("gemini") ? "새 키로 교체..." : "AIza..."}
+                  className="flex-1 rounded border px-3 py-1.5 text-sm focus:border-blue-500 focus:outline-none"
+                  onKeyDown={(e) => { if (e.key === "Enter") handleSaveKey("gemini", geminiKey); }}
+                />
+                <button
+                  type="button"
+                  onClick={() => handleSaveKey("gemini", geminiKey)}
+                  className="rounded bg-blue-600 px-3 py-1.5 text-sm text-white hover:bg-blue-700"
+                >
+                  저장
+                </button>
+                {isConfigured("gemini") && (
+                  <button
+                    type="button"
+                    onClick={() => handleDeleteKey("gemini")}
+                    className="rounded border border-red-200 px-3 py-1.5 text-sm text-red-600 hover:bg-red-50"
+                  >
+                    삭제
+                  </button>
+                )}
+              </div>
+              <p className="mt-2 text-xs text-gray-400">
+                Gemini 키가 있으면 OpenAI 대신 자동으로 사용됩니다. 기본 모델: gemini-2.0-flash
+              </p>
+            </div>
           </div>
         </section>
 

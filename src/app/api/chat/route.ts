@@ -244,7 +244,7 @@ async function handlePost(request: Request) {
 
   let apiKey: string;
   try {
-    apiKey = requireApiKey("ANTHROPIC_API_KEY", "Anthropic");
+    apiKey = requireApiKey("ANTHROPIC_API_KEY", "Anthropic", request);
   } catch (err) {
     return new Response(
       JSON.stringify({ error: extractErrorMessage(err), code: "API_KEY_MISSING" }),

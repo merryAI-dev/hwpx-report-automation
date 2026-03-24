@@ -2,7 +2,6 @@
 
 import { useState } from "react";
 import { usePathname } from "next/navigation";
-import { signOut } from "next-auth/react";
 import Link from "next/link";
 
 const NAV_ITEMS = [
@@ -16,9 +15,6 @@ const NAV_ITEMS = [
 export function AppNav() {
   const pathname = usePathname();
   const [mobileOpen, setMobileOpen] = useState(false);
-
-  // Don't show nav on login page
-  if (pathname === "/login") return null;
 
   return (
     <nav className="border-b border-[var(--color-notion-border)] bg-[var(--color-notion-bg)]">
@@ -55,13 +51,6 @@ export function AppNav() {
         </div>
 
         <div className="flex items-center gap-2">
-          <button
-            type="button"
-            onClick={() => signOut({ callbackUrl: "/login" })}
-            className="hidden rounded-md px-2.5 py-1 text-[13px] text-[var(--color-notion-text-secondary)] hover:bg-[var(--color-notion-bg-hover)] hover:text-[var(--color-notion-text)] sm:inline-flex"
-          >
-            로그아웃
-          </button>
           {/* Mobile hamburger */}
           <button
             type="button"
@@ -103,13 +92,6 @@ export function AppNav() {
               </Link>
             );
           })}
-          <button
-            type="button"
-            onClick={() => signOut({ callbackUrl: "/login" })}
-            className="mt-1 block w-full rounded-md px-3 py-2 text-left text-sm text-[var(--color-notion-text-secondary)] hover:bg-[var(--color-notion-bg-hover)]"
-          >
-            로그아웃
-          </button>
         </div>
       )}
     </nav>

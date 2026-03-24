@@ -1,6 +1,8 @@
 import OpenAI from "openai";
 import { NextResponse } from "next/server";
 import { withApiAuth } from "@/lib/auth/with-api-auth";
+import { getApiKeyFromRequest } from "@/lib/api-utils";
+import { getOpenAIClientFromRequest } from "@/lib/server/openai-client";
 import {
   DEFAULT_API_TIMEOUT_MS,
   handleApiError,
@@ -197,12 +199,13 @@ async function buildDraftWithAi(params: {
   model: string;
   maxAttempts: number;
   userGlobalInstruction?: string;
+  openaiClient?: OpenAI;
   onSectionComplete?: (title: string, completed: number, total: number) => void;
 }): Promise<{
   draft: ReportFamilyDraft;
   usage: UsageTotals;
 }> {
-  const apiKey = process.env.OPENAI_API_KEY;
+  const apiKey = params.openaiClient ? "provided" : (process.env.OPENAI_API_KEY || "");
   if (!apiKey) {
     return {
       draft: buildReportFamilyDraft(params.plan, {
@@ -216,7 +219,7 @@ async function buildDraftWithAi(params: {
     };
   }
 
-  const client = new OpenAI({
+  const client = params.openaiClient ?? new OpenAI({
     apiKey,
     baseURL: process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
   });
@@ -389,11 +392,13 @@ async function handlePost(request: Request, session: AuthenticatedSession) {
   const stream = new ReadableStream({
     async start(controller) {
       try {
+        const { client: openaiClient } = getOpenAIClientFromRequest(request);
         const result = preferAi
           ? await buildDraftWithAi({
               plan,
               model,
               maxAttempts,
+              openaiClient,
               userGlobalInstruction: body.globalInstruction,
               onSectionComplete: (title, completed, total) => {
                 sendSSE(controller, encoder, "section_complete", {
