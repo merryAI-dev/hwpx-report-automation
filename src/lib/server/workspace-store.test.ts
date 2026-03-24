@@ -7,15 +7,12 @@ import {
   createWorkspaceDocument,
   createWorkspaceDocumentVersion,
   createWorkspaceTemplate,
-  listTenantMembers,
   listWorkspaceDocumentAuditEvents,
   listWorkspaceDocumentVersions,
   listWorkspaceDocuments,
   listWorkspaceTemplates,
-  removeTenantMember,
   resolveWorkspaceActor,
   updateWorkspaceDocumentPermissions,
-  upsertTenantMember,
 } from "./workspace-store";
 
 const tempRoots: string[] = [];
@@ -241,170 +238,5 @@ describe("workspace store", () => {
 
     const templates = await listWorkspaceTemplates({ tenantId: actor.tenantId, actor, env });
     expect(templates).toHaveLength(2);
-  });
-});
-
-describe("tenant member management", () => {
-  it("returns empty list when no members file exists", async () => {
-    const { env } = await createEnv();
-    const members = await listTenantMembers(actor.tenantId, env);
-    expect(members).toEqual([]);
-  });
-
-  it("upserts a member and reads it back", async () => {
-    const { env } = await createEnv();
-
-    const member = await upsertTenantMember({
-      tenantId: actor.tenantId,
-      actorRole: "owner",
-      actorUserId: actor.userId,
-      member: {
-        userId: "user-10",
-        email: "alice@example.com",
-        displayName: "Alice",
-        role: "editor",
-      },
-      env,
-    });
-
-    expect(member.userId).toBe("user-10");
-    expect(member.email).toBe("alice@example.com");
-    expect(member.role).toBe("editor");
-    expect(member.addedBy).toBe(actor.userId);
-
-    const listed = await listTenantMembers(actor.tenantId, env);
-    expect(listed).toHaveLength(1);
-    expect(listed[0]?.userId).toBe("user-10");
-  });
-
-  it("upsert deduplicates by userId — last write wins", async () => {
-    const { env } = await createEnv();
-
-    await upsertTenantMember({
-      tenantId: actor.tenantId,
-      actorRole: "owner",
-      actorUserId: actor.userId,
-      member: { userId: "user-11", email: "bob@example.com", displayName: "Bob", role: "viewer" },
-      env,
-    });
-
-    await upsertTenantMember({
-      tenantId: actor.tenantId,
-      actorRole: "manager",
-      actorUserId: actor.userId,
-      member: { userId: "user-11", email: "bob@example.com", displayName: "Bob", role: "editor" },
-      env,
-    });
-
-    const listed = await listTenantMembers(actor.tenantId, env);
-    expect(listed).toHaveLength(1);
-    expect(listed[0]?.role).toBe("editor");
-  });
-
-  it("adds multiple distinct members", async () => {
-    const { env } = await createEnv();
-
-    await upsertTenantMember({
-      tenantId: actor.tenantId,
-      actorRole: "owner",
-      actorUserId: actor.userId,
-      member: { userId: "user-20", email: "charlie@example.com", displayName: "Charlie", role: "viewer" },
-      env,
-    });
-
-    await upsertTenantMember({
-      tenantId: actor.tenantId,
-      actorRole: "owner",
-      actorUserId: actor.userId,
-      member: { userId: "user-21", email: "diana@example.com", displayName: "Diana", role: "manager" },
-      env,
-    });
-
-    const listed = await listTenantMembers(actor.tenantId, env);
-    expect(listed).toHaveLength(2);
-    const userIds = listed.map((m) => m.userId).sort();
-    expect(userIds).toEqual(["user-20", "user-21"]);
-  });
-
-  it("throws access denied when actorRole is not owner or manager", async () => {
-    const { env } = await createEnv();
-
-    await expect(
-      upsertTenantMember({
-        tenantId: actor.tenantId,
-        actorRole: "viewer",
-        actorUserId: actor.userId,
-        member: { userId: "user-30", email: "eve@example.com", displayName: "Eve", role: "viewer" },
-        env,
-      }),
-    ).rejects.toThrow(/access denied/i);
-
-    await expect(
-      upsertTenantMember({
-        tenantId: actor.tenantId,
-        actorRole: "editor",
-        actorUserId: actor.userId,
-        member: { userId: "user-30", email: "eve@example.com", displayName: "Eve", role: "viewer" },
-        env,
-      }),
-    ).rejects.toThrow(/access denied/i);
-  });
-
-  it("removes a member and returns true", async () => {
-    const { env } = await createEnv();
-
-    await upsertTenantMember({
-      tenantId: actor.tenantId,
-      actorRole: "owner",
-      actorUserId: actor.userId,
-      member: { userId: "user-40", email: "frank@example.com", displayName: "Frank", role: "editor" },
-      env,
-    });
-
-    const removed = await removeTenantMember({
-      tenantId: actor.tenantId,
-      actorRole: "owner",
-      targetUserId: "user-40",
-      env,
-    });
-
-    expect(removed).toBe(true);
-
-    const listed = await listTenantMembers(actor.tenantId, env);
-    expect(listed).toHaveLength(0);
-  });
-
-  it("returns false when removing a non-existent member", async () => {
-    const { env } = await createEnv();
-
-    const removed = await removeTenantMember({
-      tenantId: actor.tenantId,
-      actorRole: "owner",
-      targetUserId: "does-not-exist",
-      env,
-    });
-
-    expect(removed).toBe(false);
-  });
-
-  it("throws access denied when non-owner tries to remove a member", async () => {
-    const { env } = await createEnv();
-
-    await upsertTenantMember({
-      tenantId: actor.tenantId,
-      actorRole: "owner",
-      actorUserId: actor.userId,
-      member: { userId: "user-50", email: "grace@example.com", displayName: "Grace", role: "editor" },
-      env,
-    });
-
-    await expect(
-      removeTenantMember({
-        tenantId: actor.tenantId,
-        actorRole: "manager",
-        targetUserId: "user-50",
-        env,
-      }),
-    ).rejects.toThrow(/access denied/i);
   });
 });

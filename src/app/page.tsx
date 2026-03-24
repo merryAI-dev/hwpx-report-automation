@@ -8,11 +8,6 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { DocumentEditor } from "@/components/editor/DocumentEditor";
 import { EditorToolbar } from "@/components/editor/EditorToolbar";
 import { HwpxSaveDialog } from "@/components/common/HwpxSaveDialog";
-import {
-  DocumentStartWizard,
-  type PreviewStatus,
-  type StartWizardMethod,
-} from "@/components/common/DocumentStartWizard";
 import { EditorLayout } from "@/components/editor/EditorLayout";
 import { EditorRuler } from "@/components/editor/EditorRuler";
 import { StatusBar } from "@/components/common/StatusBar";
@@ -32,10 +27,6 @@ import { parseDocxToProseMirror } from "@/lib/editor/docx-to-prosemirror";
 import { parsePptxToProseMirror } from "@/lib/editor/pptx-to-prosemirror";
 import { applyProseMirrorDocToHwpx, collectDocumentEdits } from "@/lib/editor/prosemirror-to-hwpx";
 import { buildHwpxModelFromDoc } from "@/lib/editor/hwpx-template-synthesizer";
-import {
-  DOCUMENT_TEMPLATES,
-  type DocumentTemplate,
-} from "@/lib/editor/document-templates";
 import { exportToPdf } from "@/lib/editor/export-pdf";
 import { exportToDocx } from "@/lib/editor/export-docx";
 import { triggerDiffHighlightUpdate } from "@/lib/editor/diff-highlight-extension";
@@ -228,40 +219,6 @@ function extractNodeText(node: JSONContent): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-}
-
-function sanitizeTemplateFileName(name: string): string {
-  return name.trim().replace(/[\\/:*?"<>|]+/g, "-");
-}
-
-function getPreviewTabTitle(previewStatus: PreviewStatus): string {
-  switch (previewStatus) {
-    case "loading":
-      return "미리보기를 준비 중입니다.";
-    case "ready":
-      return "Java 미리보기를 사용할 수 있습니다.";
-    case "error":
-      return "Java 미리보기 서버에 연결하지 못했습니다.";
-    case "unavailable":
-      return "현재 문서는 Java 미리보기를 지원하지 않습니다.";
-    default:
-      return "문서를 열면 미리보기를 준비합니다.";
-  }
-}
-
-function getPreviewBadgeLabel(previewStatus: PreviewStatus): string {
-  switch (previewStatus) {
-    case "loading":
-      return "준비 중";
-    case "ready":
-      return "연결됨";
-    case "error":
-      return "오류";
-    case "unavailable":
-      return "미지원";
-    default:
-      return "대기";
-  }
 }
 
 function fillTableRows(
@@ -541,14 +498,8 @@ export default function Home() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const workspaceDocumentId = searchParams.get("documentId") || "";
-  const onboardingMode = searchParams.get("onboarding") || "";
-  const templateIdQuery = searchParams.get("templateId") || "";
   const [editor, setEditor] = useState<Editor | null>(null);
   const [viewMode, setViewMode] = useState<"editor" | "preview">("editor");
-  const [startWizardOpen, setStartWizardOpen] = useState(!workspaceDocumentId);
-  const [startWizardInitialMethod, setStartWizardInitialMethod] = useState<StartWizardMethod | null>(null);
-  const [startWizardResetToken, setStartWizardResetToken] = useState(0);
-  const [previewStatus, setPreviewStatus] = useState<PreviewStatus>("idle");
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [recentSnapshots, setRecentSnapshots] = useState<RecentFileSnapshotMeta[]>([]);
   const [selectedRecentSnapshotId, setSelectedRecentSnapshotId] = useState("");
@@ -559,7 +510,6 @@ export default function Home() {
   const docRevisionRef = useRef(0);
   const lastAutoSavedRevisionRef = useRef(-1);
   const loadedWorkspaceKeyRef = useRef("");
-  const handledStartQueryRef = useRef("");
 
   const {
     fileName,
@@ -713,19 +663,6 @@ export default function Home() {
     void refreshRecentSnapshots();
   }, [refreshRecentSnapshots]);
 
-  const openStartWizard = useCallback((method: StartWizardMethod | null = null) => {
-    setStartWizardInitialMethod(method);
-    setStartWizardResetToken((prev) => prev + 1);
-    setStartWizardOpen(true);
-  }, []);
-
-  const closeStartWizard = useCallback(() => {
-    if (!editorDoc || isBusy) {
-      return;
-    }
-    setStartWizardOpen(false);
-  }, [editorDoc, isBusy]);
-
   const refreshAuthSession = useCallback(async () => {
     try {
       const response = await fetch("/api/auth/session", {
@@ -747,14 +684,6 @@ export default function Home() {
     void refreshAuthSession();
   }, [refreshAuthSession]);
 
-  useEffect(() => {
-    if (editorDoc) {
-      setStartWizardOpen(false);
-    } else if (!workspaceDocumentId) {
-      setStartWizardOpen(true);
-    }
-  }, [editorDoc, workspaceDocumentId]);
-
   const clearWorkspaceContext = useCallback(() => {
     setWorkspaceDocument(null);
     loadedWorkspaceKeyRef.current = "";
@@ -762,15 +691,6 @@ export default function Home() {
       router.replace("/");
     }
   }, [router, workspaceDocumentId]);
-
-  const confirmReplaceDocument = useCallback((nextActionLabel: string) => {
-    if (!editorDoc || !isDirty) {
-      return true;
-    }
-    return window.confirm(
-      `현재 문서에 저장되지 않은 변경사항이 있습니다. ${nextActionLabel}로 시작하면 지금 작업이 닫힙니다. 계속할까요?`,
-    );
-  }, [editorDoc, isDirty]);
 
   const onSwitchTenant = useCallback(async (tenantId: string) => {
     if (!authSession?.activeTenant || authSession.activeTenant.tenantId === tenantId) {
@@ -960,7 +880,6 @@ export default function Home() {
 
         const formatLabel = getFormatLabel(ext);
         const isHwpx = ext === "hwpx";
-        setPreviewStatus(isHwpx ? "loading" : "unavailable");
         setStatus(
           sourceExt === "hwp"
             ? "HWP를 HWPX로 변환한 뒤 문서를 분석 중입니다..."
@@ -973,10 +892,10 @@ export default function Home() {
         else if (ext === "pptx") parsePromise = parsePptxToProseMirror(buffer);
         else parsePromise = parseHwpxToProseMirror(buffer);
 
-        const [parsed, previewPayload] = await Promise.all([
+        const [parsed] = await Promise.all([
           parsePromise,
           !isHwpx
-            ? Promise.resolve<JavaRenderPayload | null>(null)
+            ? Promise.resolve()
             : (async () => {
                 try {
                   const fd = new FormData();
@@ -985,19 +904,11 @@ export default function Home() {
                   if (resp.ok) {
                     const payload = (await resp.json()) as JavaRenderPayload;
                     if (payload.html && payload.elementMap) {
-                      setPreviewStatus("ready");
-                      return payload;
-                    } else {
-                      setPreviewStatus("error");
-                      return null;
+                      setRenderResult(payload.html, payload.elementMap);
                     }
-                  } else {
-                    setPreviewStatus("error");
-                    return null;
                   }
                 } catch {
-                  setPreviewStatus("error");
-                  return null;
+                  // Java server not running
                 }
               })(),
         ]);
@@ -1026,9 +937,6 @@ export default function Home() {
           complexObjectReport: parsed.complexObjectReport,
           hwpxDocumentModel,
         });
-        if (previewPayload?.html && previewPayload.elementMap) {
-          setRenderResult(previewPayload.html, previewPayload.elementMap);
-        }
         setOutline(buildOutlineFromDoc(parsed.doc));
         setTemplateCatalog(buildTemplateCatalogFromDoc(parsed.doc));
         setWorkspaceDocument(options?.workspaceDocument ?? null);
@@ -1074,9 +982,8 @@ export default function Home() {
         });
 
         // Phase 2-4: Auto-analyze document on upload
-        fireDocumentAnalysis(parsed.segments);
+      fireDocumentAnalysis(parsed.segments);
       } catch (error) {
-        setPreviewStatus("error");
         const message = error instanceof Error ? error.message : "문서 로드 실패";
         setStatus(message);
       } finally {
@@ -1085,7 +992,6 @@ export default function Home() {
     },
     [
       setBusy,
-      setPreviewStatus,
       setViewMode,
       setStatus,
       setRenderResult,
@@ -1098,123 +1004,6 @@ export default function Home() {
       fireDocumentAnalysis,
     ],
   );
-
-  const startDocumentFromTemplate = useCallback(
-    async (template: DocumentTemplate | null) => {
-      const actionLabel = template ? `"${template.name}" 템플릿` : "빈 문서";
-      if (!confirmReplaceDocument(actionLabel)) {
-        return;
-      }
-
-      openStartWizard(template ? "template" : "blank");
-      clearWorkspaceContext();
-      setBusy(true);
-      setViewMode("editor");
-      setPreviewStatus("unavailable");
-      setStatus(
-        template
-          ? `${template.name} 템플릿으로 새 문서를 준비 중입니다...`
-          : "빈 문서를 준비 중입니다...",
-      );
-
-      try {
-        const doc: JSONContent = {
-          type: "doc",
-          content: template
-            ? structuredClone(template.starterContent)
-            : [{ type: "paragraph" }],
-        };
-        const templateResp = await fetch("/base.hwpx");
-        if (!templateResp.ok) {
-          throw new Error("기본 HWPX 템플릿을 불러오지 못했습니다.");
-        }
-        const templateBuffer = await templateResp.arrayBuffer();
-        const hwpxDocumentModel = await buildHwpxModelFromDoc(templateBuffer, doc);
-        const fileName = `${sanitizeTemplateFileName(template?.name || "새 문서")}.hwpx`;
-
-        setLoadedDocument({
-          fileName,
-          buffer: templateBuffer,
-          doc,
-          segments: [],
-          extraSegmentsMap: {},
-          integrityIssues: [],
-          complexObjectReport: null,
-          hwpxDocumentModel,
-        });
-        setOutline(buildOutlineFromDoc(doc));
-        setTemplateCatalog(buildTemplateCatalogFromDoc(doc));
-        if (template) {
-          setSelectedPreset(template.defaultPreset);
-          const preset = INSTRUCTION_PRESETS.find((item) => item.key === template.defaultPreset);
-          if (preset?.instruction) {
-            setInstruction(preset.instruction);
-          }
-        } else {
-          setSelectedPreset("custom");
-        }
-        docRevisionRef.current = 0;
-        lastAutoSavedRevisionRef.current = -1;
-        setStatus(
-          template
-            ? `템플릿으로 새 문서를 시작했습니다: ${template.name}`
-            : "빈 문서를 시작했습니다.",
-        );
-      } catch (error) {
-        setPreviewStatus("error");
-        const message = error instanceof Error ? error.message : "새 문서 생성 실패";
-        setStatus(message);
-      } finally {
-        setBusy(false);
-      }
-    },
-    [
-      clearWorkspaceContext,
-      confirmReplaceDocument,
-      openStartWizard,
-      setBusy,
-      setLoadedDocument,
-      setOutline,
-      setInstruction,
-      setPreviewStatus,
-      setSelectedPreset,
-      setStatus,
-      setTemplateCatalog,
-      setViewMode,
-    ],
-  );
-
-  useEffect(() => {
-    const queryKey = `${onboardingMode}|${templateIdQuery}`;
-    if (!queryKey.replace("|", "") || handledStartQueryRef.current === queryKey) {
-      return;
-    }
-    handledStartQueryRef.current = queryKey;
-
-    if (templateIdQuery) {
-      const template = DOCUMENT_TEMPLATES.find((item) => item.id === templateIdQuery);
-      if (template) {
-        void startDocumentFromTemplate(template);
-      } else {
-        setStatus("선택한 템플릿을 찾지 못했습니다.");
-        openStartWizard("template");
-      }
-      router.replace("/");
-      return;
-    }
-
-    if (onboardingMode === "template") {
-      openStartWizard("template");
-      router.replace("/");
-    }
-  }, [
-    onboardingMode,
-    openStartWizard,
-    router,
-    setStatus,
-    startDocumentFromTemplate,
-    templateIdQuery,
-  ]);
 
   const openWorkspaceDocument = useCallback(async (documentId: string) => {
     if (!authSession?.activeTenant || !documentId) {
@@ -1267,10 +1056,6 @@ export default function Home() {
   }, [authSession, openWorkspaceDocument, workspaceDocumentId]);
 
   const onPickFile = async (file: File) => {
-    if (!confirmReplaceDocument("새 파일")) {
-      return;
-    }
-    openStartWizard("upload");
     clearWorkspaceContext();
     await loadFileIntoEditor(file, "opened");
   };
@@ -1280,10 +1065,6 @@ export default function Home() {
       setStatus("최근 파일을 먼저 선택하세요.");
       return;
     }
-    if (!confirmReplaceDocument("최근 문서")) {
-      return;
-    }
-    openStartWizard("recent");
     setStatus("최근 파일을 불러오는 중입니다...");
     try {
       const snapshot = await loadRecentFileSnapshot(snapshotId);
@@ -2643,7 +2424,6 @@ export default function Home() {
         onSelectRecentSnapshot={setSelectedRecentSnapshotId}
         onLoadRecentSnapshot={onLoadRecentSnapshot}
         onPickFile={onPickFile}
-        onOpenStartWizard={() => openStartWizard(null)}
         onExport={onExport}
         onExportPdf={() => {
           const editorWrap = document.querySelector(".document-editor-wrap");
@@ -2745,230 +2525,191 @@ export default function Home() {
       <main className={styles.main}>
         <section className={styles.editorArea}>
           <div className={styles.editorCenter}>
-            {!editorDoc ? (
-              <DocumentStartWizard
-                key={`wizard-${startWizardResetToken}-${startWizardInitialMethod ?? "none"}`}
-                hasDocument={false}
-                initialMethod={startWizardInitialMethod}
-                recentSnapshots={recentSnapshots}
-                isBusy={isBusy}
-                status={status}
-                previewStatus={previewStatus}
-                onPickFile={onPickFile}
-                onLoadRecentSnapshot={onLoadRecentSnapshot}
-                onStartBlank={() => void startDocumentFromTemplate(null)}
-                onStartFromTemplate={(template) => void startDocumentFromTemplate(template)}
-              />
-            ) : (
-              <>
-                <div className={styles.viewTabs}>
-                  <button
-                    type="button"
-                    className={`${styles.viewTabBtn} ${viewMode === "editor" ? styles.viewTabBtnActive : ""}`}
-                    onClick={() => setViewMode("editor")}
-                  >
-                    편집
-                  </button>
-                  <button
-                    type="button"
-                    className={`${styles.viewTabBtn} ${viewMode === "preview" ? styles.viewTabBtnActive : ""}`}
-                    onClick={() => setViewMode("preview")}
-                    disabled={previewStatus !== "ready" || !renderHtml}
-                    title={getPreviewTabTitle(previewStatus)}
-                  >
-                    <span className={styles.previewTabLabel}>미리보기</span>
-                    <span className={`${styles.previewTabBadge} ${styles[`previewTabBadge${previewStatus[0].toUpperCase()}${previewStatus.slice(1)}`]}`}>
-                      {getPreviewBadgeLabel(previewStatus)}
-                    </span>
-                  </button>
-                </div>
+            {editorDoc ? (
+              <div className={styles.viewTabs}>
+                <button
+                  type="button"
+                  className={`${styles.viewTabBtn} ${viewMode === "editor" ? styles.viewTabBtnActive : ""}`}
+                  onClick={() => setViewMode("editor")}
+                >
+                  편집
+                </button>
+                <button
+                  type="button"
+                  className={`${styles.viewTabBtn} ${viewMode === "preview" ? styles.viewTabBtnActive : ""}`}
+                  onClick={() => setViewMode("preview")}
+                  disabled={!renderHtml}
+                  title={renderHtml ? undefined : "Java 서버에 연결되지 않았습니다"}
+                >
+                  미리보기
+                </button>
+              </div>
+            ) : null}
 
-                <EditorRuler />
+            <EditorRuler />
 
-                {/* 편집 탭 */}
-                <div style={{ display: viewMode === "editor" ? "block" : "none" }}>
-                  <EditorLayout>
-                    <DocumentEditor
-                      content={editorDoc}
-                      formMode={formMode}
-                      onUpdateDoc={onEditorUpdateDoc}
-                      onSelectionChange={setSelection}
-                      onEditorReady={setEditor}
-                      onAiCommand={() => {
-                        setActiveSidebarTab("ai");
-                        void onGenerateSuggestion();
-                      }}
-                      onDiffSegmentClick={(segmentId) => {
-                        if (sidebarCollapsed) toggleSidebar();
-                        setActiveSidebarTab("ai");
-                        setTimeout(() => {
-                          const el = document.querySelector(`[data-batch-diff-id="${segmentId}"]`);
-                          el?.scrollIntoView({ behavior: "smooth", block: "center" });
-                        }, 100);
-                      }}
-                      onNewParaCreated={onNewParaCreated}
-                      getHwpxDocumentModel={getHwpxDocumentModel}
-                    />
-                  </EditorLayout>
-                  <InlineAiPopup
-                    editor={editor}
-                    onAction={(action, text) => {
-                      const instructionMap: Record<string, string> = {
-                        "다듬기": `선택된 텍스트를 더 자연스럽고 전문적으로 다듬어주세요: ${text}`,
-                        "요약": `다음 텍스트를 2-3문장으로 요약해주세요: ${text}`,
-                        "번역": `다음 텍스트를 영어로 번역해주세요: ${text}`,
-                        "확장": `다음 텍스트를 더 자세하게 확장해주세요: ${text}`,
-                      };
-                      const msg = instructionMap[action] ?? `${action}: ${text}`;
-                      setActiveSidebarTab("chat");
-                      if (sidebarCollapsed) toggleSidebar();
-                      void onSendChatMessage(msg);
-                    }}
-                  />
-                </div>
-
-                {/* 미리보기 탭 */}
-                {viewMode === "preview" && renderHtml ? (
-                  <div
-                    className={styles.previewPane}
-                    // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted Java server output
-                    dangerouslySetInnerHTML={{ __html: renderHtml }}
-                    onClick={(e) => {
-                      const target = (e.target as HTMLElement).closest("[data-segment-id]");
-                      if (!target) return;
-                      const segmentId = target.getAttribute("data-segment-id");
-                      if (!segmentId) return;
-                      setViewMode("editor");
-                      setSelection({ selectedSegmentId: segmentId, selectedText: renderElementMap?.[segmentId]?.text ?? "" });
-                      if (editor) focusSegment(editor, segmentId);
-                    }}
-                  />
-                ) : null}
-              </>
-            )}
-          </div>
-          {startWizardOpen && editorDoc ? (
-            <div className={styles.wizardOverlay}>
-              <DocumentStartWizard
-                key={`wizard-overlay-${startWizardResetToken}-${startWizardInitialMethod ?? "none"}`}
-                hasDocument
-                initialMethod={startWizardInitialMethod}
-                recentSnapshots={recentSnapshots}
-                isBusy={isBusy}
-                status={status}
-                previewStatus={previewStatus}
-                onClose={closeStartWizard}
-                onPickFile={onPickFile}
-                onLoadRecentSnapshot={onLoadRecentSnapshot}
-                onStartBlank={() => void startDocumentFromTemplate(null)}
-                onStartFromTemplate={(template) => void startDocumentFromTemplate(template)}
+            {/* 편집 탭 */}
+            <div style={{ display: viewMode === "editor" ? "block" : "none" }}>
+              <EditorLayout>
+                <DocumentEditor
+                  content={editorDoc}
+                  formMode={formMode}
+                  onUpdateDoc={onEditorUpdateDoc}
+                  onSelectionChange={setSelection}
+                  onEditorReady={setEditor}
+                  onAiCommand={() => {
+                    setActiveSidebarTab("ai");
+                    void onGenerateSuggestion();
+                  }}
+                  onDiffSegmentClick={(segmentId) => {
+                    if (sidebarCollapsed) toggleSidebar();
+                    setActiveSidebarTab("ai");
+                    setTimeout(() => {
+                      const el = document.querySelector(`[data-batch-diff-id="${segmentId}"]`);
+                      el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                    }, 100);
+                  }}
+                  onNewParaCreated={onNewParaCreated}
+                  getHwpxDocumentModel={getHwpxDocumentModel}
+                />
+              </EditorLayout>
+              <InlineAiPopup
+                editor={editor}
+                onAction={(action, text) => {
+                  const instructionMap: Record<string, string> = {
+                    "다듬기": `선택된 텍스트를 더 자연스럽고 전문적으로 다듬어주세요: ${text}`,
+                    "요약": `다음 텍스트를 2-3문장으로 요약해주세요: ${text}`,
+                    "번역": `다음 텍스트를 영어로 번역해주세요: ${text}`,
+                    "확장": `다음 텍스트를 더 자세하게 확장해주세요: ${text}`,
+                  };
+                  const msg = instructionMap[action] ?? `${action}: ${text}`;
+                  setActiveSidebarTab("chat");
+                  if (sidebarCollapsed) toggleSidebar();
+                  void onSendChatMessage(msg);
+                }}
               />
             </div>
-          ) : null}
+
+            {/* 미리보기 탭 */}
+            {viewMode === "preview" && renderHtml ? (
+              <div
+                className={styles.previewPane}
+                // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted Java server output
+                dangerouslySetInnerHTML={{ __html: renderHtml }}
+                onClick={(e) => {
+                  const target = (e.target as HTMLElement).closest("[data-segment-id]");
+                  if (!target) return;
+                  const segmentId = target.getAttribute("data-segment-id");
+                  if (!segmentId) return;
+                  setViewMode("editor");
+                  setSelection({ selectedSegmentId: segmentId, selectedText: renderElementMap?.[segmentId]?.text ?? "" });
+                  if (editor) focusSegment(editor, segmentId);
+                }}
+              />
+            ) : null}
+          </div>
         </section>
 
-        {editorDoc ? (
-          <Sidebar
-            collapsed={sidebarCollapsed}
-            activeTab={activeSidebarTab}
-            outline={
-              <DocumentOutline
-                outline={outline}
-                selectedSegmentId={selection.selectedSegmentId}
-                onSelectSegment={onSelectOutlineSegment}
-              />
-            }
-            ai={
-              <AiSuggestionPanel
-                instruction={instruction}
-                suggestion={aiSuggestion}
-                selectedText={selection.selectedText}
-                singleQualityGate={singleSuggestionQualityGate}
-                singleSuggestionApproved={singleSuggestionApproved}
-                batchTargetCount={batchItems.length}
-                batchSuggestionCount={batchSuggestionCount}
-                batchDiffItems={batchDiffItems}
-                batchJob={batchJob}
-                isBusy={isBusy || aiBusy}
-                onChangeInstruction={setInstruction}
-                onRequestSuggestion={() => void onGenerateSuggestion()}
-                onApplySuggestion={onApplySuggestion}
-                onApproveSuggestion={onApproveSingleSuggestion}
-                onRequestBatchSuggestion={() => void onGenerateBatchSuggestions()}
-                onApplyBatchSuggestion={onApplyBatchSuggestions}
-                batchDecisions={batchDecisions}
-                onSetBatchDecision={setBatchDecision}
-                onApplySelectedBatchSuggestion={onApplySelectedBatchSuggestions}
-                presets={INSTRUCTION_PRESETS}
-                selectedPreset={selectedPreset}
-                onSelectPreset={onSelectPreset}
-                verificationResult={verificationResult}
-                verificationLoading={verificationLoading}
-                onVerifySuggestion={() => void onVerifySuggestion()}
-                batchMode={batchMode}
-                onSetBatchMode={setBatchMode}
-              />
-            }
-            chat={
-              <ChatPanel
-                messages={chatMessages}
-                isBusy={chatBusy}
-                pendingToolCall={pendingToolCall}
-                hasDocument={!!editorDoc}
-                onSendMessage={(text) => void onSendChatMessage(text)}
-                onApproveTool={onApproveToolCall}
-                onRejectTool={onRejectToolCall}
-                onClearChat={clearChat}
-                canUndo={!!lastToolCallSnapshot}
-                onUndoLastToolCall={() => {
-                  const snapshot = undoLastToolCall();
-                  if (snapshot && editor) {
-                    editor.commands.setContent(snapshot);
-                  }
+        <Sidebar
+          collapsed={sidebarCollapsed}
+          activeTab={activeSidebarTab}
+          outline={
+            <DocumentOutline
+              outline={outline}
+              selectedSegmentId={selection.selectedSegmentId}
+              onSelectSegment={onSelectOutlineSegment}
+            />
+          }
+          ai={
+            <AiSuggestionPanel
+              instruction={instruction}
+              suggestion={aiSuggestion}
+              selectedText={selection.selectedText}
+              singleQualityGate={singleSuggestionQualityGate}
+              singleSuggestionApproved={singleSuggestionApproved}
+              batchTargetCount={batchItems.length}
+              batchSuggestionCount={batchSuggestionCount}
+              batchDiffItems={batchDiffItems}
+              batchJob={batchJob}
+              isBusy={isBusy || aiBusy}
+              onChangeInstruction={setInstruction}
+              onRequestSuggestion={() => void onGenerateSuggestion()}
+              onApplySuggestion={onApplySuggestion}
+              onApproveSuggestion={onApproveSingleSuggestion}
+              onRequestBatchSuggestion={() => void onGenerateBatchSuggestions()}
+              onApplyBatchSuggestion={onApplyBatchSuggestions}
+              batchDecisions={batchDecisions}
+              onSetBatchDecision={setBatchDecision}
+              onApplySelectedBatchSuggestion={onApplySelectedBatchSuggestions}
+              presets={INSTRUCTION_PRESETS}
+              selectedPreset={selectedPreset}
+              onSelectPreset={onSelectPreset}
+              verificationResult={verificationResult}
+              verificationLoading={verificationLoading}
+              onVerifySuggestion={() => void onVerifySuggestion()}
+              batchMode={batchMode}
+              onSetBatchMode={setBatchMode}
+            />
+          }
+          chat={
+            <ChatPanel
+              messages={chatMessages}
+              isBusy={chatBusy}
+              pendingToolCall={pendingToolCall}
+              hasDocument={!!editorDoc}
+              onSendMessage={(text) => void onSendChatMessage(text)}
+              onApproveTool={onApproveToolCall}
+              onRejectTool={onRejectToolCall}
+              onClearChat={clearChat}
+              canUndo={!!lastToolCallSnapshot}
+              onUndoLastToolCall={() => {
+                const snapshot = undoLastToolCall();
+                if (snapshot && editor) {
+                  editor.commands.setContent(snapshot);
+                }
+              }}
+            />
+          }
+            analysis={
+              <DocumentAnalysisPanel
+                analysis={documentAnalysis}
+                complexObjectReport={complexObjectReport}
+                templateCatalog={templateCatalog}
+                isLoading={analysisLoading}
+                terminologyDict={terminologyDict}
+                onUpdateEntry={updateTerminologyEntry}
+                onRemoveEntry={removeTerminologyEntry}
+                onApplyTerminology={onApplyTerminology}
+                isBusy={isBusy}
+                compatibilityWarnings={exportWarnings}
+                collaborationStats={{
+                  historyCount: history.length,
+                  aiActionCount: history.filter((h) => h.actor === "ai").length,
+                }}
+                performanceStats={{
+                  segmentCount: sourceSegments.length,
+                  complexity: sourceSegments.length > 200 ? "high" : sourceSegments.length > 50 ? "medium" : "low",
+                }}
+                qaStats={{
+                  integrityIssueCount: integrityIssues.length,
+                  exportWarningCount: exportWarnings.length,
+                  compatibilityWarningCount: exportWarnings.length,
                 }}
               />
             }
-              analysis={
-                <DocumentAnalysisPanel
-                  analysis={documentAnalysis}
-                  complexObjectReport={complexObjectReport}
-                  templateCatalog={templateCatalog}
-                  isLoading={analysisLoading}
-                  terminologyDict={terminologyDict}
-                  onUpdateEntry={updateTerminologyEntry}
-                  onRemoveEntry={removeTerminologyEntry}
-                  onApplyTerminology={onApplyTerminology}
-                  isBusy={isBusy}
-                  compatibilityWarnings={exportWarnings}
-                  collaborationStats={{
-                    historyCount: history.length,
-                    aiActionCount: history.filter((h) => h.actor === "ai").length,
-                  }}
-                  performanceStats={{
-                    segmentCount: sourceSegments.length,
-                    complexity: sourceSegments.length > 200 ? "high" : sourceSegments.length > 50 ? "medium" : "low",
-                  }}
-                  qaStats={{
-                    integrityIssueCount: integrityIssues.length,
-                    exportWarningCount: exportWarnings.length,
-                    compatibilityWarningCount: exportWarnings.length,
-                  }}
-                />
-              }
-            history={
-              <EditHistoryPanel
-                history={history}
-                onRestoreItem={(id) => {
-                  const item = history.find((h) => h.id === id);
-                  if (item?.snapshotDoc && editor) {
-                    editor.commands.setContent(item.snapshotDoc);
-                  }
-                }}
-                disabled={isBusy || aiBusy}
-              />
-            }
-          />
-        ) : null}
+          history={
+            <EditHistoryPanel
+              history={history}
+              onRestoreItem={(id) => {
+                const item = history.find((h) => h.id === id);
+                if (item?.snapshotDoc && editor) {
+                  editor.commands.setContent(item.snapshotDoc);
+                }
+              }}
+              disabled={isBusy || aiBusy}
+            />
+          }
+        />
       </main>
 
       {/* ── 하단 상태 표시줄 ── */}

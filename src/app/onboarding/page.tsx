@@ -171,7 +171,7 @@ export default function OnboardingPage() {
                 <div>
                   <strong className={styles.featureTitle}>슬래시 커맨드</strong>
                   <p className={styles.featureDesc}>
-                    문서 편집 중 <kbd className={styles.kbd}>#</kbd> 키를 입력하면 서식, 표, AI 명령을 빠르게 삽입할 수 있습니다.
+                    문서 편집 중 <kbd>#</kbd> 키를 입력하면 서식, 표, AI 명령을 빠르게 삽입할 수 있습니다.
                   </p>
                 </div>
               </div>

@@ -270,7 +270,7 @@ export function DocumentAnalysisPanel({
             </div>
           )}
 
-          {analysis.inconsistentTerms.filter((term) => !term.variants.some((v) => terminologyDict[v])).length > 0 && (
+          {analysis.inconsistentTerms.length > 0 && (
             <div>
               <button
                 type="button"
@@ -286,11 +286,11 @@ export function DocumentAnalysisPanel({
                   gap: 4,
                 }}
               >
-                {expandTerms ? "▾" : "▸"} 용어 불일치 ({analysis.inconsistentTerms.filter((term) => !term.variants.some((v) => terminologyDict[v])).length}건)
+                {expandTerms ? "▾" : "▸"} 용어 불일치 ({analysis.inconsistentTerms.length}건)
               </button>
               {expandTerms && (
                 <ul style={{ listStyle: "none", display: "grid", gap: 6, marginTop: 4 }}>
-                  {analysis.inconsistentTerms.filter((term) => !term.variants.some((v) => terminologyDict[v])).map((term, i) => (
+                  {analysis.inconsistentTerms.map((term, i) => (
                     <li
                       key={`term-${i}`}
                       style={{
