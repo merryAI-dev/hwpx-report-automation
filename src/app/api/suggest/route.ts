@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { withApiAuth, type AuthenticatedSession } from "@/lib/auth/with-api-auth";
+import { withApiAuth } from "@/lib/auth/with-api-auth";
+import type { AuthenticatedSession } from "@/lib/auth/with-api-auth";
 import {
   requireString,
   withTimeout,
@@ -24,12 +25,7 @@ type RequestBody = {
   monthlyCostLimitUsd?: number;
 };
 
-async function handlePost(request: Request, session: AuthenticatedSession) {
-  // ── Auth check ──
-  if (session.sub === "guest") {
-    return NextResponse.json({ error: "인증이 필요합니다.", code: "UNAUTHORIZED" }, { status: 401 });
-  }
-
+async function handlePost(request: Request, _session: AuthenticatedSession) {
   // ── Rate limiting ──
   const rateLimitResp = checkRateLimit(getClientIp(request));
   if (rateLimitResp) return rateLimitResp;
