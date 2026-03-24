@@ -8,6 +8,11 @@ import { useRouter, useSearchParams } from "next/navigation";
 import { DocumentEditor } from "@/components/editor/DocumentEditor";
 import { EditorToolbar } from "@/components/editor/EditorToolbar";
 import { HwpxSaveDialog } from "@/components/common/HwpxSaveDialog";
+import {
+  DocumentStartWizard,
+  type PreviewStatus,
+  type StartWizardMethod,
+} from "@/components/common/DocumentStartWizard";
 import { EditorLayout } from "@/components/editor/EditorLayout";
 import { EditorRuler } from "@/components/editor/EditorRuler";
 import { StatusBar } from "@/components/common/StatusBar";
@@ -27,6 +32,10 @@ import { parseDocxToProseMirror } from "@/lib/editor/docx-to-prosemirror";
 import { parsePptxToProseMirror } from "@/lib/editor/pptx-to-prosemirror";
 import { applyProseMirrorDocToHwpx, collectDocumentEdits } from "@/lib/editor/prosemirror-to-hwpx";
 import { buildHwpxModelFromDoc } from "@/lib/editor/hwpx-template-synthesizer";
+import {
+  DOCUMENT_TEMPLATES,
+  type DocumentTemplate,
+} from "@/lib/editor/document-templates";
 import { exportToPdf } from "@/lib/editor/export-pdf";
 import { exportToDocx } from "@/lib/editor/export-docx";
 import { triggerDiffHighlightUpdate } from "@/lib/editor/diff-highlight-extension";
@@ -35,6 +44,11 @@ import { INSTRUCTION_PRESETS } from "@/lib/editor/ai-presets";
 import type { PresetKey } from "@/lib/editor/ai-presets";
 import { uploadBlobForSignedDownload } from "@/lib/blob-storage-client";
 import { buildTemplateCatalogFromDoc } from "@/lib/template-catalog";
+import {
+  buildPptxReportFamilyPlanPayload,
+  type ReportFamilyPlan,
+} from "@/lib/report-family-planner";
+import { buildReportFamilyPromptContext } from "@/lib/report-family-prompt-context";
 import type { SessionIdentityProvider, SessionTenantMembership } from "@/lib/auth/session";
 import { evaluateQualityGate, type QualityGateResult } from "@/lib/quality-gates";
 import { recordPilotMetricEvent } from "@/lib/pilot-metrics";
@@ -219,6 +233,40 @@ function extractNodeText(node: JSONContent): string {
 
 function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function sanitizeTemplateFileName(name: string): string {
+  return name.trim().replace(/[\\/:*?"<>|]+/g, "-");
+}
+
+function getPreviewTabTitle(previewStatus: PreviewStatus): string {
+  switch (previewStatus) {
+    case "loading":
+      return "미리보기를 준비 중입니다.";
+    case "ready":
+      return "Java 미리보기를 사용할 수 있습니다.";
+    case "error":
+      return "Java 미리보기 서버에 연결하지 못했습니다.";
+    case "unavailable":
+      return "현재 문서는 Java 미리보기를 지원하지 않습니다.";
+    default:
+      return "문서를 열면 미리보기를 준비합니다.";
+  }
+}
+
+function getPreviewBadgeLabel(previewStatus: PreviewStatus): string {
+  switch (previewStatus) {
+    case "loading":
+      return "준비 중";
+    case "ready":
+      return "연결됨";
+    case "error":
+      return "오류";
+    case "unavailable":
+      return "미지원";
+    default:
+      return "대기";
+  }
 }
 
 function fillTableRows(
@@ -498,8 +546,14 @@ export default function Home() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const workspaceDocumentId = searchParams.get("documentId") || "";
+  const onboardingMode = searchParams.get("onboarding") || "";
+  const templateIdQuery = searchParams.get("templateId") || "";
   const [editor, setEditor] = useState<Editor | null>(null);
   const [viewMode, setViewMode] = useState<"editor" | "preview">("editor");
+  const [startWizardOpen, setStartWizardOpen] = useState(!workspaceDocumentId);
+  const [startWizardInitialMethod, setStartWizardInitialMethod] = useState<StartWizardMethod | null>(null);
+  const [startWizardResetToken, setStartWizardResetToken] = useState(0);
+  const [previewStatus, setPreviewStatus] = useState<PreviewStatus>("idle");
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
   const [recentSnapshots, setRecentSnapshots] = useState<RecentFileSnapshotMeta[]>([]);
   const [selectedRecentSnapshotId, setSelectedRecentSnapshotId] = useState("");
@@ -510,6 +564,7 @@ export default function Home() {
   const docRevisionRef = useRef(0);
   const lastAutoSavedRevisionRef = useRef(-1);
   const loadedWorkspaceKeyRef = useRef("");
+  const handledStartQueryRef = useRef("");
 
   const {
     fileName,
@@ -545,6 +600,7 @@ export default function Home() {
     selectedPreset,
     // Phase 2-4: Document Intelligence
     documentAnalysis,
+    reportFamilyPlanState,
     templateCatalog,
     analysisLoading,
     // Phase 2-5: Terminology
@@ -592,6 +648,7 @@ export default function Home() {
     setSelectedPreset,
     // Phase 2-4
     setDocumentAnalysis,
+    setReportFamilyPlanState,
     setTemplateCatalog,
     setAnalysisLoading,
     // Phase 2-5
@@ -621,7 +678,6 @@ export default function Home() {
     // Tool call rollback
     lastToolCallSnapshot,
     undoLastToolCall,
-    saveToolCallSnapshot,
   } = useDocumentStore();
 
   // Phase 2: appendTransaction 이후 Zustand 갱신 신호
@@ -663,6 +719,19 @@ export default function Home() {
     void refreshRecentSnapshots();
   }, [refreshRecentSnapshots]);
 
+  const openStartWizard = useCallback((method: StartWizardMethod | null = null) => {
+    setStartWizardInitialMethod(method);
+    setStartWizardResetToken((prev) => prev + 1);
+    setStartWizardOpen(true);
+  }, []);
+
+  const closeStartWizard = useCallback(() => {
+    if (!editorDoc || isBusy) {
+      return;
+    }
+    setStartWizardOpen(false);
+  }, [editorDoc, isBusy]);
+
   const refreshAuthSession = useCallback(async () => {
     try {
       const response = await fetch("/api/auth/session", {
@@ -684,6 +753,14 @@ export default function Home() {
     void refreshAuthSession();
   }, [refreshAuthSession]);
 
+  useEffect(() => {
+    if (editorDoc) {
+      setStartWizardOpen(false);
+    } else if (!workspaceDocumentId) {
+      setStartWizardOpen(true);
+    }
+  }, [editorDoc, workspaceDocumentId]);
+
   const clearWorkspaceContext = useCallback(() => {
     setWorkspaceDocument(null);
     loadedWorkspaceKeyRef.current = "";
@@ -691,6 +768,15 @@ export default function Home() {
       router.replace("/");
     }
   }, [router, workspaceDocumentId]);
+
+  const confirmReplaceDocument = useCallback((nextActionLabel: string) => {
+    if (!editorDoc || !isDirty) {
+      return true;
+    }
+    return window.confirm(
+      `현재 문서에 저장되지 않은 변경사항이 있습니다. ${nextActionLabel}로 시작하면 지금 작업이 닫힙니다. 계속할까요?`,
+    );
+  }, [editorDoc, isDirty]);
 
   const onSwitchTenant = useCallback(async (tenantId: string) => {
     if (!authSession?.activeTenant || authSession.activeTenant.tenantId === tenantId) {
@@ -754,9 +840,33 @@ export default function Home() {
     () => collectSectionBatchItems(editorDoc, batchMode === "document" ? null : selection.selectedSegmentId),
     [editorDoc, selection.selectedSegmentId, batchMode],
   );
+  const selectedReportFamilyPlanContext = useMemo(
+    () =>
+      buildReportFamilyPromptContext({
+        plan: reportFamilyPlanState.plan,
+        segmentId: selection.selectedSegmentId,
+        text: selection.selectedText,
+      }),
+    [reportFamilyPlanState.plan, selection.selectedSegmentId, selection.selectedText],
+  );
+  const batchItemsWithPlanContext = useMemo(
+    () =>
+      batchItems.map((item) => ({
+        ...item,
+        planContext: buildReportFamilyPromptContext({
+          plan: reportFamilyPlanState.plan,
+          segmentId: item.id,
+          text: item.text,
+          sectionTitle: item.styleHints.sectionTitle,
+          prevText: item.prevText,
+          nextText: item.nextText,
+        }) || undefined,
+      })),
+    [batchItems, reportFamilyPlanState.plan],
+  );
   const batchPlan = useMemo(
-    () => buildBatchApplyPlan(batchItems, batchSuggestions),
-    [batchItems, batchSuggestions],
+    () => buildBatchApplyPlan(batchItemsWithPlanContext, batchSuggestions),
+    [batchItemsWithPlanContext, batchSuggestions],
   );
   const batchSuggestionCount = useMemo(
     () => batchPlan.filter((item) => item.changed).length,
@@ -858,6 +968,75 @@ export default function Home() {
       .finally(() => setAnalysisLoading(false));
   }, [setAnalysisLoading, setDocumentAnalysis, setInstruction, setSelectedPreset]);
 
+  const fireReportFamilyPlanning = useCallback(
+    async (params: {
+      fileName: string;
+      segments: typeof sourceSegments;
+      outlineItems: typeof outline;
+    }) => {
+      const extension = getFileExtension(params.fileName);
+      if (extension !== "pptx" || !params.segments.length || !params.outlineItems.length) {
+        setReportFamilyPlanState({
+          plan: null,
+          isLoading: false,
+          error: extension === "pptx" ? "목차 추출에 사용할 outline이 부족합니다." : null,
+        });
+        return;
+      }
+
+      setReportFamilyPlanState({
+        plan: null,
+        isLoading: true,
+        error: null,
+      });
+
+      try {
+        const payload = buildPptxReportFamilyPlanPayload({
+          familyName: `${toFileStem(params.fileName)} 보고서`,
+          fileName: params.fileName,
+          segments: params.segments,
+          outline: params.outlineItems,
+        });
+
+        const response = await fetch("/api/report-family/plan", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(payload),
+        });
+        const result = (await response.json()) as ReportFamilyPlan & { error?: string };
+
+        if (!response.ok) {
+          throw new Error(result.error || "리포트 패밀리 계획 계산 실패");
+        }
+
+        setReportFamilyPlanState({
+          plan: result,
+          isLoading: false,
+          error: null,
+        });
+      } catch (error) {
+        setReportFamilyPlanState({
+          plan: null,
+          isLoading: false,
+          error: error instanceof Error ? error.message : "리포트 패밀리 계획 계산 실패",
+        });
+      }
+    },
+    [setReportFamilyPlanState],
+  );
+
+  const onRefreshReportFamilyPlan = useCallback(() => {
+    if (getFileExtension(fileName) !== "pptx") {
+      setStatus("현재는 PPTX 문서에 대해서만 리포트 패밀리 계획을 계산합니다.");
+      return;
+    }
+    void fireReportFamilyPlanning({
+      fileName,
+      segments: sourceSegments,
+      outlineItems: outline,
+    });
+  }, [fileName, fireReportFamilyPlanning, outline, setStatus, sourceSegments]);
+
   /* ── File I/O ── */
   const loadFileIntoEditor = useCallback(
     async (
@@ -880,6 +1059,7 @@ export default function Home() {
 
         const formatLabel = getFormatLabel(ext);
         const isHwpx = ext === "hwpx";
+        setPreviewStatus(isHwpx ? "loading" : "unavailable");
         setStatus(
           sourceExt === "hwp"
             ? "HWP를 HWPX로 변환한 뒤 문서를 분석 중입니다..."
@@ -892,10 +1072,10 @@ export default function Home() {
         else if (ext === "pptx") parsePromise = parsePptxToProseMirror(buffer);
         else parsePromise = parseHwpxToProseMirror(buffer);
 
-        const [parsed] = await Promise.all([
+        const [parsed, previewPayload] = await Promise.all([
           parsePromise,
           !isHwpx
-            ? Promise.resolve()
+            ? Promise.resolve<JavaRenderPayload | null>(null)
             : (async () => {
                 try {
                   const fd = new FormData();
@@ -904,11 +1084,19 @@ export default function Home() {
                   if (resp.ok) {
                     const payload = (await resp.json()) as JavaRenderPayload;
                     if (payload.html && payload.elementMap) {
-                      setRenderResult(payload.html, payload.elementMap);
+                      setPreviewStatus("ready");
+                      return payload;
+                    } else {
+                      setPreviewStatus("error");
+                      return null;
                     }
+                  } else {
+                    setPreviewStatus("error");
+                    return null;
                   }
                 } catch {
-                  // Java server not running
+                  setPreviewStatus("error");
+                  return null;
                 }
               })(),
         ]);
@@ -937,7 +1125,11 @@ export default function Home() {
           complexObjectReport: parsed.complexObjectReport,
           hwpxDocumentModel,
         });
-        setOutline(buildOutlineFromDoc(parsed.doc));
+        if (previewPayload?.html && previewPayload.elementMap) {
+          setRenderResult(previewPayload.html, previewPayload.elementMap);
+        }
+        const nextOutline = buildOutlineFromDoc(parsed.doc);
+        setOutline(nextOutline);
         setTemplateCatalog(buildTemplateCatalogFromDoc(parsed.doc));
         setWorkspaceDocument(options?.workspaceDocument ?? null);
         loadedWorkspaceKeyRef.current = options?.workspaceDocument
@@ -982,8 +1174,16 @@ export default function Home() {
         });
 
         // Phase 2-4: Auto-analyze document on upload
-      fireDocumentAnalysis(parsed.segments);
+        fireDocumentAnalysis(parsed.segments);
+        if (ext === "pptx") {
+          void fireReportFamilyPlanning({
+            fileName: workingFile.name,
+            segments: parsed.segments,
+            outlineItems: nextOutline,
+          });
+        }
       } catch (error) {
+        setPreviewStatus("error");
         const message = error instanceof Error ? error.message : "문서 로드 실패";
         setStatus(message);
       } finally {
@@ -992,6 +1192,7 @@ export default function Home() {
     },
     [
       setBusy,
+      setPreviewStatus,
       setViewMode,
       setStatus,
       setRenderResult,
@@ -1002,8 +1203,126 @@ export default function Home() {
       setWorkspaceDocument,
       refreshRecentSnapshots,
       fireDocumentAnalysis,
+      fireReportFamilyPlanning,
     ],
   );
+
+  const startDocumentFromTemplate = useCallback(
+    async (template: DocumentTemplate | null) => {
+      const actionLabel = template ? `"${template.name}" 템플릿` : "빈 문서";
+      if (!confirmReplaceDocument(actionLabel)) {
+        return;
+      }
+
+      openStartWizard(template ? "template" : "blank");
+      clearWorkspaceContext();
+      setBusy(true);
+      setViewMode("editor");
+      setPreviewStatus("unavailable");
+      setStatus(
+        template
+          ? `${template.name} 템플릿으로 새 문서를 준비 중입니다...`
+          : "빈 문서를 준비 중입니다...",
+      );
+
+      try {
+        const doc: JSONContent = {
+          type: "doc",
+          content: template
+            ? structuredClone(template.starterContent)
+            : [{ type: "paragraph" }],
+        };
+        const templateResp = await fetch("/base.hwpx");
+        if (!templateResp.ok) {
+          throw new Error("기본 HWPX 템플릿을 불러오지 못했습니다.");
+        }
+        const templateBuffer = await templateResp.arrayBuffer();
+        const hwpxDocumentModel = await buildHwpxModelFromDoc(templateBuffer, doc);
+        const fileName = `${sanitizeTemplateFileName(template?.name || "새 문서")}.hwpx`;
+
+        setLoadedDocument({
+          fileName,
+          buffer: templateBuffer,
+          doc,
+          segments: [],
+          extraSegmentsMap: {},
+          integrityIssues: [],
+          complexObjectReport: null,
+          hwpxDocumentModel,
+        });
+        setOutline(buildOutlineFromDoc(doc));
+        setTemplateCatalog(buildTemplateCatalogFromDoc(doc));
+        if (template) {
+          setSelectedPreset(template.defaultPreset);
+          const preset = INSTRUCTION_PRESETS.find((item) => item.key === template.defaultPreset);
+          if (preset?.instruction) {
+            setInstruction(preset.instruction);
+          }
+        } else {
+          setSelectedPreset("custom");
+        }
+        docRevisionRef.current = 0;
+        lastAutoSavedRevisionRef.current = -1;
+        setStatus(
+          template
+            ? `템플릿으로 새 문서를 시작했습니다: ${template.name}`
+            : "빈 문서를 시작했습니다.",
+        );
+      } catch (error) {
+        setPreviewStatus("error");
+        const message = error instanceof Error ? error.message : "새 문서 생성 실패";
+        setStatus(message);
+      } finally {
+        setBusy(false);
+      }
+    },
+    [
+      clearWorkspaceContext,
+      confirmReplaceDocument,
+      openStartWizard,
+      setBusy,
+      setLoadedDocument,
+      setOutline,
+      setInstruction,
+      setPreviewStatus,
+      setSelectedPreset,
+      setStatus,
+      setTemplateCatalog,
+      setViewMode,
+    ],
+  );
+
+  useEffect(() => {
+    const queryKey = `${onboardingMode}|${templateIdQuery}`;
+    if (!queryKey.replace("|", "") || handledStartQueryRef.current === queryKey) {
+      return;
+    }
+    handledStartQueryRef.current = queryKey;
+
+    if (templateIdQuery) {
+      const template = DOCUMENT_TEMPLATES.find((item) => item.id === templateIdQuery);
+      if (template) {
+        void startDocumentFromTemplate(template);
+      } else {
+        setStatus("선택한 템플릿을 찾지 못했습니다.");
+        openStartWizard("template");
+      }
+      router.replace("/");
+      return;
+    }
+
+    if (onboardingMode === "template") {
+      openStartWizard("template");
+      router.replace("/");
+    }
+  }, [
+    onboardingMode,
+    openStartWizard,
+    router,
+    setStatus,
+    startDocumentFromTemplate,
+    templateIdQuery,
+  ]);
 
   const openWorkspaceDocument = useCallback(async (documentId: string) => {
     if (!authSession?.activeTenant || !documentId) {
@@ -1056,6 +1375,10 @@ export default function Home() {
   }, [authSession, openWorkspaceDocument, workspaceDocumentId]);
 
   const onPickFile = async (file: File) => {
+    if (!confirmReplaceDocument("새 파일")) {
+      return;
+    }
+    openStartWizard("upload");
     clearWorkspaceContext();
     await loadFileIntoEditor(file, "opened");
   };
@@ -1065,6 +1388,10 @@ export default function Home() {
       setStatus("최근 파일을 먼저 선택하세요.");
       return;
     }
+    if (!confirmReplaceDocument("최근 문서")) {
+      return;
+    }
+    openStartWizard("recent");
     setStatus("최근 파일을 불러오는 중입니다...");
     try {
       const snapshot = await loadRecentFileSnapshot(snapshotId);
@@ -1114,6 +1441,7 @@ export default function Home() {
         body: JSON.stringify({
           text,
           instruction,
+          planContext: selectedReportFamilyPlanContext || undefined,
           model: undefined,
         }),
       });
@@ -1524,7 +1852,7 @@ export default function Home() {
     clearBatchDecisions();
     setBatchSuggestions([]);
     setBatchJob(null);
-    const requestedBatchItems = [...batchItems];
+    const requestedBatchItems = [...batchItemsWithPlanContext];
     let createdJobId: string | null = null;
     let batchFailureTracked = false;
 
@@ -1654,7 +1982,7 @@ export default function Home() {
         .filter(([, decision]) => decision === "accepted")
         .map(([id]) => id),
     );
-    const changedPlan = buildBatchApplyPlan(batchItems, batchSuggestions).filter((item) => item.changed);
+    const changedPlan = buildBatchApplyPlan(batchItemsWithPlanContext, batchSuggestions).filter((item) => item.changed);
     const plan = changedPlan.filter((item) => {
       const gate = gateById.get(item.id);
       return !gate?.requiresApproval || approvedIds.has(item.id);
@@ -1717,7 +2045,7 @@ export default function Home() {
       setStatus("수락된 항목이 없습니다.");
       return;
     }
-    const plan = buildBatchApplyPlan(batchItems, batchSuggestions)
+    const plan = buildBatchApplyPlan(batchItemsWithPlanContext, batchSuggestions)
       .filter((item) => item.changed && acceptedIds.has(item.id));
     const approvedRiskCount = plan.filter((item) =>
       batchSuggestions.find((suggestion) => suggestion.id === item.id)?.qualityGate.requiresApproval,
@@ -2424,6 +2752,7 @@ export default function Home() {
         onSelectRecentSnapshot={setSelectedRecentSnapshotId}
         onLoadRecentSnapshot={onLoadRecentSnapshot}
         onPickFile={onPickFile}
+        onOpenStartWizard={() => openStartWizard(null)}
         onExport={onExport}
         onExportPdf={() => {
           const editorWrap = document.querySelector(".document-editor-wrap");
@@ -2525,191 +2854,233 @@ export default function Home() {
       <main className={styles.main}>
         <section className={styles.editorArea}>
           <div className={styles.editorCenter}>
-            {editorDoc ? (
-              <div className={styles.viewTabs}>
-                <button
-                  type="button"
-                  className={`${styles.viewTabBtn} ${viewMode === "editor" ? styles.viewTabBtnActive : ""}`}
-                  onClick={() => setViewMode("editor")}
-                >
-                  편집
-                </button>
-                <button
-                  type="button"
-                  className={`${styles.viewTabBtn} ${viewMode === "preview" ? styles.viewTabBtnActive : ""}`}
-                  onClick={() => setViewMode("preview")}
-                  disabled={!renderHtml}
-                  title={renderHtml ? undefined : "Java 서버에 연결되지 않았습니다"}
-                >
-                  미리보기
-                </button>
-              </div>
-            ) : null}
+            {!editorDoc ? (
+              <DocumentStartWizard
+                key={`wizard-${startWizardResetToken}-${startWizardInitialMethod ?? "none"}`}
+                hasDocument={false}
+                initialMethod={startWizardInitialMethod}
+                recentSnapshots={recentSnapshots}
+                isBusy={isBusy}
+                status={status}
+                previewStatus={previewStatus}
+                onPickFile={onPickFile}
+                onLoadRecentSnapshot={onLoadRecentSnapshot}
+                onStartBlank={() => void startDocumentFromTemplate(null)}
+                onStartFromTemplate={(template) => void startDocumentFromTemplate(template)}
+              />
+            ) : (
+              <>
+                <div className={styles.viewTabs}>
+                  <button
+                    type="button"
+                    className={`${styles.viewTabBtn} ${viewMode === "editor" ? styles.viewTabBtnActive : ""}`}
+                    onClick={() => setViewMode("editor")}
+                  >
+                    편집
+                  </button>
+                  <button
+                    type="button"
+                    className={`${styles.viewTabBtn} ${viewMode === "preview" ? styles.viewTabBtnActive : ""}`}
+                    onClick={() => setViewMode("preview")}
+                    disabled={previewStatus !== "ready" || !renderHtml}
+                    title={getPreviewTabTitle(previewStatus)}
+                  >
+                    <span className={styles.previewTabLabel}>미리보기</span>
+                    <span className={`${styles.previewTabBadge} ${styles[`previewTabBadge${previewStatus[0].toUpperCase()}${previewStatus.slice(1)}`]}`}>
+                      {getPreviewBadgeLabel(previewStatus)}
+                    </span>
+                  </button>
+                </div>
 
-            <EditorRuler />
+                <EditorRuler />
 
-            {/* 편집 탭 */}
-            <div style={{ display: viewMode === "editor" ? "block" : "none" }}>
-              <EditorLayout>
-                <DocumentEditor
-                  content={editorDoc}
-                  formMode={formMode}
-                  onUpdateDoc={onEditorUpdateDoc}
-                  onSelectionChange={setSelection}
-                  onEditorReady={setEditor}
-                  onAiCommand={() => {
-                    setActiveSidebarTab("ai");
-                    void onGenerateSuggestion();
-                  }}
-                  onDiffSegmentClick={(segmentId) => {
-                    if (sidebarCollapsed) toggleSidebar();
-                    setActiveSidebarTab("ai");
-                    setTimeout(() => {
-                      const el = document.querySelector(`[data-batch-diff-id="${segmentId}"]`);
-                      el?.scrollIntoView({ behavior: "smooth", block: "center" });
-                    }, 100);
-                  }}
-                  onNewParaCreated={onNewParaCreated}
-                  getHwpxDocumentModel={getHwpxDocumentModel}
-                />
-              </EditorLayout>
-              <InlineAiPopup
-                editor={editor}
-                onAction={(action, text) => {
-                  const instructionMap: Record<string, string> = {
-                    "다듬기": `선택된 텍스트를 더 자연스럽고 전문적으로 다듬어주세요: ${text}`,
-                    "요약": `다음 텍스트를 2-3문장으로 요약해주세요: ${text}`,
-                    "번역": `다음 텍스트를 영어로 번역해주세요: ${text}`,
-                    "확장": `다음 텍스트를 더 자세하게 확장해주세요: ${text}`,
-                  };
-                  const msg = instructionMap[action] ?? `${action}: ${text}`;
-                  setActiveSidebarTab("chat");
-                  if (sidebarCollapsed) toggleSidebar();
-                  void onSendChatMessage(msg);
-                }}
+                {/* 편집 탭 */}
+                <div style={{ display: viewMode === "editor" ? "block" : "none" }}>
+                  <EditorLayout>
+                    <DocumentEditor
+                      content={editorDoc}
+                      formMode={formMode}
+                      onUpdateDoc={onEditorUpdateDoc}
+                      onSelectionChange={setSelection}
+                      onEditorReady={setEditor}
+                      onAiCommand={() => {
+                        setActiveSidebarTab("ai");
+                        void onGenerateSuggestion();
+                      }}
+                      onDiffSegmentClick={(segmentId) => {
+                        if (sidebarCollapsed) toggleSidebar();
+                        setActiveSidebarTab("ai");
+                        setTimeout(() => {
+                          const el = document.querySelector(`[data-batch-diff-id="${segmentId}"]`);
+                          el?.scrollIntoView({ behavior: "smooth", block: "center" });
+                        }, 100);
+                      }}
+                      onNewParaCreated={onNewParaCreated}
+                      getHwpxDocumentModel={getHwpxDocumentModel}
+                    />
+                  </EditorLayout>
+                  <InlineAiPopup
+                    editor={editor}
+                    onAction={(action, text) => {
+                      const instructionMap: Record<string, string> = {
+                        "다듬기": `선택된 텍스트를 더 자연스럽고 전문적으로 다듬어주세요: ${text}`,
+                        "요약": `다음 텍스트를 2-3문장으로 요약해주세요: ${text}`,
+                        "번역": `다음 텍스트를 영어로 번역해주세요: ${text}`,
+                        "확장": `다음 텍스트를 더 자세하게 확장해주세요: ${text}`,
+                      };
+                      const msg = instructionMap[action] ?? `${action}: ${text}`;
+                      setActiveSidebarTab("chat");
+                      if (sidebarCollapsed) toggleSidebar();
+                      void onSendChatMessage(msg);
+                    }}
+                  />
+                </div>
+
+                {/* 미리보기 탭 */}
+                {viewMode === "preview" && renderHtml ? (
+                  <div
+                    className={styles.previewPane}
+                    // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted Java server output
+                    dangerouslySetInnerHTML={{ __html: renderHtml }}
+                    onClick={(e) => {
+                      const target = (e.target as HTMLElement).closest("[data-segment-id]");
+                      if (!target) return;
+                      const segmentId = target.getAttribute("data-segment-id");
+                      if (!segmentId) return;
+                      setViewMode("editor");
+                      setSelection({ selectedSegmentId: segmentId, selectedText: renderElementMap?.[segmentId]?.text ?? "" });
+                      if (editor) focusSegment(editor, segmentId);
+                    }}
+                  />
+                ) : null}
+              </>
+            )}
+          </div>
+          {startWizardOpen && editorDoc ? (
+            <div className={styles.wizardOverlay}>
+              <DocumentStartWizard
+                key={`wizard-overlay-${startWizardResetToken}-${startWizardInitialMethod ?? "none"}`}
+                hasDocument
+                initialMethod={startWizardInitialMethod}
+                recentSnapshots={recentSnapshots}
+                isBusy={isBusy}
+                status={status}
+                previewStatus={previewStatus}
+                onClose={closeStartWizard}
+                onPickFile={onPickFile}
+                onLoadRecentSnapshot={onLoadRecentSnapshot}
+                onStartBlank={() => void startDocumentFromTemplate(null)}
+                onStartFromTemplate={(template) => void startDocumentFromTemplate(template)}
               />
             </div>
-
-            {/* 미리보기 탭 */}
-            {viewMode === "preview" && renderHtml ? (
-              <div
-                className={styles.previewPane}
-                // biome-ignore lint/security/noDangerouslySetInnerHtml: trusted Java server output
-                dangerouslySetInnerHTML={{ __html: renderHtml }}
-                onClick={(e) => {
-                  const target = (e.target as HTMLElement).closest("[data-segment-id]");
-                  if (!target) return;
-                  const segmentId = target.getAttribute("data-segment-id");
-                  if (!segmentId) return;
-                  setViewMode("editor");
-                  setSelection({ selectedSegmentId: segmentId, selectedText: renderElementMap?.[segmentId]?.text ?? "" });
-                  if (editor) focusSegment(editor, segmentId);
-                }}
-              />
-            ) : null}
-          </div>
+          ) : null}
         </section>
 
-        <Sidebar
-          collapsed={sidebarCollapsed}
-          activeTab={activeSidebarTab}
-          outline={
-            <DocumentOutline
-              outline={outline}
-              selectedSegmentId={selection.selectedSegmentId}
-              onSelectSegment={onSelectOutlineSegment}
-            />
-          }
-          ai={
-            <AiSuggestionPanel
-              instruction={instruction}
-              suggestion={aiSuggestion}
-              selectedText={selection.selectedText}
-              singleQualityGate={singleSuggestionQualityGate}
-              singleSuggestionApproved={singleSuggestionApproved}
-              batchTargetCount={batchItems.length}
-              batchSuggestionCount={batchSuggestionCount}
-              batchDiffItems={batchDiffItems}
-              batchJob={batchJob}
-              isBusy={isBusy || aiBusy}
-              onChangeInstruction={setInstruction}
-              onRequestSuggestion={() => void onGenerateSuggestion()}
-              onApplySuggestion={onApplySuggestion}
-              onApproveSuggestion={onApproveSingleSuggestion}
-              onRequestBatchSuggestion={() => void onGenerateBatchSuggestions()}
-              onApplyBatchSuggestion={onApplyBatchSuggestions}
-              batchDecisions={batchDecisions}
-              onSetBatchDecision={setBatchDecision}
-              onApplySelectedBatchSuggestion={onApplySelectedBatchSuggestions}
-              presets={INSTRUCTION_PRESETS}
-              selectedPreset={selectedPreset}
-              onSelectPreset={onSelectPreset}
-              verificationResult={verificationResult}
-              verificationLoading={verificationLoading}
-              onVerifySuggestion={() => void onVerifySuggestion()}
-              batchMode={batchMode}
-              onSetBatchMode={setBatchMode}
-            />
-          }
-          chat={
-            <ChatPanel
-              messages={chatMessages}
-              isBusy={chatBusy}
-              pendingToolCall={pendingToolCall}
-              hasDocument={!!editorDoc}
-              onSendMessage={(text) => void onSendChatMessage(text)}
-              onApproveTool={onApproveToolCall}
-              onRejectTool={onRejectToolCall}
-              onClearChat={clearChat}
-              canUndo={!!lastToolCallSnapshot}
-              onUndoLastToolCall={() => {
-                const snapshot = undoLastToolCall();
-                if (snapshot && editor) {
-                  editor.commands.setContent(snapshot);
-                }
-              }}
-            />
-          }
-            analysis={
-              <DocumentAnalysisPanel
-                analysis={documentAnalysis}
-                complexObjectReport={complexObjectReport}
-                templateCatalog={templateCatalog}
-                isLoading={analysisLoading}
-                terminologyDict={terminologyDict}
-                onUpdateEntry={updateTerminologyEntry}
-                onRemoveEntry={removeTerminologyEntry}
-                onApplyTerminology={onApplyTerminology}
-                isBusy={isBusy}
-                compatibilityWarnings={exportWarnings}
-                collaborationStats={{
-                  historyCount: history.length,
-                  aiActionCount: history.filter((h) => h.actor === "ai").length,
-                }}
-                performanceStats={{
-                  segmentCount: sourceSegments.length,
-                  complexity: sourceSegments.length > 200 ? "high" : sourceSegments.length > 50 ? "medium" : "low",
-                }}
-                qaStats={{
-                  integrityIssueCount: integrityIssues.length,
-                  exportWarningCount: exportWarnings.length,
-                  compatibilityWarningCount: exportWarnings.length,
+        {editorDoc ? (
+          <Sidebar
+            collapsed={sidebarCollapsed}
+            activeTab={activeSidebarTab}
+            outline={
+              <DocumentOutline
+                outline={outline}
+                selectedSegmentId={selection.selectedSegmentId}
+                onSelectSegment={onSelectOutlineSegment}
+              />
+            }
+            ai={
+              <AiSuggestionPanel
+                instruction={instruction}
+                suggestion={aiSuggestion}
+                selectedText={selection.selectedText}
+                singleQualityGate={singleSuggestionQualityGate}
+                singleSuggestionApproved={singleSuggestionApproved}
+                batchTargetCount={batchItems.length}
+                batchSuggestionCount={batchSuggestionCount}
+                batchDiffItems={batchDiffItems}
+                batchJob={batchJob}
+                isBusy={isBusy || aiBusy}
+                onChangeInstruction={setInstruction}
+                onRequestSuggestion={() => void onGenerateSuggestion()}
+                onApplySuggestion={onApplySuggestion}
+                onApproveSuggestion={onApproveSingleSuggestion}
+                onRequestBatchSuggestion={() => void onGenerateBatchSuggestions()}
+                onApplyBatchSuggestion={onApplyBatchSuggestions}
+                batchDecisions={batchDecisions}
+                onSetBatchDecision={setBatchDecision}
+                onApplySelectedBatchSuggestion={onApplySelectedBatchSuggestions}
+                presets={INSTRUCTION_PRESETS}
+                selectedPreset={selectedPreset}
+                onSelectPreset={onSelectPreset}
+                verificationResult={verificationResult}
+                verificationLoading={verificationLoading}
+                onVerifySuggestion={() => void onVerifySuggestion()}
+                batchMode={batchMode}
+                onSetBatchMode={setBatchMode}
+              />
+            }
+            chat={
+              <ChatPanel
+                messages={chatMessages}
+                isBusy={chatBusy}
+                pendingToolCall={pendingToolCall}
+                hasDocument={!!editorDoc}
+                onSendMessage={(text) => void onSendChatMessage(text)}
+                onApproveTool={onApproveToolCall}
+                onRejectTool={onRejectToolCall}
+                onClearChat={clearChat}
+                canUndo={!!lastToolCallSnapshot}
+                onUndoLastToolCall={() => {
+                  const snapshot = undoLastToolCall();
+                  if (snapshot && editor) {
+                    editor.commands.setContent(snapshot);
+                  }
                 }}
               />
             }
-          history={
-            <EditHistoryPanel
-              history={history}
-              onRestoreItem={(id) => {
-                const item = history.find((h) => h.id === id);
-                if (item?.snapshotDoc && editor) {
-                  editor.commands.setContent(item.snapshotDoc);
-                }
-              }}
-              disabled={isBusy || aiBusy}
-            />
-          }
-        />
+              analysis={
+                <DocumentAnalysisPanel
+                  analysis={documentAnalysis}
+                  complexObjectReport={complexObjectReport}
+                  templateCatalog={templateCatalog}
+                  isLoading={analysisLoading}
+                  terminologyDict={terminologyDict}
+                  onUpdateEntry={updateTerminologyEntry}
+                  onRemoveEntry={removeTerminologyEntry}
+                  onApplyTerminology={onApplyTerminology}
+                  isBusy={isBusy}
+                  compatibilityWarnings={exportWarnings}
+                  collaborationStats={{
+                    historyCount: history.length,
+                    aiActionCount: history.filter((h) => h.actor === "ai").length,
+                  }}
+                  performanceStats={{
+                    segmentCount: sourceSegments.length,
+                    complexity: sourceSegments.length > 200 ? "high" : sourceSegments.length > 50 ? "medium" : "low",
+                  }}
+                  qaStats={{
+                    integrityIssueCount: integrityIssues.length,
+                    exportWarningCount: exportWarnings.length,
+                    compatibilityWarningCount: exportWarnings.length,
+                  }}
+                  reportFamilyPlanState={reportFamilyPlanState}
+                  canGenerateReportFamilyPlan={getFileExtension(fileName) === "pptx" && sourceSegments.length > 0 && outline.length > 0}
+                  onGenerateReportFamilyPlan={onRefreshReportFamilyPlan}
+                />
+              }
+            history={
+              <EditHistoryPanel
+                history={history}
+                onRestoreItem={(id) => {
+                  const item = history.find((h) => h.id === id);
+                  if (item?.snapshotDoc && editor) {
+                    editor.commands.setContent(item.snapshotDoc);
+                  }
+                }}
+                disabled={isBusy || aiBusy}
+              />
+            }
+          />
+        ) : null}
       </main>
 
       {/* ── 하단 상태 표시줄 ── */}

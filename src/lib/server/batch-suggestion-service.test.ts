@@ -4,12 +4,19 @@ import { MAX_BATCH_ITEMS, normalizeBatchItems } from "./batch-suggestion-service
 describe("normalizeBatchItems", () => {
   it("trims ids/text and removes empty rows", () => {
     const items = normalizeBatchItems([
-      { id: " a ", text: " hello " },
+      { id: " a ", text: " hello ", planContext: " family " },
       { id: "", text: "missing-id" },
       { id: "b", text: "   " },
     ]);
 
-    expect(items).toEqual([{ id: "a", text: "hello", styleHints: {}, prevText: undefined, nextText: undefined }]);
+    expect(items).toEqual([{
+      id: "a",
+      text: "hello",
+      styleHints: {},
+      prevText: undefined,
+      nextText: undefined,
+      planContext: "family",
+    }]);
   });
 
   it("caps the payload at MAX_BATCH_ITEMS", () => {

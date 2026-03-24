@@ -10,6 +10,7 @@ export type BatchSuggestionInput = {
   styleHints: Record<string, string>;
   prevText?: string;
   nextText?: string;
+  planContext?: string;
 };
 
 export type BatchSuggestionResult = {

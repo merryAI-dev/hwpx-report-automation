@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { TemplateCatalog } from "@/lib/template-catalog";
-import type { DocumentAnalysis } from "@/store/document-store";
+import type { DocumentAnalysis, ReportFamilyPlanState } from "@/store/document-store";
 import {
   COMPLEX_OBJECT_TYPE_LABELS,
   hasComplexObjectSignal,
@@ -33,6 +33,9 @@ type DocumentAnalysisPanelProps = {
     exportWarningCount: number;
     compatibilityWarningCount: number;
   };
+  reportFamilyPlanState: ReportFamilyPlanState;
+  canGenerateReportFamilyPlan: boolean;
+  onGenerateReportFamilyPlan: () => void;
 };
 
 function ScoreBar({ score }: { score: number }) {
@@ -78,6 +81,9 @@ export function DocumentAnalysisPanel({
   collaborationStats,
   performanceStats,
   qaStats,
+  reportFamilyPlanState,
+  canGenerateReportFamilyPlan,
+  onGenerateReportFamilyPlan,
 }: DocumentAnalysisPanelProps) {
   const [expandTerms, setExpandTerms] = useState(true);
   const [expandTemplateFields, setExpandTemplateFields] = useState(true);
@@ -87,11 +93,11 @@ export function DocumentAnalysisPanel({
     templateCatalog.fieldCount > 0 || templateCatalog.issues.length > 0
   );
 
-  if (isLoading && !analysis && !hasTemplateCatalog && !hasComplexObjects) {
+  if (isLoading && !analysis && !hasTemplateCatalog && !hasComplexObjects && !reportFamilyPlanState.isLoading) {
     return <p className="sidebar-empty">문서 분석 중...</p>;
   }
 
-  if (!analysis && !hasTemplateCatalog && !hasComplexObjects) {
+  if (!analysis && !hasTemplateCatalog && !hasComplexObjects && !reportFamilyPlanState.plan) {
     return <p className="sidebar-empty">문서를 열면 자동으로 분석됩니다.</p>;
   }
 
@@ -155,6 +161,279 @@ export function DocumentAnalysisPanel({
         <label className="sidebar-label">5. QA 게이트</label>
         <div className="sidebar-box">
           무결성 경고 {qaStats.integrityIssueCount}건 · 내보내기 경고 {qaStats.exportWarningCount}건 · 호환성 경고 {qaStats.compatibilityWarningCount}건
+        </div>
+      </div>
+
+      <div>
+        <label className="sidebar-label">6. 리포트 패밀리 계획</label>
+        <div className="sidebar-box" style={{ display: "grid", gap: 10, background: "#f8fafc" }}>
+          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+            <div style={{ fontSize: 12, color: "#475569", lineHeight: 1.6 }}>
+              PPTX 기반 보고서 family용 TOC, masking, slide-grounded prompt 계획입니다.
+            </div>
+            <button
+              type="button"
+              onClick={onGenerateReportFamilyPlan}
+              disabled={isBusy || reportFamilyPlanState.isLoading || !canGenerateReportFamilyPlan}
+              style={{
+                borderRadius: 10,
+                border: "1px solid #cbd5e1",
+                background: canGenerateReportFamilyPlan ? "#ffffff" : "#f8fafc",
+                color: canGenerateReportFamilyPlan ? "#0f172a" : "#94a3b8",
+                padding: "6px 10px",
+                fontSize: 12,
+                fontWeight: 600,
+                cursor: canGenerateReportFamilyPlan ? "pointer" : "not-allowed",
+              }}
+            >
+              {reportFamilyPlanState.isLoading ? "계획 계산 중..." : "계획 다시 계산"}
+            </button>
+          </div>
+
+          {reportFamilyPlanState.error ? (
+            <div
+              style={{
+                fontSize: 12,
+                padding: "6px 8px",
+                background: "#fff1f2",
+                border: "1px solid #fecdd3",
+                borderRadius: 8,
+                color: "#9f1239",
+              }}
+            >
+              {reportFamilyPlanState.error}
+            </div>
+          ) : null}
+
+          {!canGenerateReportFamilyPlan && !reportFamilyPlanState.plan ? (
+            <div style={{ fontSize: 12, color: "#64748b" }}>
+              현재는 PPTX 문서를 열었을 때만 slide-grounded 계획을 자동 계산합니다.
+            </div>
+          ) : null}
+
+          {reportFamilyPlanState.plan ? (
+            <>
+              <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+                {reportFamilyPlanState.plan.familyId ? (
+                  <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#e2e8f0", color: "#334155", fontWeight: 600 }}>
+                    Family {reportFamilyPlanState.plan.familyId}
+                  </span>
+                ) : null}
+                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#f1f5f9", color: "#475569", fontWeight: 600 }}>
+                  {reportFamilyPlanState.plan.schemaSource === "registered_packet" ? "registered packet schema" : reportFamilyPlanState.plan.schemaSource === "synthetic_outline" ? "outline-derived schema" : "target document schema"}
+                </span>
+                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#dbeafe", color: "#1d4ed8", fontWeight: 600 }}>
+                  TOC {reportFamilyPlanState.plan.toc.length}
+                </span>
+                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#dcfce7", color: "#166534", fontWeight: 600 }}>
+                  Allowed {reportFamilyPlanState.plan.sourcePolicy.allowedSourceIds.length}
+                </span>
+                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#fee2e2", color: "#991b1b", fontWeight: 600 }}>
+                  Masked {reportFamilyPlanState.plan.sourcePolicy.maskedSourceIds.length}
+                </span>
+                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#ede9fe", color: "#6d28d9", fontWeight: 600 }}>
+                  Section prompts {reportFamilyPlanState.plan.sectionPlans.length}
+                </span>
+                <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#fef3c7", color: "#92400e", fontWeight: 600 }}>
+                  Mapped {reportFamilyPlanState.plan.sectionPlans.filter((section) => section.alignmentStrategy === "registered_mapping").length}
+                </span>
+                {reportFamilyPlanState.plan.planQuality ? (
+                  <>
+                    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#ecfeff", color: "#155e75", fontWeight: 600 }}>
+                      Mapping {Math.round(reportFamilyPlanState.plan.planQuality.mappingCoverage * 100)}%
+                    </span>
+                    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#eef2ff", color: "#3730a3", fontWeight: 600 }}>
+                      Type {Math.round(reportFamilyPlanState.plan.planQuality.sectionTypeAlignment * 100)}%
+                    </span>
+                    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#fff7ed", color: "#9a3412", fontWeight: 600 }}>
+                      Appendix {Math.round(reportFamilyPlanState.plan.planQuality.appendixEvidenceReadiness * 100)}%
+                    </span>
+                    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#f0fdf4", color: "#166534", fontWeight: 600 }}>
+                      Entity {Math.round(reportFamilyPlanState.plan.planQuality.entityCoverage * 100)}%
+                    </span>
+                    <span style={{ fontSize: 11, padding: "2px 8px", borderRadius: 999, background: "#f8fafc", color: "#475569", fontWeight: 600 }}>
+                      Evidence {reportFamilyPlanState.plan.planQuality.evidenceBundleCount}
+                    </span>
+                  </>
+                ) : null}
+              </div>
+
+              <div style={{ display: "grid", gap: 4 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>추출된 목차</div>
+                <ul style={{ listStyle: "none", display: "grid", gap: 4 }}>
+                  {reportFamilyPlanState.plan.toc.slice(0, 6).map((entry) => (
+                    <li key={entry.id} style={{ fontSize: 12, color: "#334155" }}>
+                      {entry.numbering ? `${entry.numbering} ` : ""}{entry.title}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              <div style={{ display: "grid", gap: 4 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>생성 소스 정책</div>
+                <ul style={{ listStyle: "none", display: "grid", gap: 4 }}>
+                  {reportFamilyPlanState.plan.sourcePolicy.reasons.map((reason) => (
+                    <li key={reason} style={{ fontSize: 12, color: "#475569" }}>
+                      {reason}
+                    </li>
+                  ))}
+                </ul>
+              </div>
+
+              {reportFamilyPlanState.plan.planQuality ? (
+                <div style={{ display: "grid", gap: 4 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>패밀리 schema 품질</div>
+                  <div
+                    style={{
+                      fontSize: 12,
+                      padding: "8px 10px",
+                      background: "#fff",
+                      border: "1px solid #e2e8f0",
+                      borderRadius: 8,
+                      color: "#334155",
+                      lineHeight: 1.6,
+                    }}
+                  >
+                    등록 섹션 {reportFamilyPlanState.plan.planQuality.registeredSectionCount}개 중 {reportFamilyPlanState.plan.planQuality.mappedSectionCount}개가 현재 slide cluster에 연결됐습니다.
+                    <br />
+                    상태: {reportFamilyPlanState.plan.planQuality.status === "pass" ? "family schema aligned" : "retry required"}
+                  </div>
+                  {reportFamilyPlanState.plan.planQuality.missingMappings.length ||
+                  reportFamilyPlanState.plan.planQuality.typeMismatches.length ||
+                  reportFamilyPlanState.plan.planQuality.appendixGaps.length ||
+                  reportFamilyPlanState.plan.planQuality.entityGaps.length ? (
+                    <ul style={{ listStyle: "none", display: "grid", gap: 4 }}>
+                      {reportFamilyPlanState.plan.planQuality.missingMappings.slice(0, 3).map((title) => (
+                        <li
+                          key={`missing-${title}`}
+                          style={{
+                            fontSize: 12,
+                            padding: "6px 8px",
+                            background: "#f8fafc",
+                            border: "1px solid #e2e8f0",
+                            borderRadius: 8,
+                            color: "#475569",
+                          }}
+                        >
+                          missing mapping: {title}
+                        </li>
+                      ))}
+                      {reportFamilyPlanState.plan.planQuality.typeMismatches.slice(0, 2).map((issue) => (
+                        <li
+                          key={`type-${issue}`}
+                          style={{
+                            fontSize: 12,
+                            padding: "6px 8px",
+                            background: "#eef2ff",
+                            border: "1px solid #c7d2fe",
+                            borderRadius: 8,
+                            color: "#3730a3",
+                          }}
+                        >
+                          type mismatch: {issue}
+                        </li>
+                      ))}
+                      {reportFamilyPlanState.plan.planQuality.appendixGaps.slice(0, 2).map((title) => (
+                        <li
+                          key={`appendix-${title}`}
+                          style={{
+                            fontSize: 12,
+                            padding: "6px 8px",
+                            background: "#fff7ed",
+                            border: "1px solid #fed7aa",
+                            borderRadius: 8,
+                            color: "#9a3412",
+                          }}
+                        >
+                          appendix gap: {title}
+                        </li>
+                      ))}
+                      {reportFamilyPlanState.plan.planQuality.entityGaps.slice(0, 2).map((title) => (
+                        <li
+                          key={`entity-${title}`}
+                          style={{
+                            fontSize: 12,
+                            padding: "6px 8px",
+                            background: "#f0fdf4",
+                            border: "1px solid #bbf7d0",
+                            borderRadius: 8,
+                            color: "#166534",
+                          }}
+                        >
+                          entity gap: {title}
+                        </li>
+                      ))}
+                    </ul>
+                  ) : null}
+                </div>
+              ) : null}
+
+              <div style={{ display: "grid", gap: 4 }}>
+                <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>대표 섹션 매핑</div>
+                <ul style={{ listStyle: "none", display: "grid", gap: 6 }}>
+                  {reportFamilyPlanState.plan.sectionPlans
+                    .filter((section) => section.supportingChunks.length > 0)
+                    .slice(0, 4)
+                    .map((section) => (
+                      <li
+                        key={section.tocEntryId}
+                        style={{
+                          fontSize: 12,
+                          padding: "6px 8px",
+                          background: "#fff",
+                          border: "1px solid #e2e8f0",
+                          borderRadius: 8,
+                          color: "#334155",
+                        }}
+                      >
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
+                          <strong style={{ color: "#0f172a" }}>{section.tocTitle}</strong>
+                          <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#ede9fe", color: "#6d28d9", fontWeight: 700 }}>
+                            {section.sectionType}
+                          </span>
+                          {section.evidenceExpectation === "appendix_bundle_required" ? (
+                            <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#fee2e2", color: "#991b1b", fontWeight: 700 }}>
+                              appendix bundle
+                            </span>
+                          ) : null}
+                          {section.chunkingStrategy === "slide_entity" ? (
+                            <span style={{ fontSize: 10, padding: "1px 6px", borderRadius: 999, background: "#ecfeff", color: "#155e75", fontWeight: 700 }}>
+                              entity chunks
+                            </span>
+                          ) : null}
+                        </div>
+                        <div style={{ marginTop: 2 }}>
+                          {section.supportingChunks.map((chunk) => chunk.title).join(", ")}
+                        </div>
+                        {section.focusEntities.length ? (
+                          <div style={{ marginTop: 2, color: "#64748b" }}>
+                            entity: {section.focusEntities.join(", ")}
+                          </div>
+                        ) : null}
+                        {section.evidenceBundles.length ? (
+                          <div style={{ marginTop: 2, color: "#7c2d12" }}>
+                            evidence: {section.evidenceBundles.map((bundle) => bundle.fileName).join(", ")}
+                          </div>
+                        ) : null}
+                      </li>
+                    ))}
+                </ul>
+              </div>
+
+              {reportFamilyPlanState.plan.retryPlan?.actions.length ? (
+                <div style={{ display: "grid", gap: 4 }}>
+                  <div style={{ fontSize: 12, fontWeight: 700, color: "#0f172a" }}>다음 RALPH 액션</div>
+                  <ul style={{ listStyle: "none", display: "grid", gap: 4 }}>
+                    {reportFamilyPlanState.plan.retryPlan.actions.slice(0, 4).map((action) => (
+                      <li key={action.bucket} style={{ fontSize: 12, color: "#475569" }}>
+                        <strong style={{ color: "#0f172a" }}>{action.title}</strong>: {action.reason}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              ) : null}
+            </>
+          ) : null}
         </div>
       </div>
 

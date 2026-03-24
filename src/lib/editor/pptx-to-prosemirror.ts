@@ -203,7 +203,10 @@ function slidesToDocument(
         text: slide.title,
         originalText: slide.title,
         tag: "h2",
-        styleHints: {},
+        styleHints: {
+          slideNumber: String(slide.slideNumber),
+          pptxRole: "title",
+        },
       });
       content.push({
         type: "heading",
@@ -229,7 +232,10 @@ function slidesToDocument(
         text: item,
         originalText: item,
         tag: "p",
-        styleHints: {},
+        styleHints: {
+          slideNumber: String(slide.slideNumber),
+          pptxRole: "body",
+        },
       });
       content.push({
         type: "paragraph",
@@ -263,7 +269,10 @@ function slidesToDocument(
         text: noteText,
         originalText: noteText,
         tag: "p",
-        styleHints: {},
+        styleHints: {
+          slideNumber: String(slide.slideNumber),
+          pptxRole: "notes",
+        },
       });
       content.push({
         type: "paragraph",
