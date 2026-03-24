@@ -1,6 +1,6 @@
 "use client";
 
-import { memo, useEffect, useRef, useState } from "react";
+import { memo, useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import type { Editor } from "@tiptap/core";
 import type { SidebarTab } from "@/store/document-store";
@@ -13,23 +13,331 @@ import { ExportModal } from "./ExportModal";
 import type { ExportFormat, ExportOptions } from "./ExportModal";
 import styles from "./EditorToolbar.module.css";
 
+// ── Constants ─────────────────────────────────────────────────────────────────
+
 const HWP_FONTS = [
-  "바탕",
-  "바탕체",
-  "궁서",
-  "궁서체",
-  "굴림",
-  "굴림체",
-  "돋움",
-  "돋움체",
-  "맑은 고딕",
-  "나눔고딕",
-  "나눔명조",
-  "Arial",
-  "Times New Roman",
+  "바탕", "바탕체", "궁서", "궁서체", "굴림", "굴림체", "돋움", "돋움체",
+  "맑은 고딕", "나눔고딕", "나눔명조", "Arial", "Times New Roman",
 ];
 
 const FONT_SIZES = [8, 9, 10, 11, 12, 14, 16, 18, 20, 22, 24, 26, 28, 32, 36, 40, 48, 54, 60, 72];
+
+const NAV_ITEMS = [
+  { href: "/dashboard", label: "홈" },
+  { href: "/search",    label: "검색" },
+  { href: "/documents", label: "문서함" },
+  { href: "/templates", label: "템플릿함" },
+  { href: "/pilot",     label: "KPI" },
+  { href: "/batch/jobs",label: "배치" },
+  { href: "/onboarding",label: "도움말" },
+];
+
+// ── Utilities ─────────────────────────────────────────────────────────────────
+
+function getCurrentFontFamily(editor: Editor | null): string {
+  if (!editor) return "바탕";
+  const attrs = editor.getAttributes("textStyle") as { fontFamily?: string };
+  return attrs.fontFamily || "바탕";
+}
+
+function getCurrentFontSize(editor: Editor | null): number {
+  if (!editor) return 10;
+  const attrs = editor.getAttributes("textStyle") as { fontSize?: string };
+  const raw = attrs.fontSize || "";
+  const n = Number.parseInt(raw, 10);
+  return Number.isFinite(n) && n > 0 ? n : 10;
+}
+
+function getCurrentLetterSpacing(editor: Editor | null): number {
+  if (!editor) return 0;
+  const paragraphAttrs = editor.getAttributes("paragraph") as { letterSpacing?: number | string };
+  const headingAttrs = editor.getAttributes("heading") as { letterSpacing?: number | string };
+  const raw = paragraphAttrs.letterSpacing ?? headingAttrs.letterSpacing;
+  const parsed = Number.parseInt(String(raw ?? 0), 10);
+  return Number.isFinite(parsed) ? parsed : 0;
+}
+
+function formatRecentTime(savedAt: number): string {
+  return new Date(savedAt).toLocaleString("ko-KR", {
+    month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit",
+  });
+}
+
+function formatRecentSnapshotLabel(snapshot: RecentFileSnapshotMeta): string {
+  const kind = snapshot.kind === "auto-save" ? "자동" : snapshot.kind === "manual-save" ? "저장" : "열기";
+  return `${kind} | ${formatRecentTime(snapshot.savedAt)} | ${snapshot.name}`;
+}
+
+function readFileAsDataUrl(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result;
+      if (typeof result === "string") { resolve(result); return; }
+      reject(new Error("이미지 데이터를 읽지 못했습니다."));
+    };
+    reader.onerror = () => reject(reader.error ?? new Error("이미지 로드 실패"));
+    reader.readAsDataURL(file);
+  });
+}
+
+function readImageSize(src: string): Promise<{ width: number; height: number }> {
+  return new Promise((resolve) => {
+    const image = new window.Image();
+    image.onload = () => {
+      const w = Number.isFinite(image.naturalWidth) && image.naturalWidth > 0 ? image.naturalWidth : 320;
+      const h = Number.isFinite(image.naturalHeight) && image.naturalHeight > 0 ? image.naturalHeight : 180;
+      resolve({ width: w, height: h });
+    };
+    image.onerror = () => resolve({ width: 320, height: 180 });
+    image.src = src;
+  });
+}
+
+function useClickOutside(ref: React.RefObject<HTMLElement | null>, onClose: () => void, enabled: boolean) {
+  useEffect(() => {
+    if (!enabled) return;
+    const handler = (e: MouseEvent) => {
+      if (!ref.current?.contains(e.target as Node)) onClose();
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [ref, onClose, enabled]);
+}
+
+// ── SVG Icons ─────────────────────────────────────────────────────────────────
+
+function IcoUndo() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M9 14L4 9l5-5" />
+      <path d="M4 9h10.5a5.5 5.5 0 010 11H11" />
+    </svg>
+  );
+}
+
+function IcoRedo() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M15 14l5-5-5-5" />
+      <path d="M20 9H9.5a5.5 5.5 0 000 11H13" />
+    </svg>
+  );
+}
+
+function IcoAlignLeft() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+      <line x1="2" y1="4" x2="14" y2="4" />
+      <line x1="2" y1="8" x2="10" y2="8" />
+      <line x1="2" y1="12" x2="12" y2="12" />
+    </svg>
+  );
+}
+
+function IcoAlignCenter() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+      <line x1="2" y1="4" x2="14" y2="4" />
+      <line x1="4" y1="8" x2="12" y2="8" />
+      <line x1="3" y1="12" x2="13" y2="12" />
+    </svg>
+  );
+}
+
+function IcoAlignRight() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+      <line x1="2" y1="4" x2="14" y2="4" />
+      <line x1="6" y1="8" x2="14" y2="8" />
+      <line x1="4" y1="12" x2="14" y2="12" />
+    </svg>
+  );
+}
+
+function IcoAlignJustify() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" aria-hidden="true">
+      <line x1="2" y1="4" x2="14" y2="4" />
+      <line x1="2" y1="8" x2="14" y2="8" />
+      <line x1="2" y1="12" x2="14" y2="12" />
+    </svg>
+  );
+}
+
+function IcoPhoto() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <circle cx="8.5" cy="8.5" r="1.5" />
+      <path d="M21 15l-5-5L5 21" />
+    </svg>
+  );
+}
+
+function IcoDotsH() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">
+      <circle cx="5" cy="12" r="2" />
+      <circle cx="12" cy="12" r="2" />
+      <circle cx="19" cy="12" r="2" />
+    </svg>
+  );
+}
+
+function IcoPanelOpen() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <line x1="15" y1="3" x2="15" y2="21" />
+    </svg>
+  );
+}
+
+function IcoPanelClose() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <line x1="15" y1="3" x2="15" y2="21" />
+      <path d="M18 9l-3 3 3 3" />
+    </svg>
+  );
+}
+
+// ── Dropdown sub-components ───────────────────────────────────────────────────
+
+function OpenDropdown({
+  disabled,
+  recentSnapshots,
+  selectedId,
+  onLoadSnapshot,
+  fileInputRef,
+}: {
+  disabled: boolean;
+  recentSnapshots: RecentFileSnapshotMeta[];
+  selectedId: string;
+  onLoadSnapshot: (id: string) => void;
+  fileInputRef: React.RefObject<HTMLInputElement | null>;
+}) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useClickOutside(ref, close, open);
+
+  return (
+    <div ref={ref} className={styles.dropdown}>
+      <button
+        type="button"
+        className={styles.btn}
+        disabled={disabled}
+        onClick={() => setOpen((v) => !v)}
+        title="파일 열기 (Ctrl+O)"
+      >
+        열기 <span className={styles.caret}>▾</span>
+      </button>
+      {open && (
+        <div className={styles.dropdownMenu}>
+          <button
+            type="button"
+            className={styles.dropdownItem}
+            onClick={() => { fileInputRef.current?.click(); setOpen(false); }}
+          >
+            <span>파일 열기...</span>
+            <span className={styles.dropdownShortcut}>⌘O</span>
+          </button>
+          {recentSnapshots.length > 0 && (
+            <>
+              <div className={styles.dropdownDivider} />
+              <div className={styles.dropdownLabel}>최근 파일</div>
+              {recentSnapshots.slice(0, 6).map((s) => (
+                <button
+                  key={s.id}
+                  type="button"
+                  className={`${styles.dropdownItem} ${selectedId === s.id ? styles.dropdownItemActive : ""}`}
+                  onClick={() => { onLoadSnapshot(s.id); setOpen(false); }}
+                >
+                  <span className={styles.dropdownItemName}>{s.name}</span>
+                  <span className={styles.dropdownItemMeta}>{formatRecentTime(s.savedAt)}</span>
+                </button>
+              ))}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NavOverflow() {
+  const [open, setOpen] = useState(false);
+  const ref = useRef<HTMLDivElement>(null);
+  const close = useCallback(() => setOpen(false), []);
+  useClickOutside(ref, close, open);
+
+  return (
+    <div ref={ref} className={styles.dropdown}>
+      <button
+        type="button"
+        className={styles.btn}
+        onClick={() => setOpen((v) => !v)}
+        title="메뉴"
+      >
+        <IcoDotsH />
+      </button>
+      {open && (
+        <div className={`${styles.dropdownMenu} ${styles.dropdownMenuRight}`}>
+          {NAV_ITEMS.map((item) => (
+            <Link
+              key={item.href}
+              href={item.href}
+              className={styles.dropdownItem}
+              onClick={() => setOpen(false)}
+            >
+              {item.label}
+            </Link>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function SessionChip({
+  context,
+  tenantSwitching,
+  onSwitchTenant,
+}: {
+  context: NonNullable<EditorToolbarProps["sessionContext"]>;
+  tenantSwitching: boolean;
+  onSwitchTenant: (id: string) => void;
+}) {
+  return (
+    <div className={styles.sessionChip}>
+      {context.memberships.length > 1 ? (
+        <select
+          className={styles.tenantSelect}
+          value={context.activeTenantId}
+          disabled={tenantSwitching || context.memberships.length <= 1}
+          title="조직 전환"
+          onChange={(e) => onSwitchTenant(e.target.value)}
+        >
+          {context.memberships.map((m) => (
+            <option key={m.tenantId} value={m.tenantId}>
+              {m.tenantName}
+            </option>
+          ))}
+        </select>
+      ) : (
+        <span className={styles.sessionOrg}>{context.memberships[0]?.tenantName}</span>
+      )}
+      <span className={styles.sessionMeta} title={context.email}>
+        {context.displayName}
+      </span>
+    </div>
+  );
+}
+
+// ── Props ─────────────────────────────────────────────────────────────────────
 
 type EditorToolbarProps = {
   editor: Editor | null;
@@ -49,9 +357,7 @@ type EditorToolbarProps = {
   onExport: () => void;
   onExportPdf: () => void;
   onExportDocx: () => void;
-  /** Optional: called when user exports from the ExportModal with format + options */
   onExportWithOptions?: (format: ExportFormat, options: ExportOptions) => void;
-  /** Current document file name (used as default in ExportModal) */
   currentFileName?: string;
   onSave: () => void;
   sessionContext: {
@@ -59,15 +365,10 @@ type EditorToolbarProps = {
     displayName: string;
     providerDisplayName: string;
     activeTenantId: string;
-    memberships: Array<{
-      tenantId: string;
-      tenantName: string;
-      role: string;
-    }>;
+    memberships: Array<{ tenantId: string; tenantName: string; role: string }>;
   } | null;
   tenantSwitching: boolean;
   onSwitchTenant: (tenantId: string) => void;
-  onLogout: () => void;
   formMode: boolean;
   onToggleFormMode: () => void;
   onToggleSidebar?: () => void;
@@ -75,93 +376,18 @@ type EditorToolbarProps = {
   onExportMarkdown?: () => void;
 };
 
-function getCurrentFontFamily(editor: Editor | null): string {
-  if (!editor) return "바탕";
-  const attrs = editor.getAttributes("textStyle") as { fontFamily?: string };
-  return attrs.fontFamily || "바탕";
-}
-
-function getCurrentFontSize(editor: Editor | null): number {
-  if (!editor) return 10;
-  const attrs = editor.getAttributes("textStyle") as { fontSize?: string };
-  const raw = attrs.fontSize || "";
-  const n = Number.parseInt(raw, 10);
-  return Number.isFinite(n) && n > 0 ? n : 10;
-}
-
-function getCurrentLetterSpacing(editor: Editor | null): number {
-  if (!editor) {
-    return 0;
-  }
-  const paragraphAttrs = editor.getAttributes("paragraph") as { letterSpacing?: number | string };
-  const headingAttrs = editor.getAttributes("heading") as { letterSpacing?: number | string };
-  const raw = paragraphAttrs.letterSpacing ?? headingAttrs.letterSpacing;
-  const parsed = Number.parseInt(String(raw ?? 0), 10);
-  return Number.isFinite(parsed) ? parsed : 0;
-}
-
-function getRecentKindLabel(kind: RecentFileSnapshotMeta["kind"]): string {
-  if (kind === "auto-save") {
-    return "자동저장";
-  }
-  if (kind === "manual-save") {
-    return "수동저장";
-  }
-  return "열기";
-}
-
-function formatRecentSnapshotLabel(snapshot: RecentFileSnapshotMeta): string {
-  const time = new Date(snapshot.savedAt).toLocaleString("ko-KR", {
-    month: "2-digit",
-    day: "2-digit",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-  return `${getRecentKindLabel(snapshot.kind)} | ${time} | ${snapshot.name}`;
-}
-
-function readFileAsDataUrl(file: File): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => {
-      const result = reader.result;
-      if (typeof result === "string") {
-        resolve(result);
-        return;
-      }
-      reject(new Error("이미지 데이터를 읽지 못했습니다."));
-    };
-    reader.onerror = () => reject(reader.error ?? new Error("이미지 로드 실패"));
-    reader.readAsDataURL(file);
-  });
-}
-
-function readImageSize(src: string): Promise<{ width: number; height: number }> {
-  return new Promise((resolve) => {
-    const image = new window.Image();
-    image.onload = () => {
-      const width = Number.isFinite(image.naturalWidth) && image.naturalWidth > 0 ? image.naturalWidth : 320;
-      const height = Number.isFinite(image.naturalHeight) && image.naturalHeight > 0 ? image.naturalHeight : 180;
-      resolve({ width, height });
-    };
-    image.onerror = () => resolve({ width: 320, height: 180 });
-    image.src = src;
-  });
-}
+// ── Main ──────────────────────────────────────────────────────────────────────
 
 export const EditorToolbar = memo(function EditorToolbar({
   editor,
   sidebarCollapsed,
-  activeSidebarTab,
   disabled: globalDisabled,
   hasDocument,
   downloadUrl,
   downloadName,
-  onSetSidebarTab,
   onAiCommand,
   recentSnapshots,
   selectedRecentSnapshotId,
-  onSelectRecentSnapshot,
   onLoadRecentSnapshot,
   onPickFile,
   onExport,
@@ -173,7 +399,6 @@ export const EditorToolbar = memo(function EditorToolbar({
   sessionContext,
   tenantSwitching,
   onSwitchTenant,
-  onLogout,
   formMode,
   onToggleFormMode,
   onToggleSidebar,
@@ -190,39 +415,26 @@ export const EditorToolbar = memo(function EditorToolbar({
   const currentSize = getCurrentFontSize(editor);
   const currentLetterSpacing = getCurrentLetterSpacing(editor);
 
-  const isTabActive = (tab: SidebarTab) => !sidebarCollapsed && activeSidebarTab === tab;
-
   useEffect(() => {
     const handler = (event: KeyboardEvent) => {
-      if (!(event.ctrlKey || event.metaKey)) {
-        return;
-      }
+      if (!(event.ctrlKey || event.metaKey)) return;
       const key = event.key.toLowerCase();
-
       if (key === "o") {
         event.preventDefault();
-        if (!globalDisabled) {
-          fileInputRef.current?.click();
-        }
+        if (!globalDisabled) fileInputRef.current?.click();
         return;
       }
-
       if (key === "s") {
         event.preventDefault();
-        if (!globalDisabled && hasDocument) {
-          onSave();
-        }
+        if (!globalDisabled && hasDocument) onSave();
       }
     };
-
     window.addEventListener("keydown", handler);
     return () => window.removeEventListener("keydown", handler);
   }, [globalDisabled, hasDocument, onSave]);
 
   const updateLetterSpacing = (delta: number) => {
-    if (!editor) {
-      return;
-    }
+    if (!editor) return;
     const next = Math.max(-50, Math.min(50, currentLetterSpacing + delta));
     const attrs = { letterSpacing: next };
     if (editor.isActive("heading")) {
@@ -233,21 +445,14 @@ export const EditorToolbar = memo(function EditorToolbar({
   };
 
   const onPickImage = async (file: File) => {
-    if (!editor) {
-      return;
-    }
+    if (!editor) return;
     setImageUploading(true);
     try {
       const src = await readFileAsDataUrl(file);
       const { width, height } = await readImageSize(src);
       editor.chain().focus().setImage({
-        src,
-        alt: file.name,
-        title: file.name,
-        width,
-        height,
-        fileName: file.name,
-        mimeType: file.type || "image/png",
+        src, alt: file.name, title: file.name, width, height,
+        fileName: file.name, mimeType: file.type || "image/png",
       } as never).run();
     } catch (error) {
       log.error("이미지 삽입 실패", error instanceof Error ? { message: error.message } : undefined);
@@ -256,529 +461,238 @@ export const EditorToolbar = memo(function EditorToolbar({
     }
   };
 
+  const handleExportClick = () => {
+    if (onExportWithOptions) {
+      setExportModalOpen(true);
+    } else {
+      onExport();
+    }
+  };
+
   return (
     <>
+      {/* Hidden file inputs */}
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept=".hwp,.hwpx,.docx,.pptx"
+        className={styles.hiddenInput}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) onPickFile(f); e.target.value = ""; }}
+      />
+      <input
+        ref={imageInputRef}
+        type="file"
+        accept="image/*"
+        data-image-input=""
+        className={styles.hiddenInput}
+        onChange={(e) => { const f = e.target.files?.[0]; if (f) void onPickImage(f); e.target.value = ""; }}
+      />
+
       <div className={styles.toolbar}>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept=".hwp,.hwpx,.docx,.pptx"
-          style={{ display: "none" }}
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) onPickFile(file);
-            e.target.value = "";
-          }}
-        />
-        <input
-          ref={imageInputRef}
-          type="file"
-          accept="image/*"
-          data-image-input=""
-          style={{ display: "none" }}
-          onChange={(e) => {
-            const file = e.target.files?.[0];
-            if (file) {
-              void onPickImage(file);
-            }
-            e.target.value = "";
-          }}
-        />
-        {/* ── 1행: 열기~저장 + 패널 토글 ── */}
+        {/* ── Row 1: 파일 · 파일명 · 세션 · 저장 · 패널 ── */}
         <div className={styles.toolbarRow}>
+          {/* Left: open + export */}
           <div className={styles.group}>
+            <OpenDropdown
+              disabled={globalDisabled}
+              recentSnapshots={recentSnapshots}
+              selectedId={selectedRecentSnapshotId}
+              onLoadSnapshot={onLoadRecentSnapshot}
+              fileInputRef={fileInputRef}
+            />
             <button
               type="button"
               className={styles.btn}
-              disabled={globalDisabled}
-              onClick={() => fileInputRef.current?.click()}
-              title="열기 (Ctrl/Cmd+O)"
+              disabled={globalDisabled || !hasDocument}
+              onClick={handleExportClick}
+              title="내보내기"
             >
-              열기
+              내보내기
             </button>
-            <div className={styles.recentGroup}>
-              <select
-                className={styles.recentSelect}
-                value={selectedRecentSnapshotId}
-                disabled={globalDisabled || !recentSnapshots.length}
-                title="최근 파일"
-                onChange={(event) => onSelectRecentSnapshot(event.target.value)}
-              >
-                <option value="">
-                  {recentSnapshots.length ? "최근 파일 선택" : "최근 파일 없음"}
-                </option>
-                {recentSnapshots.map((snapshot) => (
-                  <option key={snapshot.id} value={snapshot.id}>
-                    {formatRecentSnapshotLabel(snapshot)}
-                  </option>
-                ))}
-              </select>
-              <button
-                type="button"
-                className={styles.btn}
-                disabled={globalDisabled || !selectedRecentSnapshotId}
-                onClick={() => onLoadRecentSnapshot(selectedRecentSnapshotId)}
-                title="선택한 최근 파일 불러오기"
-              >
-                최근열기
-              </button>
-            </div>
-            {onExportWithOptions ? (
-              <button
-                type="button"
-                className={styles.btn}
-                disabled={globalDisabled || !hasDocument}
-                onClick={() => setExportModalOpen(true)}
-                title="내보내기 옵션"
-              >
-                내보내기
-              </button>
-            ) : (
+            {!onExportWithOptions && (
               <>
-                <button
-                  type="button"
-                  className={styles.btn}
-                  disabled={globalDisabled || !hasDocument}
-                  onClick={onExport}
-                  title="내보내기"
-                >
-                  내보내기
-                </button>
-                <button
-                  type="button"
-                  className={styles.btn}
-                  disabled={globalDisabled || !hasDocument}
-                  onClick={onExportPdf}
-                  title="PDF 내보내기"
-                >
-                  PDF
-                </button>
-                <button
-                  type="button"
-                  className={styles.btn}
-                  disabled={globalDisabled || !hasDocument}
-                  onClick={onExportDocx}
-                  title="DOCX 내보내기"
-                >
-                  DOCX
-                </button>
+                <button type="button" className={styles.btn} disabled={globalDisabled || !hasDocument} onClick={onExportPdf} title="PDF 내보내기">PDF</button>
+                <button type="button" className={styles.btn} disabled={globalDisabled || !hasDocument} onClick={onExportDocx} title="DOCX 내보내기">DOCX</button>
               </>
             )}
-            <a
-              href="/pilot"
-              target="_blank"
-              rel="noreferrer"
-              className={`${styles.btn} ${styles.linkButton}`}
-              title="파일럿 대시보드"
-            >
-              파일럿
-            </a>
             {downloadUrl && (
-              <a
-                href={downloadUrl}
-                download={downloadName}
-                className={styles.downloadLink}
-                title="다운로드"
-              >
-                ↓
-              </a>
+              <a href={downloadUrl} download={downloadName} className={styles.downloadLink} title="다운로드">↓</a>
             )}
           </div>
 
-          <div className={styles.sep} />
+          {/* Center: file name */}
+          <div className={styles.fileName}>
+            {currentFileName && (
+              <span className={styles.fileNameText} title={currentFileName}>{currentFileName}</span>
+            )}
+          </div>
 
-          <div className={styles.group}>
-            {sessionContext ? (
-              <>
-                <select
-                  className={styles.tenantSelect}
-                  value={sessionContext.activeTenantId}
-                  disabled={globalDisabled || tenantSwitching || sessionContext.memberships.length <= 1}
-                  title="활성 테넌트"
-                  onChange={(event) => onSwitchTenant(event.target.value)}
-                >
-                  {sessionContext.memberships.map((membership) => (
-                    <option key={membership.tenantId} value={membership.tenantId}>
-                      {`${membership.tenantName} · ${membership.role}`}
-                    </option>
-                  ))}
-                </select>
-                <span className={styles.sessionBadge}>{sessionContext.providerDisplayName}</span>
-                <span className={styles.sessionMeta} title={sessionContext.email}>
-                  {sessionContext.displayName}
-                </span>
-              </>
-            ) : null}
-            <div className={styles.navShortcuts}>
-              <Link className={styles.navShortcut} href="/dashboard">
-                홈
-              </Link>
-              <Link className={styles.navShortcut} href="/search" title="전체 검색">
-                🔍
-              </Link>
-              <Link className={styles.navShortcut} href="/documents">
-                문서함
-              </Link>
-              <Link className={styles.navShortcut} href="/templates">
-                템플릿함
-              </Link>
-              <Link className={styles.navShortcut} href="/pilot">
-                KPI
-              </Link>
-              <Link className={styles.navShortcut} href="/onboarding" title="기능 안내">
-                ?
-              </Link>
-              <Link className={styles.navShortcut} href="/batch/jobs" title="배치 작업 관리">
-                배치
-              </Link>
-            </div>
-            <Btn
-              label="저장"
-              title="다른 이름으로 저장 (Ctrl/Cmd+S)"
-              active={false}
+          {/* Right: nav overflow + session + save + panel toggle */}
+          <div className={styles.rowRight}>
+            <NavOverflow />
+            {sessionContext && (
+              <SessionChip
+                context={sessionContext}
+                tenantSwitching={tenantSwitching}
+                onSwitchTenant={onSwitchTenant}
+              />
+            )}
+            <div className={styles.sep} />
+            <button
+              type="button"
+              className={styles.btn}
               disabled={globalDisabled || !hasDocument}
               onClick={onSave}
-            />
-            <Btn
-              label="로그아웃"
-              title="세션 종료"
-              active={false}
-              disabled={globalDisabled}
-              onClick={onLogout}
-            />
-          </div>
-
-          {/* ── 우측 패널 토글 (flex push) ── */}
-          <div className={styles.panelToggles}>
-            <Btn
-              label={sidebarCollapsed ? "패널+" : "패널-"}
-              title="사이드 패널 토글"
-              active={!sidebarCollapsed}
-              disabled={false}
+              title="다른 이름으로 저장 (Ctrl/Cmd+S)"
+            >
+              저장
+            </button>
+            <div className={styles.sep} />
+            <button
+              type="button"
+              className={styles.iconBtn}
+              title={sidebarCollapsed ? "패널 열기" : "패널 닫기"}
               onClick={() => onToggleSidebar?.()}
-            />
-            <Btn
-              label="개요"
-              title="문서 개요"
-              active={isTabActive("outline")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("outline")}
-            />
-            <Btn
-              label="AI"
-              title="AI 제안"
-              active={isTabActive("ai")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("ai")}
-            />
-            <Btn
-              label="채팅"
-              title="AI 채팅"
-              active={isTabActive("chat")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("chat")}
-            />
-            <Btn
-              label="분석"
-              title="문서 분석"
-              active={isTabActive("analysis")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("analysis")}
-            />
-            <Btn
-              label="이력"
-              title="수정 이력"
-              active={isTabActive("history")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("history")}
-            />
+            >
+              {sidebarCollapsed ? <IcoPanelOpen /> : <IcoPanelClose />}
+            </button>
           </div>
         </div>
 
-        {/* ── 2행: 뒤로가기~AI 수정 ── */}
+        {/* ── Row 2: 편집 도구 ── */}
         <div className={styles.toolbarRow}>
+          {/* Undo / Redo */}
           <div className={styles.group}>
-            <Btn
-              label="←"
-              title="실행 취소 (Ctrl+Z)"
-              active={false}
+            <button
+              type="button"
+              className={styles.iconBtn}
               disabled={editorDisabled || !(editor?.can().undo() ?? false)}
               onClick={() => editor?.chain().focus().undo().run()}
-            />
-            <Btn
-              label="→"
-              title="다시 실행 (Ctrl+Y)"
-              active={false}
+              title="실행 취소 (Ctrl+Z)"
+            >
+              <IcoUndo />
+            </button>
+            <button
+              type="button"
+              className={styles.iconBtn}
               disabled={editorDisabled || !(editor?.can().redo() ?? false)}
               onClick={() => editor?.chain().focus().redo().run()}
-            />
+              title="다시 실행 (Ctrl+Y)"
+            >
+              <IcoRedo />
+            </button>
           </div>
 
           <div className={styles.sep} />
 
+          {/* Font + Size */}
           <div className={styles.group}>
             <select
               className={styles.fontSelect}
               disabled={editorDisabled}
               value={currentFont}
-              onChange={(e) => {
-                editor?.chain().focus().setFontFamily(e.target.value).run();
-              }}
+              onChange={(e) => editor?.chain().focus().setFontFamily(e.target.value).run()}
               title="글꼴"
             >
               {HWP_FONTS.map((f) => (
-                <option key={f} value={f} style={{ fontFamily: f }}>
-                  {f}
-                </option>
+                <option key={f} value={f} style={{ fontFamily: f }}>{f}</option>
               ))}
             </select>
-
             <select
               className={styles.sizeSelect}
               disabled={editorDisabled}
               value={currentSize}
-              onChange={(e) => {
-                const size = Number(e.target.value);
-                editor?.chain().focus().setMark("textStyle", { fontSize: `${size}pt` }).run();
-              }}
+              onChange={(e) => editor?.chain().focus().setMark("textStyle", { fontSize: `${Number(e.target.value)}pt` }).run()}
               title="글자 크기"
             >
               {FONT_SIZES.map((s) => (
-                <option key={s} value={s}>
-                  {s}
-                </option>
+                <option key={s} value={s}>{s}</option>
               ))}
             </select>
           </div>
 
           <div className={styles.sep} />
 
+          {/* Text formatting */}
           <div className={styles.group}>
-            <Btn
-              label={<b>가</b>}
-              title="굵게 (Ctrl+B)"
-              active={editor?.isActive("bold") ?? false}
-              disabled={editorDisabled}
-              onClick={() => editor?.chain().focus().toggleBold().run()}
-            />
-            <Btn
-              label={<i>가</i>}
-              title="기울임 (Ctrl+I)"
-              active={editor?.isActive("italic") ?? false}
-              disabled={editorDisabled}
-              onClick={() => editor?.chain().focus().toggleItalic().run()}
-            />
-            <Btn
-              label={<u>가</u>}
-              title="밑줄 (Ctrl+U)"
-              active={editor?.isActive("underline") ?? false}
-              disabled={editorDisabled}
-              onClick={() => editor?.chain().focus().toggleUnderline().run()}
-            />
-            <Btn
-              label={<s>가</s>}
-              title="취소선"
-              active={editor?.isActive("strike") ?? false}
-              disabled={editorDisabled}
-              onClick={() => editor?.chain().focus().toggleStrike().run()}
-            />
-            <Btn
-              label="x²"
-              title="위첨자"
-              active={editor?.isActive("superscript") ?? false}
-              disabled={editorDisabled}
-              onClick={() => editor?.chain().focus().toggleSuperscript().run()}
-            />
-            <Btn
-              label="x₂"
-              title="아래첨자"
-              active={editor?.isActive("subscript") ?? false}
-              disabled={editorDisabled}
-              onClick={() => editor?.chain().focus().toggleSubscript().run()}
-            />
-            <Btn
-              label="가"
-              title="글자 모양 (Alt+L)"
-              active={false}
-              disabled={editorDisabled}
-              onClick={() => setCharModalOpen(true)}
-            />
-            <Btn
-              label="자간-"
-              title="자간 줄이기"
-              active={false}
-              disabled={editorDisabled}
-              onClick={() => updateLetterSpacing(-1)}
-            />
-            <button
-              type="button"
-              className={styles.btn}
-              title="현재 자간"
-              disabled
-              aria-label="현재 자간"
-            >
-              {`자간 ${currentLetterSpacing}`}
-            </button>
-            <Btn
-              label="자간+"
-              title="자간 늘리기"
-              active={false}
-              disabled={editorDisabled}
-              onClick={() => updateLetterSpacing(1)}
-            />
+            <Btn label={<b>B</b>} title="굵게 (Ctrl+B)" active={editor?.isActive("bold") ?? false} disabled={editorDisabled} onClick={() => editor?.chain().focus().toggleBold().run()} />
+            <Btn label={<i>I</i>}  title="기울임 (Ctrl+I)" active={editor?.isActive("italic") ?? false} disabled={editorDisabled} onClick={() => editor?.chain().focus().toggleItalic().run()} />
+            <Btn label={<u>U</u>} title="밑줄 (Ctrl+U)" active={editor?.isActive("underline") ?? false} disabled={editorDisabled} onClick={() => editor?.chain().focus().toggleUnderline().run()} />
+            <Btn label={<s>S</s>} title="취소선" active={editor?.isActive("strike") ?? false} disabled={editorDisabled} onClick={() => editor?.chain().focus().toggleStrike().run()} />
+            <Btn label="x²" title="위첨자" active={editor?.isActive("superscript") ?? false} disabled={editorDisabled} onClick={() => editor?.chain().focus().toggleSuperscript().run()} />
+            <Btn label="x₂" title="아래첨자" active={editor?.isActive("subscript") ?? false} disabled={editorDisabled} onClick={() => editor?.chain().focus().toggleSubscript().run()} />
+            <Btn label="Aa" title="글자 모양 (Alt+L)" active={false} disabled={editorDisabled} onClick={() => setCharModalOpen(true)} />
+
+            {/* 자간 spinner */}
+            <div className={styles.spinnerGroup} title="자간 조정">
+              <button type="button" className={styles.spinnerBtn} disabled={editorDisabled} onClick={() => updateLetterSpacing(-1)} aria-label="자간 줄이기">−</button>
+              <span className={styles.spinnerValue} aria-label="현재 자간">{currentLetterSpacing}</span>
+              <button type="button" className={styles.spinnerBtn} disabled={editorDisabled} onClick={() => updateLetterSpacing(1)} aria-label="자간 늘리기">+</button>
+            </div>
           </div>
 
           <div className={styles.sep} />
 
+          {/* Alignment */}
           <div className={styles.group}>
-            <Btn
-              label="≡←"
-              title="왼쪽 정렬 (Ctrl+L)"
-              active={editor?.isActive({ textAlign: "left" }) ?? false}
-              disabled={editorDisabled}
-              onClick={() => editor?.chain().focus().setTextAlign("left").run()}
-            />
-            <Btn
-              label="≡↔"
-              title="가운데 정렬 (Ctrl+E)"
-              active={editor?.isActive({ textAlign: "center" }) ?? false}
-              disabled={editorDisabled}
-              onClick={() => editor?.chain().focus().setTextAlign("center").run()}
-            />
-            <Btn
-              label="≡→"
-              title="오른쪽 정렬 (Ctrl+R)"
-              active={editor?.isActive({ textAlign: "right" }) ?? false}
-              disabled={editorDisabled}
-              onClick={() => editor?.chain().focus().setTextAlign("right").run()}
-            />
-            <Btn
-              label="≡≡"
-              title="양쪽 정렬 (Ctrl+J)"
-              active={editor?.isActive({ textAlign: "justify" }) ?? false}
-              disabled={editorDisabled}
-              onClick={() => editor?.chain().focus().setTextAlign("justify").run()}
-            />
-            <Btn
-              label="문단"
-              title="문단 모양 (Alt+T)"
-              active={false}
-              disabled={editorDisabled}
-              onClick={() => setParaModalOpen(true)}
-            />
+            <button type="button" className={`${styles.iconBtn} ${(editor?.isActive({ textAlign: "left" }) ?? false) ? styles.iconBtnActive : ""}`} disabled={editorDisabled} onClick={() => editor?.chain().focus().setTextAlign("left").run()} title="왼쪽 정렬 (Ctrl+L)"><IcoAlignLeft /></button>
+            <button type="button" className={`${styles.iconBtn} ${(editor?.isActive({ textAlign: "center" }) ?? false) ? styles.iconBtnActive : ""}`} disabled={editorDisabled} onClick={() => editor?.chain().focus().setTextAlign("center").run()} title="가운데 정렬 (Ctrl+E)"><IcoAlignCenter /></button>
+            <button type="button" className={`${styles.iconBtn} ${(editor?.isActive({ textAlign: "right" }) ?? false) ? styles.iconBtnActive : ""}`} disabled={editorDisabled} onClick={() => editor?.chain().focus().setTextAlign("right").run()} title="오른쪽 정렬 (Ctrl+R)"><IcoAlignRight /></button>
+            <button type="button" className={`${styles.iconBtn} ${(editor?.isActive({ textAlign: "justify" }) ?? false) ? styles.iconBtnActive : ""}`} disabled={editorDisabled} onClick={() => editor?.chain().focus().setTextAlign("justify").run()} title="양쪽 정렬 (Ctrl+J)"><IcoAlignJustify /></button>
+            <Btn label="¶" title="문단 모양 (Alt+T)" active={false} disabled={editorDisabled} onClick={() => setParaModalOpen(true)} />
           </div>
 
           <div className={styles.sep} />
 
+          {/* Headings */}
           <div className={styles.group}>
-            <Btn
-              label="H1"
-              title="제목 필드 지정 (H1)"
-              active={editor?.isActive("heading", { level: 1 }) ?? false}
-              disabled={editorDisabled}
-              onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).updateAttributes("heading", { fieldType: "title" }).run()}
-            />
-            <Btn
-              label="H2"
-              title="받는 사람 필드 지정 (H2)"
-              active={editor?.isActive("heading", { level: 2 }) ?? false}
-              disabled={editorDisabled}
-              onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).updateAttributes("heading", { fieldType: "recipient" }).run()}
-            />
-            <Btn
-              label="H3"
-              title="보내는 사람 필드 지정 (H3)"
-              active={editor?.isActive("heading", { level: 3 }) ?? false}
-              disabled={editorDisabled}
-              onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).updateAttributes("heading", { fieldType: "sender" }).run()}
-            />
-            <Btn
-              label="H4"
-              title="본문 필드 지정 (H4)"
-              active={editor?.isActive("heading", { level: 4 }) ?? false}
-              disabled={editorDisabled}
-              onClick={() => editor?.chain().focus().toggleHeading({ level: 4 }).updateAttributes("heading", { fieldType: "body" }).run()}
-            />
+            <Btn label="H1" title="제목 필드 (H1)" active={editor?.isActive("heading", { level: 1 }) ?? false} disabled={editorDisabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 1 }).updateAttributes("heading", { fieldType: "title" }).run()} />
+            <Btn label="H2" title="받는 사람 필드 (H2)" active={editor?.isActive("heading", { level: 2 }) ?? false} disabled={editorDisabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 2 }).updateAttributes("heading", { fieldType: "recipient" }).run()} />
+            <Btn label="H3" title="보내는 사람 필드 (H3)" active={editor?.isActive("heading", { level: 3 }) ?? false} disabled={editorDisabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 3 }).updateAttributes("heading", { fieldType: "sender" }).run()} />
+            <Btn label="H4" title="본문 필드 (H4)" active={editor?.isActive("heading", { level: 4 }) ?? false} disabled={editorDisabled} onClick={() => editor?.chain().focus().toggleHeading({ level: 4 }).updateAttributes("heading", { fieldType: "body" }).run()} />
           </div>
 
           <div className={styles.sep} />
 
-          <TableControls
-            editor={editor}
-            groupClassName={styles.group}
-            buttonClassName={styles.btn}
-          />
-
+          {/* Table + Image */}
+          <TableControls editor={editor} groupClassName={styles.group} buttonClassName={styles.btn} />
           <div className={styles.group}>
             <button
               type="button"
-              className={styles.btn}
+              className={styles.iconBtn}
               disabled={editorDisabled || imageUploading}
               onClick={() => imageInputRef.current?.click()}
               title="이미지 삽입"
             >
-              {imageUploading ? "이미지..." : "이미지"}
+              {imageUploading ? <span className={styles.spinnerInline} /> : <IcoPhoto />}
             </button>
           </div>
 
           <div className={styles.sep} />
 
+          {/* Form mode + AI */}
           <div className={styles.group}>
             <Btn
-              label="양식 모드"
+              label={formMode ? "양식 ●" : "양식 ○"}
               title="양식 입력 모드 토글"
               active={formMode}
               disabled={editorDisabled}
               onClick={onToggleFormMode}
             />
-            <button type="button" className={styles.btn} disabled={editorDisabled} onClick={onAiCommand}>
+            <button
+              type="button"
+              className={styles.btnAi}
+              disabled={editorDisabled}
+              onClick={onAiCommand}
+              title="AI 문서 편집"
+            >
               AI 수정
             </button>
-          </div>
-
-        </div>
-
-        <div className={styles.panelToggleRow}>
-          <div className={`${styles.group} ${styles.panelToggleGroup}`}>
-            <Btn
-              label="개요"
-              title="문서 개요"
-              active={isTabActive("outline")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("outline")}
-            />
-            <Btn
-              label="AI"
-              title="AI 제안"
-              active={isTabActive("ai")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("ai")}
-            />
-            <Btn
-              label="채팅"
-              title="AI 채팅"
-              active={isTabActive("chat")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("chat")}
-            />
-            <Btn
-              label="분석"
-              title="문서 분석"
-              active={isTabActive("analysis")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("analysis")}
-            />
-            <Btn
-              label="이력"
-              title="수정 이력"
-              active={isTabActive("history")}
-              disabled={false}
-              onClick={() => onSetSidebarTab("history")}
-            />
           </div>
         </div>
       </div>
 
+      {/* Modals */}
       {paraModalOpen && editor && (
         <ParagraphStyleModal editor={editor} onClose={() => setParaModalOpen(false)} />
       )}
@@ -790,23 +704,17 @@ export const EditorToolbar = memo(function EditorToolbar({
           isOpen={exportModalOpen}
           onClose={() => setExportModalOpen(false)}
           defaultFileName={currentFileName ?? "document"}
-          onExport={(format: ExportFormat, options: ExportOptions) => {
-            onExportWithOptions(format, options);
-          }}
+          onExport={(format: ExportFormat, options: ExportOptions) => onExportWithOptions(format, options)}
         />
       )}
     </>
   );
 });
 
-/* ── Small helpers ── */
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function Btn({
-  label,
-  title,
-  active,
-  disabled,
-  onClick,
+  label, title, active, disabled, onClick,
 }: {
   label: React.ReactNode;
   title: string;

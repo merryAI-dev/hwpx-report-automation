@@ -1,6 +1,24 @@
 @import "tailwindcss";
 @import "tippy.js/dist/tippy.css";
 
+/* ── Dark mode: class-based only (no system prefers-color-scheme) ── */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ── CLI terminal theme tokens ── */
+@theme {
+  --color-cli-bg: #0d1117;
+  --color-cli-border: #30363d;
+  --color-cli-text: #e6edf3;
+  --color-cli-dim: #6e7681;
+  --color-cli-green: #3fb950;
+  --color-cli-blue: #79c0ff;
+  --color-cli-yellow: #d29922;
+  --color-cli-red: #f85149;
+  --color-cli-surface: #161b22;
+  --color-cli-btn-save: #238636;
+  --color-cli-btn-save-hover: #2ea043;
+}
+
 /* ── Notion-style theme tokens ── */
 @theme {
   --color-notion-bg: #ffffff;
@@ -81,6 +99,25 @@ html.dark {
 @font-face {
   font-family: "돋움";
   src: local("돋움"), local("Dotum"), local("Apple SD Gothic Neo");
+}
+
+/* ── Font utility classes ── */
+@layer base {
+  .font-code {
+    font-family: var(--font-code), "IBM Plex Mono", "Fira Code", monospace;
+  }
+}
+
+/* ── CLI cursor blink animation ── */
+@keyframes cli-blink {
+  0%, 100% { opacity: 1; }
+  50%       { opacity: 0; }
+}
+
+@layer base {
+  .animate-cli-blink {
+    animation: cli-blink 1.1s step-end infinite;
+  }
 }
 
 /* ── Global overrides on top of Tailwind preflight ── */
@@ -795,6 +832,34 @@ a {
 .chat-bubble-text {
   margin: 0;
   white-space: pre-wrap;
+}
+
+.chat-bubble-markdown {
+  white-space: normal;
+}
+.chat-bubble-markdown p { margin: 0 0 6px; }
+.chat-bubble-markdown p:last-child { margin-bottom: 0; }
+.chat-bubble-markdown strong { font-weight: 600; }
+.chat-bubble-markdown em { font-style: italic; }
+.chat-bubble-markdown code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 12px;
+  background: rgba(0, 0, 0, 0.08);
+  border-radius: 4px;
+  padding: 1px 5px;
+}
+.chat-bubble-markdown ul,
+.chat-bubble-markdown ol {
+  padding-left: 18px;
+  margin: 4px 0;
+}
+.chat-bubble-markdown li { margin: 2px 0; }
+.chat-bubble-markdown h1,
+.chat-bubble-markdown h2,
+.chat-bubble-markdown h3 {
+  font-size: inherit;
+  font-weight: 700;
+  margin: 6px 0 2px;
 }
 
 .chat-typing {

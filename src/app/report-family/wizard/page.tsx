@@ -43,6 +43,53 @@ const SECTION_TYPE_LABELS: Record<string, string> = {
   unknown: "기타",
 };
 
+// ─── SVG icons ────────────────────────────────────────────────────────────────
+
+function IcoArrowLeft() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M19 12H5M12 19l-7-7 7-7" />
+    </svg>
+  );
+}
+
+function IcoArrowRight() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M5 12h14M12 5l7 7-7 7" />
+    </svg>
+  );
+}
+
+function IcoCheck() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="2,6 5,9 10,3" />
+    </svg>
+  );
+}
+
+function IcoUpload() {
+  return (
+    <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
+      <polyline points="16,6 12,2 8,6" />
+      <line x1="12" y1="2" x2="12" y2="15" />
+    </svg>
+  );
+}
+
+function IcoDocument() {
+  return (
+    <svg width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+      <polyline points="14,2 14,8 20,8" />
+      <line x1="8" y1="13" x2="16" y2="13" />
+      <line x1="8" y1="17" x2="12" y2="17" />
+    </svg>
+  );
+}
+
 // ─── Step indicator ───────────────────────────────────────────────────────────
 
 const STEPS = [
@@ -158,22 +205,22 @@ function StepIndicator({ current }: { current: WizardStep }) {
         const isActive = i === currentIdx;
         return (
           <div key={step.id} className="flex items-center flex-1 last:flex-none">
-            <div className="flex flex-col items-center gap-1">
+            <div className="flex flex-col items-center gap-1.5">
               <div
                 className={[
-                  "w-8 h-8 rounded-full flex items-center justify-center text-sm font-semibold transition-colors",
+                  "w-7 h-7 rounded-full flex items-center justify-center text-xs font-semibold transition-all",
                   isDone
                     ? "bg-notion-accent text-white"
                     : isActive
-                      ? "bg-notion-accent text-white ring-4 ring-notion-accent-light"
-                      : "bg-notion-bg-active text-notion-text-tertiary",
+                      ? "bg-notion-accent text-white ring-2 ring-notion-accent ring-offset-2 ring-offset-[var(--color-notion-bg)]"
+                      : "border border-notion-border bg-notion-bg text-notion-text-tertiary",
                 ].join(" ")}
               >
-                {isDone ? "✓" : i + 1}
+                {isDone ? <IcoCheck /> : i + 1}
               </div>
               <span
                 className={[
-                  "text-xs whitespace-nowrap",
+                  "text-[11px] whitespace-nowrap tracking-wide",
                   isActive ? "text-notion-accent font-medium" : "text-notion-text-tertiary",
                 ].join(" ")}
               >
@@ -183,7 +230,7 @@ function StepIndicator({ current }: { current: WizardStep }) {
             {i < STEPS.length - 1 && (
               <div
                 className={[
-                  "flex-1 h-0.5 mx-1 mb-5 transition-colors",
+                  "flex-1 h-px mx-2 mb-5 transition-colors",
                   isDone ? "bg-notion-accent" : "bg-notion-border",
                 ].join(" ")}
               />
@@ -218,21 +265,26 @@ function UploadStep({
   return (
     <div className="flex flex-col gap-8 items-center w-full max-w-xl mx-auto">
       <div className="text-center">
-        <h2 className="text-2xl font-semibold text-notion-text mb-2">PPTX 업로드</h2>
-        <p className="text-notion-text-secondary text-sm">
-          발표 자료를 올리면 AI가 보고서 목차를 제안합니다
+        <p className="text-[10px] font-semibold tracking-widest uppercase text-notion-text-tertiary mb-2">
+          STEP 01 — 파일 업로드
+        </p>
+        <h2 className="text-[22px] font-semibold tracking-tight text-notion-text mb-1.5">
+          PPTX 파일을 업로드하세요
+        </h2>
+        <p className="text-notion-text-secondary text-sm leading-relaxed">
+          발표 자료를 올리면 AI가 보고서 목차를 자동으로 제안합니다
         </p>
       </div>
 
       {/* Drop zone */}
       <div
         className={[
-          "w-full border-2 border-dashed rounded-xl p-10 flex flex-col items-center gap-3 cursor-pointer transition-colors",
+          "w-full border-2 border-dashed rounded-xl p-10 flex flex-col items-center gap-3 cursor-pointer transition-all",
           dragActive
-            ? "border-notion-accent bg-notion-accent-light"
+            ? "border-notion-accent bg-notion-accent-light ring-2 ring-notion-accent ring-offset-2"
             : file
-              ? "border-notion-green bg-green-50"
-              : "border-notion-border hover:border-notion-border-strong hover:bg-notion-bg-hover",
+              ? "border-notion-accent bg-notion-accent-light"
+              : "border-notion-border hover:border-notion-accent/50 hover:bg-notion-bg-hover",
         ].join(" ")}
         onClick={() => inputRef.current?.click()}
         onDragOver={(e) => { e.preventDefault(); setDragActive(true); }}
@@ -253,13 +305,14 @@ function UploadStep({
         />
         {file ? (
           <>
-            <div className="text-3xl">📊</div>
+            <div className="text-notion-accent"><IcoDocument /></div>
             <div className="font-medium text-notion-text">{file.name}</div>
             <div className="text-xs text-notion-text-secondary">
               {(file.size / 1024).toFixed(0)} KB
             </div>
             <button
-              className="text-xs text-notion-text-secondary hover:text-notion-red mt-1"
+              type="button"
+              className="text-xs text-notion-text-secondary hover:text-notion-red mt-1 transition-colors"
               onClick={(e) => { e.stopPropagation(); setFile(null); }}
             >
               다른 파일 선택
@@ -267,16 +320,16 @@ function UploadStep({
           </>
         ) : (
           <>
-            <div className="text-3xl">📤</div>
-            <div className="font-medium text-notion-text">PPTX 파일을 끌어다 놓거나 클릭하세요</div>
-            <div className="text-xs text-notion-text-secondary">.pptx 파일만 지원됩니다</div>
+            <div className="text-notion-text-tertiary"><IcoUpload /></div>
+            <div className="font-medium text-notion-text">끌어다 놓거나 클릭해서 업로드</div>
+            <div className="text-xs text-notion-text-tertiary">.pptx 파일만 지원됩니다</div>
           </>
         )}
       </div>
 
       {/* Family name */}
       <div className="w-full flex flex-col gap-2">
-        <label className="text-sm font-medium text-notion-text-secondary">
+        <label className="text-xs font-semibold tracking-wide uppercase text-notion-text-secondary">
           보고서 유형 이름
         </label>
         <input
@@ -284,19 +337,21 @@ function UploadStep({
           value={familyName}
           onChange={(e) => setFamilyName(e.target.value)}
           placeholder="예: 해양수산 액셀러레이터 최종보고서"
-          className="w-full px-3 py-2 rounded-lg border border-notion-border bg-notion-bg text-notion-text text-sm focus:outline-none focus:ring-2 focus:ring-notion-accent focus:border-transparent placeholder:text-notion-text-tertiary"
+          className="w-full px-3 py-2.5 rounded-lg border border-notion-border bg-notion-bg text-notion-text text-sm focus:outline-none focus:ring-2 focus:ring-notion-accent focus:border-transparent placeholder:text-notion-text-tertiary transition-shadow"
         />
-        <p className="text-xs text-notion-text-tertiary">
+        <p className="text-xs text-notion-text-tertiary leading-relaxed">
           동일한 유형의 PPTX를 다음에 올리면 이 이름으로 패턴을 재사용합니다
         </p>
       </div>
 
       <button
+        type="button"
         disabled={!file || !familyName.trim()}
         onClick={() => file && onNext({ file, familyName: familyName.trim() })}
-        className="w-full py-3 rounded-lg bg-notion-accent text-white font-medium text-sm hover:bg-notion-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        className="w-full py-3 px-4 rounded-xl bg-notion-accent text-white font-semibold text-sm hover:bg-notion-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-between gap-2"
       >
-        분석 시작 →
+        <span>분석 시작</span>
+        <IcoArrowRight />
       </button>
     </div>
   );
@@ -399,8 +454,11 @@ function TocStep({
       {/* TOC panel */}
       <div className={["flex flex-col gap-6", showPreview && pptxPreviewUrl ? "w-96 shrink-0" : "w-full"].join(" ")}>
       <div className="text-center">
-        <h2 className="text-2xl font-semibold text-notion-text mb-2">목차 확정</h2>
-        <p className="text-notion-text-secondary text-sm">
+        <p className="text-[10px] font-semibold tracking-widest uppercase text-notion-text-tertiary mb-2">
+          STEP 02 — 목차 확정
+        </p>
+        <h2 className="text-[22px] font-semibold tracking-tight text-notion-text mb-1.5">목차를 확정하세요</h2>
+        <p className="text-notion-text-secondary text-sm leading-relaxed">
           AI가 제안한 보고서 목차입니다. 순서 조정, 이름 변경, 삭제 후 확정하세요.
         </p>
         {pptxPreviewUrl && !showPreview && (
@@ -612,17 +670,21 @@ function TocStep({
 
       <div className="flex gap-3 mt-2">
         <button
+          type="button"
           onClick={onBack}
-          className="px-4 py-2 rounded-lg border border-notion-border text-notion-text-secondary text-sm hover:bg-notion-bg-hover transition-colors"
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-notion-border text-notion-text-secondary text-sm hover:bg-notion-bg-hover transition-colors"
         >
-          ← 이전
+          <IcoArrowLeft />
+          이전
         </button>
         <button
+          type="button"
           onClick={onNext}
           disabled={isLoading || visibleToc.length === 0}
-          className="flex-1 py-2 rounded-lg bg-notion-accent text-white font-medium text-sm hover:bg-notion-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+          className="flex-1 py-2 px-4 rounded-xl bg-notion-accent text-white font-semibold text-sm hover:bg-notion-accent-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed flex items-center justify-between gap-2"
         >
-          목차 확정 → 초안 생성
+          <span>목차 확정 · 초안 생성</span>
+          <IcoArrowRight />
         </button>
       </div>
       </div>{/* end TOC panel */}
@@ -901,18 +963,22 @@ function ReviewStep({
         {/* Navigation */}
         <div className="flex justify-between">
           <button
+            type="button"
             onClick={() => onNavigate(Math.max(0, currentIdx - 1))}
             disabled={currentIdx === 0}
-            className="text-sm text-notion-text-secondary hover:text-notion-text disabled:opacity-30 px-2 py-1"
+            className="flex items-center gap-1.5 text-sm text-notion-text-secondary hover:text-notion-text disabled:opacity-30 px-2 py-1 transition-colors"
           >
-            ← 이전 섹션
+            <IcoArrowLeft />
+            이전 섹션
           </button>
           <button
+            type="button"
             onClick={() => onNavigate(Math.min(reviews.length - 1, currentIdx + 1))}
             disabled={currentIdx === reviews.length - 1}
-            className="text-sm text-notion-text-secondary hover:text-notion-text disabled:opacity-30 px-2 py-1"
+            className="flex items-center gap-1.5 text-sm text-notion-text-secondary hover:text-notion-text disabled:opacity-30 px-2 py-1 transition-colors"
           >
-            다음 섹션 →
+            다음 섹션
+            <IcoArrowRight />
           </button>
         </div>
       </div>
@@ -967,8 +1033,11 @@ function FormatStep({
   return (
     <div className="flex flex-col gap-6 w-full max-w-2xl mx-auto">
       <div className="text-center">
-        <h2 className="text-xl font-semibold text-notion-text mb-1">문서 양식 설정</h2>
-        <p className="text-notion-text-tertiary text-xs">
+        <p className="text-[10px] font-semibold tracking-widest uppercase text-notion-text-tertiary mb-2">
+          STEP 06 — 문서 양식
+        </p>
+        <h2 className="text-[22px] font-semibold tracking-tight text-notion-text mb-1.5">문서 양식을 설정하세요</h2>
+        <p className="text-notion-text-tertiary text-sm leading-relaxed">
           한국 공문서 양식을 선택하고 에디터에서 열어보세요
         </p>
       </div>
@@ -978,11 +1047,12 @@ function FormatStep({
         {(Object.entries(FORMAT_PRESETS) as [FormatPreset, (typeof FORMAT_PRESETS)[FormatPreset]][]).map(([key, p]) => (
           <button
             key={key}
+            type="button"
             onClick={() => setPreset(key)}
             className={[
               "flex flex-col items-center gap-1 p-3 rounded-xl border text-center transition-all",
               format.preset === key
-                ? "border-notion-accent bg-notion-accent-light text-notion-accent"
+                ? "border-notion-accent bg-notion-accent-light text-notion-accent ring-2 ring-notion-accent ring-offset-1"
                 : "border-notion-border bg-notion-bg text-notion-text-secondary hover:bg-notion-bg-hover",
             ].join(" ")}
           >
@@ -1073,22 +1143,27 @@ function FormatStep({
       {/* Actions */}
       <div className="flex gap-3">
         <button
+          type="button"
           onClick={onBack}
-          className="px-4 py-2 rounded-lg border border-notion-border text-notion-text-secondary text-sm hover:bg-notion-bg-hover transition-colors"
+          className="flex items-center gap-1.5 px-4 py-2 rounded-xl border border-notion-border text-notion-text-secondary text-sm hover:bg-notion-bg-hover transition-colors"
         >
-          ← 이전
+          <IcoArrowLeft />
+          이전
         </button>
         <button
+          type="button"
           onClick={handleDownloadMarkdown}
           className="px-4 py-2.5 rounded-xl border border-notion-border text-notion-text-secondary text-sm font-medium hover:bg-notion-bg-hover transition-colors"
         >
           MD 다운로드
         </button>
         <button
+          type="button"
           onClick={onOpenEditor}
-          className="flex-1 py-2.5 rounded-xl bg-notion-accent text-white font-medium text-sm hover:bg-notion-accent-hover transition-colors"
+          className="flex-1 py-2.5 px-4 rounded-xl bg-notion-accent text-white font-semibold text-sm hover:bg-notion-accent-hover transition-colors flex items-center justify-between gap-2"
         >
-          HWPX 에디터에서 열기 →
+          <span>HWPX 에디터에서 열기</span>
+          <IcoArrowRight />
         </button>
       </div>
     </div>
@@ -1256,16 +1331,20 @@ function CompleteStep({
 
       <div className="flex gap-3">
         <button
+          type="button"
           onClick={onFinish}
-          className="px-4 py-2.5 rounded-xl border border-white/20 bg-white/10 backdrop-blur-sm text-notion-text-secondary text-sm hover:bg-white/20 transition-colors"
+          className="flex items-center gap-1.5 px-4 py-2.5 rounded-xl border border-white/20 bg-white/10 backdrop-blur-sm text-notion-text-secondary text-sm hover:bg-white/20 transition-colors"
         >
+          <IcoArrowLeft />
           메인으로
         </button>
         <button
+          type="button"
           onClick={onNextFormat}
-          className="flex-1 py-2.5 rounded-xl bg-notion-accent text-white font-medium text-sm hover:bg-notion-accent-hover transition-colors"
+          className="flex-1 py-2.5 px-4 rounded-xl bg-notion-accent text-white font-semibold text-sm hover:bg-notion-accent-hover transition-colors flex items-center justify-between gap-2"
         >
-          문서 양식 설정 →
+          <span>문서 양식 설정</span>
+          <IcoArrowRight />
         </button>
       </div>
     </div>
@@ -1670,34 +1749,43 @@ export default function ReportFamilyWizardPage() {
   return (
     <div className={["min-h-screen transition-colors duration-500", (step === "complete" || step === "format") ? "bg-gradient-to-br from-slate-100 via-stone-50 to-zinc-100" : "bg-notion-bg"].join(" ")}>
       {/* Header */}
-      <div className="border-b border-notion-border bg-notion-bg sticky top-0 z-10">
-        <div className="max-w-6xl mx-auto px-6 py-4 flex items-center gap-4">
+      <div className="border-b border-notion-border bg-notion-bg/90 backdrop-blur-sm sticky top-0 z-10">
+        <div className="max-w-6xl mx-auto px-6 py-3.5 flex items-center gap-4">
           <button
+            type="button"
             onClick={() => router.push("/")}
-            className="text-notion-text-secondary hover:text-notion-text text-sm"
+            className="flex items-center gap-1.5 text-sm text-notion-text-secondary hover:text-notion-text transition-colors"
           >
-            ← 나가기
+            <IcoArrowLeft />
+            나가기
           </button>
-          <div className="flex-1">
-            <h1 className="text-sm font-semibold text-notion-text">
-              보고서 생성 마법사
-            </h1>
-            {familyName && (
-              <p className="text-xs text-notion-text-tertiary">{familyName}</p>
-            )}
+          <div className="flex items-center gap-2.5 flex-1">
+            <div className="w-6 h-6 rounded-md bg-notion-accent flex items-center justify-center shrink-0">
+              <span className="text-white text-[9px] font-bold tracking-tight">RF</span>
+            </div>
+            <div>
+              <h1 className="text-sm font-semibold text-notion-text tracking-tight">
+                보고서 생성 마법사
+              </h1>
+              {familyName && (
+                <p className="text-[11px] text-notion-text-tertiary leading-none mt-0.5">{familyName}</p>
+              )}
+            </div>
           </div>
           {step === "review" && reviews.length > 0 && (
             <button
+              type="button"
               onClick={() => void handleReviewComplete()}
               disabled={doneCount === 0}
               className={[
-                "px-4 py-1.5 rounded-lg text-sm font-medium transition-colors",
+                "flex items-center gap-1.5 px-4 py-1.5 rounded-lg text-sm font-medium transition-colors",
                 allReviewed
                   ? "bg-notion-accent text-white hover:bg-notion-accent-hover"
                   : "bg-notion-bg-active text-notion-text-secondary hover:bg-notion-bg-hover",
               ].join(" ")}
             >
-              {allReviewed ? "검토 완료 →" : `완료 (${doneCount}/${reviews.length})`}
+              {allReviewed ? "검토 완료" : `완료 (${doneCount}/${reviews.length})`}
+              {allReviewed && <IcoArrowRight />}
             </button>
           )}
         </div>

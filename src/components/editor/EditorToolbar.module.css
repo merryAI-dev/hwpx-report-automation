@@ -17,12 +17,12 @@
   flex-wrap: nowrap;
   overflow-x: auto;
   overflow-y: hidden;
-  scrollbar-width: none; /* Firefox */
-  -ms-overflow-style: none; /* IE/Edge */
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 .toolbarRow::-webkit-scrollbar {
-  display: none; /* Chrome/Safari */
+  display: none;
 }
 
 .group {
@@ -36,9 +36,12 @@
   width: 1px;
   height: 18px;
   background: var(--color-notion-border);
+  opacity: 0.7;
   margin: 0 4px;
   flex-shrink: 0;
 }
+
+/* ── Base button ─────────────────────────────────────────────────────────── */
 
 .btn {
   border: none;
@@ -49,13 +52,21 @@
   color: var(--color-notion-text);
   border-radius: 4px;
   cursor: pointer;
-  transition: background 0.1s ease;
+  transition: background 150ms ease, color 150ms ease;
   white-space: nowrap;
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
 }
 
 .btn:hover:not(:disabled) {
   background: var(--color-notion-bg-hover);
   color: var(--color-notion-text);
+}
+
+.btn:focus-visible {
+  outline: 2px solid var(--color-notion-accent);
+  outline-offset: 1px;
 }
 
 .btn:disabled {
@@ -68,6 +79,232 @@
   color: var(--color-notion-accent) !important;
 }
 
+/* ── Icon button ─────────────────────────────────────────────────────────── */
+
+.iconBtn {
+  border: none;
+  background: transparent;
+  padding: 4px 5px;
+  color: var(--color-notion-text);
+  border-radius: 4px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 150ms ease, color 150ms ease;
+  flex-shrink: 0;
+}
+
+.iconBtn:hover:not(:disabled) {
+  background: var(--color-notion-bg-hover);
+}
+
+.iconBtn:focus-visible {
+  outline: 2px solid var(--color-notion-accent);
+  outline-offset: 1px;
+}
+
+.iconBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.iconBtnActive {
+  background: var(--color-notion-accent-light) !important;
+  color: var(--color-notion-accent) !important;
+}
+
+/* ── AI button ───────────────────────────────────────────────────────────── */
+
+.btnAi {
+  border: none;
+  background: var(--color-notion-accent-light);
+  color: var(--color-notion-accent);
+  padding: 3px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 150ms ease, color 150ms ease;
+  white-space: nowrap;
+}
+
+.btnAi:hover:not(:disabled) {
+  background: var(--color-notion-accent);
+  color: #fff;
+}
+
+.btnAi:focus-visible {
+  outline: 2px solid var(--color-notion-accent);
+  outline-offset: 1px;
+}
+
+.btnAi:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+/* ── Caret ───────────────────────────────────────────────────────────────── */
+
+.caret {
+  font-size: 10px;
+  opacity: 0.7;
+  line-height: 1;
+}
+
+/* ── Dropdown ────────────────────────────────────────────────────────────── */
+
+.dropdown {
+  position: relative;
+  display: inline-flex;
+}
+
+.dropdownMenu {
+  position: absolute;
+  top: calc(100% + 4px);
+  left: 0;
+  min-width: 200px;
+  background: var(--color-notion-bg);
+  border: 1px solid var(--color-notion-border);
+  border-radius: 8px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.12), 0 2px 6px rgba(0, 0, 0, 0.08);
+  z-index: 200;
+  overflow: hidden;
+  padding: 4px;
+}
+
+.dropdownMenuRight {
+  left: auto;
+  right: 0;
+}
+
+.dropdownItem {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: 6px 10px;
+  font-size: 13px;
+  color: var(--color-notion-text);
+  background: transparent;
+  border: none;
+  border-radius: 5px;
+  cursor: pointer;
+  text-align: left;
+  text-decoration: none;
+  transition: background 150ms ease;
+  gap: 8px;
+}
+
+.dropdownItem:hover {
+  background: var(--color-notion-bg-hover);
+}
+
+.dropdownItemActive {
+  background: var(--color-notion-accent-light) !important;
+  color: var(--color-notion-accent) !important;
+}
+
+.dropdownDivider {
+  height: 1px;
+  background: var(--color-notion-border);
+  margin: 4px 0;
+}
+
+.dropdownLabel {
+  padding: 4px 10px 2px;
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--color-notion-text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.dropdownShortcut {
+  font-size: 11px;
+  color: var(--color-notion-text-secondary);
+  flex-shrink: 0;
+}
+
+.dropdownItemName {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dropdownItemMeta {
+  font-size: 11px;
+  color: var(--color-notion-text-secondary);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+
+/* ── File name ───────────────────────────────────────────────────────────── */
+
+.fileName {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 0;
+  padding: 0 8px;
+}
+
+.fileNameText {
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--color-notion-text);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  max-width: 280px;
+}
+
+/* ── Row right ───────────────────────────────────────────────────────────── */
+
+.rowRight {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex-shrink: 0;
+  margin-left: auto;
+}
+
+/* ── Session chip ────────────────────────────────────────────────────────── */
+
+.sessionChip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 4px;
+  border-radius: 6px;
+  background: var(--color-notion-bg-hover);
+  max-width: 200px;
+}
+
+.sessionOrg {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-notion-text);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 100px;
+}
+
+.sessionMeta {
+  max-width: 120px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: var(--color-notion-text-secondary);
+  padding: 0 2px;
+}
+
+/* ── Font / Size selects ─────────────────────────────────────────────────── */
+
 .fontSelect {
   border: none;
   background: transparent;
@@ -78,6 +315,7 @@
   cursor: pointer;
   max-width: 90px;
   border-radius: 4px;
+  transition: background 150ms ease;
 }
 
 .fontSelect:hover {
@@ -94,96 +332,109 @@
   cursor: pointer;
   max-width: 50px;
   border-radius: 4px;
+  transition: background 150ms ease;
 }
 
 .sizeSelect:hover {
   background: var(--color-notion-bg-hover);
 }
 
-.recentSelect {
-  border: none;
-  background: transparent;
-  padding: 3px 6px;
-  font-size: 12px;
-  color: var(--color-notion-text);
-  outline: none;
-  cursor: pointer;
-  max-width: 220px;
-  border-radius: 4px;
-}
-
-.recentSelect:hover {
-  background: var(--color-notion-bg-hover);
-}
+/* ── Tenant select ───────────────────────────────────────────────────────── */
 
 .tenantSelect {
   border: none;
   background: transparent;
-  padding: 4px 8px;
-  font-size: 13px;
+  padding: 2px 4px;
+  font-size: 12px;
+  font-weight: 600;
   color: var(--color-notion-text);
   outline: none;
   cursor: pointer;
-  min-width: 180px;
-}
-
-.sessionBadge {
-  display: inline-flex;
-  align-items: center;
-  padding: 2px 8px;
+  max-width: 110px;
   border-radius: 4px;
-  background: var(--color-notion-accent-light);
-  color: var(--color-notion-accent);
-  font-size: 11px;
-  font-weight: 600;
-  white-space: nowrap;
+  transition: background 150ms ease;
 }
 
-.sessionMeta {
-  max-width: 140px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  font-size: 12px;
-  color: var(--color-notion-text-secondary);
-  padding: 0 6px;
+.tenantSelect:hover {
+  background: var(--color-notion-bg-hover);
 }
 
-.navShortcuts {
+/* ── Spinner group (자간) ─────────────────────────────────────────────────── */
+
+.spinnerGroup {
   display: inline-flex;
   align-items: center;
-  gap: 2px;
+  border: 1px solid var(--color-notion-border);
+  border-radius: 5px;
+  overflow: hidden;
+  height: 24px;
+  flex-shrink: 0;
 }
 
-.navShortcut {
+.spinnerBtn {
+  border: none;
+  background: transparent;
+  padding: 0 7px;
+  font-size: 14px;
+  line-height: 1;
+  color: var(--color-notion-text);
+  cursor: pointer;
+  height: 100%;
+  transition: background 150ms ease;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.spinnerBtn:hover:not(:disabled) {
+  background: var(--color-notion-bg-hover);
+}
+
+.spinnerBtn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.spinnerValue {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  padding: 4px 8px;
-  border-radius: 4px;
-  color: var(--color-notion-text-secondary);
-  text-decoration: none;
-  font-size: 13px;
+  min-width: 28px;
+  font-size: 11px;
   font-weight: 500;
-  white-space: nowrap;
+  color: var(--color-notion-text-secondary);
+  border-left: 1px solid var(--color-notion-border);
+  border-right: 1px solid var(--color-notion-border);
+  height: 100%;
+  padding: 0 4px;
+  user-select: none;
 }
 
-.navShortcut:hover {
-  background: var(--color-notion-bg-hover);
-  color: var(--color-notion-text);
+/* ── Spinner inline (image uploading) ───────────────────────────────────── */
+
+.spinnerInline {
+  display: inline-block;
+  width: 13px;
+  height: 13px;
+  border: 2px solid var(--color-notion-border);
+  border-top-color: var(--color-notion-accent);
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  flex-shrink: 0;
 }
 
-.panelToggleRow {
-  display: flex;
-  justify-content: flex-end;
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
-.panelToggleGroup {
-  display: flex;
-  gap: 2px;
-  flex-wrap: wrap;
-  justify-content: flex-end;
-  max-width: 100%;
+/* ── Misc ────────────────────────────────────────────────────────────────── */
+
+.hiddenInput {
+  position: absolute;
+  width: 0;
+  height: 0;
+  opacity: 0;
+  pointer-events: none;
 }
 
 .downloadLink {
@@ -191,14 +442,10 @@
   color: var(--color-notion-accent);
   padding: 0 8px;
   font-weight: 600;
-}
-
-.linkButton {
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
   text-decoration: none;
 }
+
+/* ── Responsive ──────────────────────────────────────────────────────────── */
 
 @media (max-width: 900px) {
   .toolbar {
@@ -213,5 +460,13 @@
   .btn {
     padding: 2px 6px;
     font-size: 11px;
+  }
+
+  .fileNameText {
+    max-width: 160px;
+  }
+
+  .sessionChip {
+    max-width: 140px;
   }
 }

@@ -117,7 +117,19 @@ python scripts/build_report.py \
 
 ---
 
-### 웹 UI (Next.js)
+### HWPX Studio — 웹 UI (Next.js)
+
+브라우저에서 바로 쓰는 풀스택 HWPX 편집기. Vercel/Fly.io에 바로 배포 가능합니다.
+
+**주요 기능:**
+- HWPX 업로드 → 텍스트 노드 탐색 및 편집
+- 구형 `.hwp` 업로드 (외부 변환기 연동)
+- AI 채팅 사이드바 — 마크다운 렌더링 지원, 섹션 일괄 재작성
+- PPTX 분석 → HWPX 보고서 생성 마법사 (4단계)
+- `{{PLACEHOLDER}}` 치환, 배치 문서 생성
+- 문서함·대시보드 — Notion 스타일 UI
+- 로컬 임시저장 (30초마다 localStorage 자동 저장 + 복원 배너)
+- HWPX 무결성 검사, 사용자/쿼터 관리
 
 ```bash
 cd web
@@ -126,8 +138,6 @@ npm install
 npm run dev
 # → http://localhost:3000
 ```
-
-웹 UI는 리치 에디터, 문서 배치 생성, AI 제안, HWPX 무결성 검사, 사용자/쿼터 관리를 제공합니다.
 
 ---
 

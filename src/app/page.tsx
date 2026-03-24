@@ -9,10 +9,10 @@ import { DocumentEditor } from "@/components/editor/DocumentEditor";
 import { EditorToolbar } from "@/components/editor/EditorToolbar";
 import { HwpxSaveDialog } from "@/components/common/HwpxSaveDialog";
 import {
-  DocumentStartWizard,
   type PreviewStatus,
   type StartWizardMethod,
 } from "@/components/common/DocumentStartWizard";
+import { CliSetup } from "@/components/common/CliSetup";
 import { EditorLayout } from "@/components/editor/EditorLayout";
 import { EditorRuler } from "@/components/editor/EditorRuler";
 import { StatusBar } from "@/components/common/StatusBar";
@@ -122,6 +122,8 @@ type SegmentTextUpdate = {
 };
 
 const AUTOSAVE_INTERVAL_MS = 60_000;
+const DRAFT_CACHE_KEY = "hwpx_draft_cache";
+const DRAFT_CACHE_INTERVAL_MS = 30_000;
 let uniqueSaveSequence = 0;
 
 function toFileStem(fileName: string): string {
@@ -573,6 +575,11 @@ export default function Home() {
     isLoading: false,
     error: null,
   });
+  const [draftCache, setDraftCache] = useState<{
+    savedAt: number;
+    fileName: string;
+    json: import("@tiptap/core").JSONContent;
+  } | null>(null);
   const autoSaveInFlightRef = useRef(false);
   const docRevisionRef = useRef(0);
   const lastAutoSavedRevisionRef = useRef(-1);
@@ -1558,7 +1565,6 @@ export default function Home() {
     if (!confirmReplaceDocument("새 파일")) {
       return;
     }
-    openStartWizard("upload");
     clearWorkspaceContext();
     await loadFileIntoEditor(file, "opened");
   };
@@ -1940,6 +1946,7 @@ export default function Home() {
         count: 1,
         edits: result.edits,
       });
+      clearDraftCache();
     } catch (error) {
       const message = error instanceof Error ? error.message : "저장 실패";
       setStatus(message);
@@ -2002,6 +2009,46 @@ export default function Home() {
     }, AUTOSAVE_INTERVAL_MS);
     return () => window.clearInterval(timer);
   }, [onAutoSave]);
+
+  // 로컬 임시저장: isDirty 상태에서 30초마다 TipTap JSON을 localStorage에 저장
+  useEffect(() => {
+    if (!editor || !isDirty || !editorDoc) return;
+    const timer = window.setInterval(() => {
+      try {
+        const json = editor.getJSON();
+        localStorage.setItem(DRAFT_CACHE_KEY, JSON.stringify({
+          savedAt: Date.now(),
+          fileName: fileName || "untitled",
+          json,
+        }));
+      } catch {
+        // storage full 등 무시
+      }
+    }, DRAFT_CACHE_INTERVAL_MS);
+    return () => window.clearInterval(timer);
+  }, [editor, isDirty, editorDoc, fileName]);
+
+  // 페이지 로드 시 24시간 이내 임시저장본 확인
+  useEffect(() => {
+    try {
+      const raw = localStorage.getItem(DRAFT_CACHE_KEY);
+      if (!raw) return;
+      const parsed = JSON.parse(raw) as { savedAt: number; fileName: string; json: import("@tiptap/core").JSONContent };
+      const age = Date.now() - parsed.savedAt;
+      if (age < 24 * 60 * 60 * 1000) {
+        setDraftCache(parsed);
+      } else {
+        localStorage.removeItem(DRAFT_CACHE_KEY);
+      }
+    } catch {
+      // 파싱 실패 무시
+    }
+  }, []);
+
+  const clearDraftCache = () => {
+    try { localStorage.removeItem(DRAFT_CACHE_KEY); } catch {}
+    setDraftCache(null);
+  };
 
   const onSelectOutlineSegment = (segmentId: string) => {
     if (!editor) {
@@ -2913,6 +2960,45 @@ export default function Home() {
 
   return (
     <div className={styles.page}>
+      {/* ── 로컬 임시저장 복원 배너 ── */}
+      {draftCache && !editorDoc && (
+        <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[300] bg-[var(--color-notion-bg)] border border-[var(--color-notion-border)] rounded-xl shadow-lg px-5 py-3 flex items-center gap-4 text-sm whitespace-nowrap">
+          <span className="text-[var(--color-notion-text-secondary)]">
+            <strong className="text-[var(--color-notion-text)]">{draftCache.fileName}</strong>
+            {" — "}
+            {new Date(draftCache.savedAt).toLocaleTimeString("ko-KR")} 임시저장본이 있습니다
+          </span>
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded-lg bg-[var(--color-notion-accent)] text-white text-xs font-semibold cursor-pointer"
+            onClick={() => {
+              editor?.commands.setContent(draftCache.json);
+              setDraftCache(null);
+            }}
+          >복원</button>
+          <button
+            type="button"
+            className="px-3 py-1.5 rounded-lg border border-[var(--color-notion-border)] text-[var(--color-notion-text-secondary)] text-xs cursor-pointer"
+            onClick={clearDraftCache}
+          >무시</button>
+        </div>
+      )}
+      {/* ── CLI Setup fullscreen overlay (shows when no document loaded) ── */}
+      {!editorDoc && (
+        <div className="fixed inset-0 z-[200] bg-[var(--color-cli-bg)] overflow-hidden">
+          <CliSetup
+            key={`cli-${startWizardResetToken}`}
+            recentSnapshots={recentSnapshots}
+            isBusy={isBusy}
+            status={status}
+            onPickFile={onPickFile}
+            onLoadRecentSnapshot={onLoadRecentSnapshot}
+            onStartBlank={() => void startDocumentFromTemplate(null)}
+            onStartFromTemplate={(template) => void startDocumentFromTemplate(template)}
+          />
+        </div>
+      )}
+
       {/* ── HWP-style 통합 툴바 ── */}
       <EditorToolbar
         editor={editor}
@@ -3007,11 +3093,6 @@ export default function Home() {
         }
         tenantSwitching={tenantSwitching}
         onSwitchTenant={onSwitchTenant}
-        onLogout={() => {
-          void fetch("/api/auth/logout", { method: "POST" }).finally(() => {
-            window.location.assign("/login");
-          });
-        }}
         formMode={formMode}
         onToggleFormMode={() => setFormMode(!formMode)}
       />
@@ -3046,21 +3127,7 @@ export default function Home() {
       <main className={styles.main}>
         <section className={styles.editorArea}>
           <div className={styles.editorCenter}>
-            {!editorDoc ? (
-              <DocumentStartWizard
-                key={`wizard-${startWizardResetToken}-${startWizardInitialMethod ?? "none"}`}
-                hasDocument={false}
-                initialMethod={startWizardInitialMethod}
-                recentSnapshots={recentSnapshots}
-                isBusy={isBusy}
-                status={status}
-                previewStatus={previewStatus}
-                onPickFile={onPickFile}
-                onLoadRecentSnapshot={onLoadRecentSnapshot}
-                onStartBlank={() => void startDocumentFromTemplate(null)}
-                onStartFromTemplate={(template) => void startDocumentFromTemplate(template)}
-              />
-            ) : (
+            {editorDoc ? (
               <>
                 <div className={styles.viewTabs}>
                   <button
@@ -3146,19 +3213,15 @@ export default function Home() {
                   />
                 ) : null}
               </>
-            )}
+            ) : null}
           </div>
           {startWizardOpen && editorDoc ? (
             <div className={styles.wizardOverlay}>
-              <DocumentStartWizard
-                key={`wizard-overlay-${startWizardResetToken}-${startWizardInitialMethod ?? "none"}`}
-                hasDocument
-                initialMethod={startWizardInitialMethod}
+              <CliSetup
+                key={`cli-overlay-${startWizardResetToken}`}
                 recentSnapshots={recentSnapshots}
                 isBusy={isBusy}
                 status={status}
-                previewStatus={previewStatus}
-                onClose={closeStartWizard}
                 onPickFile={onPickFile}
                 onLoadRecentSnapshot={onLoadRecentSnapshot}
                 onStartBlank={() => void startDocumentFromTemplate(null)}
@@ -3172,6 +3235,7 @@ export default function Home() {
           <Sidebar
             collapsed={sidebarCollapsed}
             activeTab={activeSidebarTab}
+            onSetTab={handleSetSidebarTab}
             outline={
               <DocumentOutline
                 outline={outline}

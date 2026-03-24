@@ -65,10 +65,10 @@ export default function DocumentsPage() {
       <div className={styles.container}>
         <header className={styles.header}>
           <div className={styles.titleBlock}>
-            <div className={styles.kicker}>Document Workspace</div>
+            <div className={styles.kicker}>문서 워크스페이스</div>
             <h1 className={styles.title}>문서함</h1>
             <p className={styles.subtitle}>
-              테넌트 문서를 저장, 재오픈, 버전 추적할 수 있는 워크스페이스입니다. 현재 문서에서 저장하면 여기로 영속화됩니다.
+              저장한 문서를 관리하고, 재오픈하거나 버전을 추적하세요.
             </p>
           </div>
           <div className={styles.nav}>
@@ -86,12 +86,12 @@ export default function DocumentsPage() {
                 문서 {quota.documentCount} / {quota.maxDocuments}개 사용됨
               </span>
             </div>
-            <div style={{ background: "#e5e7eb", borderRadius: "4px", height: "8px", overflow: "hidden", marginTop: "0.5rem" }}>
+            <div style={{ background: "var(--color-notion-bg-active)", borderRadius: "4px", height: "4px", overflow: "hidden", marginTop: "0.5rem" }}>
               <div
                 style={{
                   height: "100%",
                   width: `${Math.min(100, (quota.documentCount / quota.maxDocuments) * 100)}%`,
-                  background: quota.documentsOverLimit ? "#ef4444" : "#3b82f6",
+                  background: quota.documentsOverLimit ? "#ef4444" : "var(--color-notion-accent)",
                   borderRadius: "4px",
                   transition: "width 0.3s",
                 }}

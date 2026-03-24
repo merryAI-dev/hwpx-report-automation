@@ -114,17 +114,18 @@ python python/build_report.py \
 
 ### HWPX Studio — Web UI
 
-A full-featured web editor deployable to Vercel.
+A full-featured web editor deployable to Vercel or Fly.io.
 
 **Features:**
-- Upload HWPX → browse and edit text nodes
+- Upload HWPX → browse and edit text nodes with undo/redo
 - Legacy `.hwp` upload with external converter integration
-- Style attribute catalog viewer
-- Style-preserving edit queue with undo/redo
-- AI suggestions (`/api/suggest`) and batch section rewriting (`/api/suggest-batch`)
-- Original / suggestion diff preview
-- `{{PLACEHOLDER}}` substitution
-- Filesystem-based blob storage + signed download URLs
+- AI chat sidebar — rendered markdown, section rewriting, diff preview
+- PPTX → HWPX report generation wizard (upload → outline → format → export)
+- `{{PLACEHOLDER}}` substitution and batch document generation
+- Document vault and dashboard (Notion-style design system)
+- Local draft cache — auto-saves to localStorage every 30s, restore banner on reload
+- HWPX integrity checks, user quota management
+- Filesystem blob storage + signed download URLs
 - Template metatag catalog extraction (`{{TITLE}}`, `{{date:report_date|required|label=보고일}}`)
 
 **Local run:**

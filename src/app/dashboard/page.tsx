@@ -6,6 +6,92 @@ import type { WorkspaceDocumentSummary, WorkspaceTemplateSummary } from "@/lib/w
 import type { TenantQuotaSummary } from "@/lib/server/quota-store";
 import styles from "./page.module.css";
 
+// ── SVG icons ──────────────────────────────────────────────────────────────────
+
+function IcoDoc() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M14 2H6a2 2 0 00-2 2v16a2 2 0 002 2h12a2 2 0 002-2V8z" />
+      <polyline points="14,2 14,8 20,8" />
+    </svg>
+  );
+}
+
+function IcoTemplate() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <rect x="3" y="3" width="18" height="18" rx="2" />
+      <line x1="3" y1="9" x2="21" y2="9" />
+      <line x1="9" y1="21" x2="9" y2="9" />
+    </svg>
+  );
+}
+
+function IcoBatch() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="16,3 21,3 21,8" />
+      <line x1="4" y1="20" x2="21" y2="3" />
+      <polyline points="21,16 21,21 16,21" />
+      <line x1="15" y1="15" x2="21" y2="21" />
+    </svg>
+  );
+}
+
+function IcoStorage() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <ellipse cx="12" cy="5" rx="9" ry="3" />
+      <path d="M3 5v14a9 3 0 0018 0V5" />
+      <path d="M3 12a9 3 0 0018 0" />
+    </svg>
+  );
+}
+
+function IcoEdit() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M11 4H4a2 2 0 00-2 2v14a2 2 0 002 2h14a2 2 0 002-2v-7" />
+      <path d="M18.5 2.5a2.121 2.121 0 013 3L12 15l-4 1 1-4 9.5-9.5z" />
+    </svg>
+  );
+}
+
+function IcoUpload() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <path d="M4 16v2a2 2 0 002 2h12a2 2 0 002-2v-2" />
+      <polyline points="16,6 12,2 8,6" />
+      <line x1="12" y1="2" x2="12" y2="15" />
+    </svg>
+  );
+}
+
+function IcoZap() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polygon points="13,2 3,14 12,14 11,22 21,10 12,10 13,2" />
+    </svg>
+  );
+}
+
+function IcoSearch() {
+  return (
+    <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <circle cx="11" cy="11" r="8" />
+      <line x1="21" y1="21" x2="16.65" y2="16.65" />
+    </svg>
+  );
+}
+
+function IcoChevronRight() {
+  return (
+    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true">
+      <polyline points="9,18 15,12 9,6" />
+    </svg>
+  );
+}
+
 type RecentJob = {
   id: string;
   status: string;
@@ -197,27 +283,27 @@ export default function DashboardPage() {
         {/* ── 2. KPI 카드 ── */}
         <div className={styles.kpiGrid}>
           <Link href="/documents" className={styles.kpiCard}>
-            <div className={styles.kpiIcon}>📄</div>
+            <div className={styles.kpiIcon}><IcoDoc /></div>
             <div className={styles.kpiLabel}>문서</div>
             <div className={styles.kpiValue}>{summary?.documentCount ?? 0}</div>
-            <div className={styles.kpiSub}>개</div>
+            <div className={styles.kpiSub}>개 저장됨</div>
           </Link>
           <Link href="/templates" className={styles.kpiCard}>
-            <div className={styles.kpiIcon}>📋</div>
+            <div className={styles.kpiIcon}><IcoTemplate /></div>
             <div className={styles.kpiLabel}>템플릿</div>
             <div className={styles.kpiValue}>{summary?.templateCount ?? 0}</div>
             <div className={styles.kpiSub}>승인됨 {summary?.approvedTemplateCount ?? 0}개</div>
           </Link>
           <Link href="/batch/jobs" className={styles.kpiCard}>
-            <div className={styles.kpiIcon}>⚙️</div>
+            <div className={styles.kpiIcon}><IcoBatch /></div>
             <div className={styles.kpiLabel}>배치 작업</div>
             <div className={styles.kpiValue}>{summary?.activeJobCount ?? 0}</div>
             <div className={styles.kpiSub}>진행 중 · 완료 {summary?.completedJobCount ?? 0}개</div>
           </Link>
           <div className={styles.kpiCard} style={{ cursor: "default" }}>
-            <div className={styles.kpiIcon}>💾</div>
+            <div className={styles.kpiIcon}><IcoStorage /></div>
             <div className={styles.kpiLabel}>저장 공간</div>
-            <div className={styles.kpiValue} style={{ fontSize: 18 }}>
+            <div className={styles.kpiValue} style={{ fontSize: 18, letterSpacing: 0 }}>
               {summary ? formatBytes(summary.quota.blobBytes) : "—"}
             </div>
             <div className={styles.quotaBar}>
@@ -236,21 +322,21 @@ export default function DashboardPage() {
           </div>
           <div className={styles.quickActionsRow} style={{ marginTop: 12 }}>
             <Link href="/" className={styles.quickActionBtn}>
-              <span className={styles.quickActionIcon}>✏️</span>
+              <div className={styles.quickActionIcon}><IcoEdit /></div>
               새 문서
             </Link>
             <Link href="/templates" className={styles.quickActionBtn}>
-              <span className={styles.quickActionIcon}>📤</span>
+              <div className={styles.quickActionIcon}><IcoUpload /></div>
               템플릿 업로드
             </Link>
             <Link href="/batch/jobs" className={styles.quickActionBtn}>
-              <span className={styles.quickActionIcon}>⚡</span>
+              <div className={styles.quickActionIcon}><IcoZap /></div>
               배치 작업
             </Link>
             <button type="button" className={styles.quickActionBtn} disabled>
-              <span className={styles.quickActionIcon}>🔍</span>
+              <div className={styles.quickActionIcon}><IcoSearch /></div>
               문서 검색
-              <span style={{ fontSize: 10, color: "#94a3b8" }}>(준비 중)</span>
+              <span style={{ fontSize: 10, opacity: 0.5 }}>준비 중</span>
             </button>
           </div>
         </div>
@@ -259,7 +345,7 @@ export default function DashboardPage() {
         <section className={styles.section}>
           <div className={styles.sectionHeader}>
             <h2 className={styles.sectionTitle}>최근 문서</h2>
-            <Link href="/documents" className={styles.viewAllLink}>전체보기 →</Link>
+            <Link href="/documents" className={styles.viewAllLink}>전체보기 <IcoChevronRight /></Link>
           </div>
           {!summary?.recentDocuments.length ? (
             <div className={styles.empty}>저장된 문서가 없습니다.</div>
@@ -280,7 +366,7 @@ export default function DashboardPage() {
         <section className={styles.section}>
           <div className={styles.sectionHeader}>
             <h2 className={styles.sectionTitle}>최근 배치 작업</h2>
-            <Link href="/batch/jobs" className={styles.viewAllLink}>전체보기 →</Link>
+            <Link href="/batch/jobs" className={styles.viewAllLink}>전체보기 <IcoChevronRight /></Link>
           </div>
           {!summary?.recentJobs.length ? (
             <div className={styles.empty}>실행된 배치 작업이 없습니다.</div>
@@ -313,7 +399,7 @@ export default function DashboardPage() {
         <section className={styles.section}>
           <div className={styles.sectionHeader}>
             <h2 className={styles.sectionTitle}>승인된 템플릿</h2>
-            <Link href="/templates" className={styles.viewAllLink}>전체보기 →</Link>
+            <Link href="/templates" className={styles.viewAllLink}>전체보기 <IcoChevronRight /></Link>
           </div>
           {!approvedTemplates.length ? (
             <div className={styles.empty}>승인된 템플릿이 없습니다.</div>

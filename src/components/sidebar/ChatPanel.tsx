@@ -2,6 +2,7 @@
 
 import { useState, useRef, useEffect, useMemo } from "react";
 import { diffWords } from "diff";
+import ReactMarkdown from "react-markdown";
 import type { ChatMessageUI, PendingToolCall, EditPreviewItem } from "@/types/chat";
 import { INSTRUCTION_PRESETS } from "@/lib/editor/ai-presets";
 
@@ -235,11 +236,16 @@ function ChatMessage({ message }: { message: ChatMessageUI }) {
       <div className={`chat-bubble ${isUser ? "chat-bubble-user" : "chat-bubble-assistant"}`}>
         {message.isStreaming && !message.content ? (
           <ThinkingIndicator />
-        ) : (
+        ) : isUser ? (
           <p className="chat-bubble-text">
             {message.content}
             {message.isStreaming && <span className="streaming-cursor" />}
           </p>
+        ) : (
+          <div className="chat-bubble-text chat-bubble-markdown">
+            <ReactMarkdown>{message.content}</ReactMarkdown>
+            {message.isStreaming && <span className="streaming-cursor" />}
+          </div>
         )}
       </div>
       {/* Tool calls display */}
