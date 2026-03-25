@@ -563,6 +563,11 @@ export default function Home() {
   const [startWizardResetToken, setStartWizardResetToken] = useState(0);
   const [previewStatus, setPreviewStatus] = useState<PreviewStatus>("idle");
   const [saveDialogOpen, setSaveDialogOpen] = useState(false);
+  const [confirmDialogState, setConfirmDialogState] = useState<{
+    open: boolean;
+    message: string;
+  }>({ open: false, message: "" });
+  const confirmResolveRef = useRef<((result: boolean) => void) | null>(null);
   const [recentSnapshots, setRecentSnapshots] = useState<RecentFileSnapshotMeta[]>([]);
   const [selectedRecentSnapshotId, setSelectedRecentSnapshotId] = useState("");
   const [authSession, setAuthSession] = useState<AuthSessionResponse | null>(null);
@@ -789,14 +794,21 @@ export default function Home() {
     }
   }, [router, workspaceDocumentId]);
 
-  const confirmReplaceDocument = useCallback((nextActionLabel: string) => {
+  const showConfirm = useCallback((message: string): Promise<boolean> => {
+    return new Promise((resolve) => {
+      confirmResolveRef.current = resolve;
+      setConfirmDialogState({ open: true, message });
+    });
+  }, []);
+
+  const confirmReplaceDocument = useCallback(async (nextActionLabel: string): Promise<boolean> => {
     if (!editorDoc || !isDirty) {
       return true;
     }
-    return window.confirm(
+    return showConfirm(
       `현재 문서에 저장되지 않은 변경사항이 있습니다. ${nextActionLabel}로 시작하면 지금 작업이 닫힙니다. 계속할까요?`,
     );
-  }, [editorDoc, isDirty]);
+  }, [editorDoc, isDirty, showConfirm]);
 
   const onSwitchTenant = useCallback(async (tenantId: string) => {
     if (!authSession?.activeTenant || authSession.activeTenant.tenantId === tenantId) {
@@ -1063,7 +1075,7 @@ export default function Home() {
       return;
     }
 
-    const confirmed = window.confirm(
+    const confirmed = await showConfirm(
       "현재 슬라이드 문서를 기반으로 새 보고서 초안을 생성해 편집기에 엽니다. 계속할까요?",
     );
     if (!confirmed) {
@@ -1137,9 +1149,11 @@ export default function Home() {
     setBusy,
     setLoadedDocument,
     setOutline,
+    setPreviewStatus,
     setSelectedPreset,
     setStatus,
     setTemplateCatalog,
+    showConfirm,
   ]);
 
   /* ── File I/O ── */
@@ -1316,7 +1330,7 @@ export default function Home() {
   const startDocumentFromTemplate = useCallback(
     async (template: DocumentTemplate | null) => {
       const actionLabel = template ? `"${template.name}" 템플릿` : "빈 문서";
-      if (!confirmReplaceDocument(actionLabel)) {
+      if (!(await confirmReplaceDocument(actionLabel))) {
         return;
       }
 
@@ -1562,7 +1576,7 @@ export default function Home() {
   }, [authSession, openWorkspaceDocument, workspaceDocumentId]);
 
   const onPickFile = async (file: File) => {
-    if (!confirmReplaceDocument("새 파일")) {
+    if (!(await confirmReplaceDocument("새 파일"))) {
       return;
     }
     clearWorkspaceContext();
@@ -1574,7 +1588,7 @@ export default function Home() {
       setStatus("최근 파일을 먼저 선택하세요.");
       return;
     }
-    if (!confirmReplaceDocument("최근 문서")) {
+    if (!(await confirmReplaceDocument("최근 문서"))) {
       return;
     }
     openStartWizard("recent");
@@ -2963,8 +2977,8 @@ export default function Home() {
 
   return (
     <div className={styles.page}>
-      {/* ── 로컬 임시저장 복원 배너 — editorDoc & editor가 마운트된 후에만 표시 ── */}
-      {draftCache && editorDoc && editor && (
+      {/* ── 로컬 임시저장 복원 배너 — editor가 마운트된 후 표시 (editorDoc 없이도 표시) ── */}
+      {draftCache && editor && (
         <div className="fixed bottom-4 left-1/2 -translate-x-1/2 z-[300] bg-[var(--color-notion-bg)] border border-[var(--color-notion-border)] rounded-xl shadow-lg px-5 py-3 flex items-center gap-4 text-sm whitespace-nowrap">
           <span className="text-[var(--color-notion-text-secondary)]">
             <strong className="text-[var(--color-notion-text)]">{draftCache.fileName}</strong>
@@ -2974,7 +2988,11 @@ export default function Home() {
           <button
             type="button"
             className="px-3 py-1.5 rounded-lg bg-[var(--color-notion-accent)] text-white text-xs font-semibold cursor-pointer"
-            onClick={() => {
+            onClick={async () => {
+              if (!editorDoc) {
+                // CliSetup 화면에서 복원: 빈 문서를 먼저 로드한 뒤 임시저장본으로 덮어쓰기
+                await startDocumentFromTemplate(null);
+              }
               editor.commands.setContent(draftCache.json);
               clearDraftCache();
             }}
@@ -3371,6 +3389,88 @@ export default function Home() {
         onClose={() => setSaveDialogOpen(false)}
         onConfirm={onConfirmSave}
       />
+      {confirmDialogState.open && (
+        <div
+          style={{
+            position: "fixed",
+            inset: 0,
+            zIndex: 400,
+            background: "rgba(0,0,0,0.4)",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+          }}
+          role="presentation"
+          onClick={() => {
+            setConfirmDialogState({ open: false, message: "" });
+            confirmResolveRef.current?.(false);
+            confirmResolveRef.current = null;
+          }}
+        >
+          <div
+            role="alertdialog"
+            aria-modal="true"
+            aria-labelledby="confirm-dialog-message"
+            style={{
+              background: "var(--notion-bg, #fff)",
+              border: "1px solid var(--notion-border, #e0e0e0)",
+              borderRadius: "12px",
+              boxShadow: "0 8px 32px rgba(0,0,0,0.18)",
+              padding: "24px",
+              maxWidth: "400px",
+              width: "90vw",
+            }}
+            onClick={(e) => e.stopPropagation()}
+          >
+            <p
+              id="confirm-dialog-message"
+              style={{ margin: "0 0 20px", fontSize: "14px", lineHeight: 1.6 }}
+            >
+              {confirmDialogState.message}
+            </p>
+            <div style={{ display: "flex", gap: "8px", justifyContent: "flex-end" }}>
+              <button
+                type="button"
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  border: "1px solid var(--notion-border, #e0e0e0)",
+                  background: "transparent",
+                  cursor: "pointer",
+                  fontSize: "13px",
+                }}
+                onClick={() => {
+                  setConfirmDialogState({ open: false, message: "" });
+                  confirmResolveRef.current?.(false);
+                  confirmResolveRef.current = null;
+                }}
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                style={{
+                  padding: "8px 16px",
+                  borderRadius: "8px",
+                  border: "none",
+                  background: "var(--notion-accent, #2563eb)",
+                  color: "#fff",
+                  cursor: "pointer",
+                  fontSize: "13px",
+                  fontWeight: 600,
+                }}
+                onClick={() => {
+                  setConfirmDialogState({ open: false, message: "" });
+                  confirmResolveRef.current?.(true);
+                  confirmResolveRef.current = null;
+                }}
+              >
+                계속하기
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
