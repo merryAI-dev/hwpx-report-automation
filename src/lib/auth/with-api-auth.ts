@@ -37,12 +37,17 @@ export function withApiAuth<T extends Request = Request, C = unknown>(
   return async (request: T, context?: C) => {
     const session = await readSessionFromRequest(request);
 
-    const authenticatedSession: AuthenticatedSession = session
-      ? { ...session, activeTenant: getActiveTenantMembership(session) }
-      : GUEST_SESSION;
+    if (!session) {
+      return NextResponse.json({ error: "Authentication required." }, { status: 401 });
+    }
+
+    const authenticatedSession: AuthenticatedSession = {
+      ...session,
+      activeTenant: getActiveTenantMembership(session),
+    };
 
     if (options.requireTenant && !authenticatedSession.activeTenant) {
-      return NextResponse.json({ error: "Active tenant is required." }, { status: 403 });
+      return NextResponse.json({ error: "워크스페이스 설정이 필요합니다." }, { status: 403 });
     }
 
     return handler(request, authenticatedSession, context);
