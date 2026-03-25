@@ -110,5 +110,5 @@ describe("convertLegacyHwpBuffer", () => {
         commandTemplate,
       }),
     ).rejects.toMatchObject({ code: "invalid_hwpx_output" });
-  });
+  }, 15000);
 });

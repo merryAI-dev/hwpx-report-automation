@@ -75,6 +75,7 @@ describe("/api/chat", () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
+    process.env.ANTHROPIC_API_KEY = "test-key";
     vi.mocked(requireUserApiKey).mockResolvedValue({ apiKey: "test-key", userEmail: "test@example.com" });
     mockMessagesStream.mockClear();
     mockStream.on.mockClear();
@@ -86,7 +87,8 @@ describe("/api/chat", () => {
   });
 
   it("returns 500 JSON when API key is missing", async () => {
-    vi.mocked(requireUserApiKey).mockRejectedValue(new ApiKeyError("Anthropic"));
+    // chat route uses requireApiKey("ANTHROPIC_API_KEY"), not requireUserApiKey
+    delete process.env.ANTHROPIC_API_KEY;
 
     const res = await POST(makeRequest(VALID_BODY));
 

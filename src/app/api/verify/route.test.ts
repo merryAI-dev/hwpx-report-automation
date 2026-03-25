@@ -8,7 +8,11 @@ vi.mock("@/lib/auth/with-api-auth", () => ({
 const mockCreate = vi.fn();
 vi.mock("openai", () => {
   class MockOpenAI {
+    apiKey: string;
     chat = { completions: { create: mockCreate } };
+    constructor(config: { apiKey?: string } = {}) {
+      this.apiKey = config.apiKey ?? "";
+    }
   }
   return { default: MockOpenAI };
 });
@@ -51,6 +55,7 @@ describe("/api/verify", () => {
   const originalEnv = { ...process.env };
 
   beforeEach(() => {
+    process.env.OPENAI_API_KEY = "test-key";
     vi.mocked(requireUserApiKey).mockResolvedValue({ apiKey: "test-key", userEmail: "test@example.com" });
     mockCreate.mockReset();
   });
@@ -123,7 +128,7 @@ describe("/api/verify", () => {
   });
 
   it("returns 500 when API key is missing", async () => {
-    vi.mocked(requireUserApiKey).mockRejectedValue(new ApiKeyError("OpenAI"));
+    delete process.env.OPENAI_API_KEY;
 
     const res = await POST(makeRequest({
       originalText: "원문",

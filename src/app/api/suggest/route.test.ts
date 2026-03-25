@@ -1,6 +1,17 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { POST } from "@/app/api/suggest/route";
 import { SESSION_COOKIE_NAME, createSessionToken } from "@/lib/auth/session";
+
+vi.mock("openai", () => {
+  class MockOpenAI {
+    apiKey: string;
+    chat = { completions: { create: vi.fn() } };
+    constructor(config: { apiKey?: string } = {}) {
+      this.apiKey = config.apiKey ?? "";
+    }
+  }
+  return { default: MockOpenAI };
+});
 
 const ORIGINAL_ENV = { ...process.env };
 
