@@ -7,9 +7,10 @@ vi.mock("@/lib/api-validation", () => ({
   getClientIp: vi.fn(() => "127.0.0.1"),
 }));
 
-vi.mock("@/lib/hwpx", () => ({
-  applyPlaceholders: vi.fn(),
-}));
+vi.mock("@/lib/hwpx", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/hwpx")>();
+  return { ...actual, applyPlaceholders: vi.fn() };
+});
 
 import { POST } from "./route";
 import { checkRateLimit } from "@/lib/api-validation";

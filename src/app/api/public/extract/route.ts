@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { inspectHwpx } from "@/lib/hwpx";
+import { inspectHwpx, ZipExpansionError } from "@/lib/hwpx";
 import { checkRateLimit, getClientIp } from "@/lib/api-validation";
 
 export const runtime = "nodejs";
@@ -62,7 +62,10 @@ export async function POST(request: NextRequest) {
       return err("FILE_TOO_LARGE", "파일 크기는 10MB 이하여야 합니다.", 413);
     }
     result = await inspectHwpx(buffer);
-  } catch {
+  } catch (e) {
+    if (e instanceof ZipExpansionError) {
+      return err("PAYLOAD_TOO_LARGE", "압축 해제된 파일 크기가 50MB를 초과합니다.", 413);
+    }
     return err("INVALID_HWPX", "유효하지 않은 HWPX 파일입니다.", 400);
   }
 
