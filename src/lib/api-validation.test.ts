@@ -101,7 +101,7 @@ describe("checkRateLimit", () => {
     expect(res).not.toBeNull();
     expect(res!.status).toBe(429);
     const json = await res!.json();
-    expect(json.code).toBe("RATE_LIMITED");
+    expect(json.error).toBe("RATE_LIMITED");
   });
 });
 
