@@ -2,7 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/auth/session";
 
 function isPublicPath(pathname: string): boolean {
-  return pathname === "/login";
+  return pathname === "/login" || pathname === "/demo";
 }
 
 function isPublicApiPath(pathname: string): boolean {

@@ -24,6 +24,11 @@ export function GET() {
 </html>`;
 
   return new Response(html, {
-    headers: { "Content-Type": "text/html" },
+    headers: {
+      "Content-Type": "text/html",
+      // Override CSP for this standalone docs page to allow unpkg.com CDN
+      "Content-Security-Policy":
+        "default-src 'self'; script-src 'self' 'unsafe-inline' https://unpkg.com; style-src 'self' 'unsafe-inline' https://unpkg.com; img-src 'self' data:; connect-src 'self'",
+    },
   });
 }
