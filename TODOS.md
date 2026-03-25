@@ -70,6 +70,44 @@
 
 ---
 
+## 배포 및 패키지 관리
+
+### hwpx-automation PyPI 배포
+**Priority:** P2
+**Status:** Open
+
+빌드 완료 (`hwpx_automation-1.0.0.tar.gz`, `.whl`). 추가 검증 후 배포 예정.
+
+**남은 작업:**
+1. 로컬 설치 테스트: `pip install pyhwpx/dist/hwpx_automation-1.0.0-py3-none-any.whl`
+2. 기본 동작 확인 후 `python -m twine upload pyhwpx/dist/*` (PyPI 토큰 필요)
+
+**빌드 파일 위치:** `pyhwpx/dist/`
+
+---
+
+### Fly.io 배포
+**Priority:** P2
+**Status:** Open
+
+`fly.toml` 설정 완료 (app: `hwpx-report`, region: nrt). `flyctl` 미설치 상태.
+
+**남은 작업:**
+1. `brew install flyctl`
+2. `fly auth login`
+3. `cd web && fly deploy`
+
+---
+
+### Root repo README push 미완
+**Priority:** P3
+**Status:** Open
+
+루트 git(`/hwpx-report-automation`) 과 `origin/main` 히스토리 갈라짐. README 변경사항 로컬에만 존재.
+force push 없이는 해결 어려움 — 별도 정리 필요.
+
+---
+
 ## Phase 2 — Discoverability Sprint (CEO 리뷰 2026-03-25 추가)
 
 ### GET /api/public/templates — 샘플 HWPX 파일 제공 엔드포인트
