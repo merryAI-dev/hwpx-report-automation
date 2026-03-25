@@ -1,0 +1,451 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "HWPX Studio API",
+    "version": "1.0.0",
+    "description": "한국 HWP/HWPX 문서 자동화 API\n\n플레이스홀더 채우기, 텍스트 추출, 템플릿 목록 조회 기능을 제공합니다.\n\n**인증**: 불필요 (공개 API)\n\n**Rate Limit**: IP당 분당 2회 (fill, extract 엔드포인트)"
+  },
+  "servers": [
+    {
+      "url": "https://your-domain.com",
+      "description": "Production"
+    },
+    {
+      "url": "http://localhost:3000",
+      "description": "Local"
+    }
+  ],
+  "paths": {
+    "/api/public/fill": {
+      "post": {
+        "summary": "HWPX 템플릿 채우기",
+        "description": "HWPX 파일을 받아 플레이스홀더를 데이터로 채운 결과 파일을 반환합니다.\n\n예시:\n```\ncurl -X POST https://YOUR_DOMAIN/api/public/fill \\\n  -F \"file=@template.hwpx\" \\\n  -F 'data={\"TITLE\":\"2026 보고서\",\"AUTHOR\":\"홍길동\"}' \\\n  --output output.hwpx\n```",
+        "operationId": "fillHwpx",
+        "tags": ["문서 처리"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "채울 HWPX 파일 (최대 10MB)"
+                  },
+                  "data": {
+                    "type": "string",
+                    "description": "플레이스홀더 값 (JSON 객체 문자열). 키-값 모두 문자열이어야 합니다.\n예: `{\"TITLE\":\"2026 보고서\",\"AUTHOR\":\"홍길동\"}`"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "플레이스홀더가 채워진 HWPX 파일",
+            "headers": {
+              "Content-Disposition": {
+                "schema": {
+                  "type": "string",
+                  "example": "attachment; filename=\"output.hwpx\""
+                }
+              }
+            },
+            "content": {
+              "application/octet-stream": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "잘못된 요청",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "FILE_MISSING": {
+                    "summary": "파일 필드 누락",
+                    "value": {
+                      "error": "FILE_MISSING",
+                      "message": "file 필드가 필요합니다."
+                    }
+                  },
+                  "INVALID_HWPX": {
+                    "summary": "유효하지 않은 HWPX 파일",
+                    "value": {
+                      "error": "INVALID_HWPX",
+                      "message": "유효하지 않은 HWPX 파일입니다."
+                    }
+                  },
+                  "INVALID_DATA": {
+                    "summary": "잘못된 data 필드",
+                    "value": {
+                      "error": "INVALID_DATA",
+                      "message": "data 필드는 JSON 객체여야 합니다."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "파일 크기 초과",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "FILE_TOO_LARGE": {
+                    "summary": "업로드 파일 크기 초과 (10MB)",
+                    "value": {
+                      "error": "FILE_TOO_LARGE",
+                      "message": "파일 크기는 10MB 이하여야 합니다."
+                    }
+                  },
+                  "PAYLOAD_TOO_LARGE": {
+                    "summary": "압축 해제 크기 초과 (50MB)",
+                    "value": {
+                      "error": "PAYLOAD_TOO_LARGE",
+                      "message": "압축 해제된 파일 크기가 50MB를 초과합니다."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit 초과 (IP당 분당 2회)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "summary": "Rate limit 초과",
+                    "value": {
+                      "error": "RATE_LIMITED",
+                      "message": "요청이 너무 많습니다. 잠시 후 다시 시도하세요."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/public/extract": {
+      "post": {
+        "summary": "HWPX 텍스트 추출",
+        "description": "HWPX 파일에서 모든 텍스트 노드를 추출하여 반환합니다.\n\n예시:\n```\ncurl -X POST https://YOUR_DOMAIN/api/public/extract \\\n  -F \"file=@document.hwpx\"\n```",
+        "operationId": "extractHwpx",
+        "tags": ["문서 처리"],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "type": "object",
+                "required": ["file"],
+                "properties": {
+                  "file": {
+                    "type": "string",
+                    "format": "binary",
+                    "description": "텍스트를 추출할 HWPX 파일 (최대 10MB)"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "추출된 텍스트 노드 목록",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ExtractResponse"
+                },
+                "example": {
+                  "nodes": [
+                    {
+                      "file": "Contents/section0.xml",
+                      "index": 0,
+                      "text": "제목 입력"
+                    },
+                    {
+                      "file": "Contents/section0.xml",
+                      "index": 3,
+                      "text": "홍길동"
+                    }
+                  ],
+                  "count": 2
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "잘못된 요청",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "FILE_MISSING": {
+                    "summary": "파일 필드 누락",
+                    "value": {
+                      "error": "FILE_MISSING",
+                      "message": "file 필드가 필요합니다."
+                    }
+                  },
+                  "INVALID_HWPX": {
+                    "summary": "유효하지 않은 HWPX 파일",
+                    "value": {
+                      "error": "INVALID_HWPX",
+                      "message": "유효하지 않은 HWPX 파일입니다."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "파일 크기 초과",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "FILE_TOO_LARGE": {
+                    "summary": "업로드 파일 크기 초과 (10MB)",
+                    "value": {
+                      "error": "FILE_TOO_LARGE",
+                      "message": "파일 크기는 10MB 이하여야 합니다."
+                    }
+                  },
+                  "PAYLOAD_TOO_LARGE": {
+                    "summary": "압축 해제 크기 초과 (50MB)",
+                    "value": {
+                      "error": "PAYLOAD_TOO_LARGE",
+                      "message": "압축 해제된 파일 크기가 50MB를 초과합니다."
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "429": {
+            "description": "Rate limit 초과 (IP당 분당 2회)",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                },
+                "examples": {
+                  "RATE_LIMITED": {
+                    "summary": "Rate limit 초과",
+                    "value": {
+                      "error": "RATE_LIMITED",
+                      "message": "요청이 너무 많습니다. 잠시 후 다시 시도하세요."
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/public/templates": {
+      "get": {
+        "summary": "템플릿 목록 조회",
+        "description": "사용 가능한 HWPX 샘플 템플릿 목록을 반환합니다.",
+        "operationId": "listTemplates",
+        "tags": ["템플릿"],
+        "responses": {
+          "200": {
+            "description": "템플릿 목록",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "#/components/schemas/Template"
+                  }
+                },
+                "example": [
+                  {
+                    "name": "blank",
+                    "description": "빈 HWPX 문서 ({{TITLE}}, {{AUTHOR}} 플레이스홀더 포함)",
+                    "url": "/samples/blank.hwpx"
+                  },
+                  {
+                    "name": "report",
+                    "description": "보고서 템플릿 ({{TITLE}}, {{DATE}}, {{CONTENT}} 포함)",
+                    "url": "/samples/report.hwpx"
+                  }
+                ]
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/public/health": {
+      "get": {
+        "summary": "헬스 체크",
+        "description": "API 서버 상태를 확인하는 Liveness Probe 엔드포인트입니다.\n\n예시:\n```\ncurl https://YOUR_DOMAIN/api/public/health\n# {\"status\":\"ok\",\"ts\":\"2026-03-24T07:00:00.000Z\"}\n```",
+        "operationId": "healthCheck",
+        "tags": ["상태"],
+        "responses": {
+          "200": {
+            "description": "서버 정상 동작 중",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HealthResponse"
+                },
+                "example": {
+                  "status": "ok",
+                  "ts": "2026-03-24T07:00:00.000Z"
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+  },
+  "components": {
+    "schemas": {
+      "ErrorResponse": {
+        "type": "object",
+        "required": ["error", "message"],
+        "properties": {
+          "error": {
+            "type": "string",
+            "description": "에러 코드",
+            "enum": [
+              "FILE_MISSING",
+              "FILE_TOO_LARGE",
+              "INVALID_HWPX",
+              "INVALID_DATA",
+              "RATE_LIMITED",
+              "PAYLOAD_TOO_LARGE",
+              "INVALID_REQUEST"
+            ]
+          },
+          "message": {
+            "type": "string",
+            "description": "사람이 읽을 수 있는 에러 메시지 (한국어)"
+          }
+        }
+      },
+      "TextNode": {
+        "type": "object",
+        "required": ["file", "index", "text"],
+        "properties": {
+          "file": {
+            "type": "string",
+            "description": "텍스트가 위치한 HWPX 내부 XML 파일 경로",
+            "example": "Contents/section0.xml"
+          },
+          "index": {
+            "type": "integer",
+            "description": "XML 파일 내 텍스트 노드 순번",
+            "example": 0
+          },
+          "text": {
+            "type": "string",
+            "description": "추출된 텍스트 내용",
+            "example": "제목 입력"
+          }
+        }
+      },
+      "ExtractResponse": {
+        "type": "object",
+        "required": ["nodes", "count"],
+        "properties": {
+          "nodes": {
+            "type": "array",
+            "description": "추출된 텍스트 노드 목록",
+            "items": {
+              "$ref": "#/components/schemas/TextNode"
+            }
+          },
+          "count": {
+            "type": "integer",
+            "description": "추출된 텍스트 노드 총 개수",
+            "example": 2
+          }
+        }
+      },
+      "Template": {
+        "type": "object",
+        "required": ["name", "description", "url"],
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "템플릿 식별자",
+            "example": "blank"
+          },
+          "description": {
+            "type": "string",
+            "description": "템플릿 설명 (포함된 플레이스홀더 안내 포함)",
+            "example": "빈 HWPX 문서 ({{TITLE}}, {{AUTHOR}} 플레이스홀더 포함)"
+          },
+          "url": {
+            "type": "string",
+            "description": "템플릿 파일 다운로드 경로",
+            "example": "/samples/blank.hwpx"
+          }
+        }
+      },
+      "HealthResponse": {
+        "type": "object",
+        "required": ["status", "ts"],
+        "properties": {
+          "status": {
+            "type": "string",
+            "description": "서버 상태",
+            "enum": ["ok"],
+            "example": "ok"
+          },
+          "ts": {
+            "type": "string",
+            "format": "date-time",
+            "description": "현재 서버 시각 (ISO 8601)",
+            "example": "2026-03-24T07:00:00.000Z"
+          }
+        }
+      }
+    }
+  },
+  "tags": [
+    {
+      "name": "문서 처리",
+      "description": "HWPX 파일 처리 관련 엔드포인트"
+    },
+    {
+      "name": "템플릿",
+      "description": "샘플 템플릿 목록 조회"
+    },
+    {
+      "name": "상태",
+      "description": "서버 상태 확인"
+    }
+  ]
+}

@@ -16,18 +16,6 @@ export type AuthenticatedRouteHandler<T extends Request = Request, C = unknown> 
   context?: C,
 ) => Promise<Response> | Response;
 
-const GUEST_SESSION: AuthenticatedSession = {
-  sub: "guest",
-  email: "guest@local",
-  displayName: "Guest",
-  provider: { id: "guest", type: "password" as const, displayName: "Local" },
-  memberships: [],
-  activeTenantId: "",
-  iat: 0,
-  exp: 0,
-  activeTenant: null,
-};
-
 export function withApiAuth<T extends Request = Request, C = unknown>(
   handler: AuthenticatedRouteHandler<T, C>,
   options: {
