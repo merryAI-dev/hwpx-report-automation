@@ -5,6 +5,7 @@
  * Priority: Gemini key header → OpenAI key header → env vars
  */
 import OpenAI from "openai";
+import { ApiKeyError } from "@/lib/errors";
 
 const GEMINI_BASE_URL = "https://generativelanguage.googleapis.com/v1beta/openai/";
 const GEMINI_DEFAULT_MODEL = "gemini-2.0-flash";
@@ -55,8 +56,7 @@ export function getOpenAIClientFromRequest(request: Request): OpenAIClient {
 export function requireOpenAIClientFromRequest(request: Request): OpenAIClient {
   const result = getOpenAIClientFromRequest(request);
   if (result.client.apiKey === "missing") {
-    const { ApiKeyError } = require("@/lib/errors") as typeof import("@/lib/errors");
-    throw new ApiKeyError("OpenAI 또는 Gemini API 키가 설정되지 않았습니다. 설정 페이지에서 API 키를 입력해주세요.");
+    throw new ApiKeyError("OpenAI");
   }
   return result;
 }

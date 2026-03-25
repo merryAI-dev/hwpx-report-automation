@@ -164,8 +164,8 @@ export function checkRateLimit(
     log.warn("Rate limit exceeded", { ip, count: entry.timestamps.length, maxPerMinute });
     return NextResponse.json(
       {
-        error: `요청이 너무 많습니다. ${retryAfterSec}초 후에 다시 시도해주세요.`,
-        code: "RATE_LIMITED",
+        error: "RATE_LIMITED",
+        message: `요청이 너무 많습니다. ${retryAfterSec}초 후에 다시 시도해주세요.`,
       },
       {
         status: 429,
