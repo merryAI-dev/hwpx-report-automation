@@ -30,6 +30,25 @@ export type XmlSegment = {
 
 const STYLE_KEYS = ["style", "pridref", "idref", "font", "face", "align"];
 const REQUIRED_ENTRIES = ["mimetype", "version.xml", "Contents/content.hpf"];
+const MAX_UNCOMPRESSED_BYTES = 50 * 1024 * 1024; // 50 MB
+
+export class ZipExpansionError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "ZipExpansionError";
+  }
+}
+
+async function validateZipSize(buffer: ArrayBuffer): Promise<void> {
+  const zip = await JSZip.loadAsync(buffer);
+  let totalUncompressed = 0;
+  for (const file of Object.values(zip.files)) {
+    totalUncompressed += (file as any)._data?.uncompressedSize ?? 0;
+    if (totalUncompressed > MAX_UNCOMPRESSED_BYTES) {
+      throw new ZipExpansionError("언패킹 크기 50MB 초과");
+    }
+  }
+}
 
 function getStyleHints(element: Element | null): Record<string, string> {
   if (!element) {
@@ -584,6 +603,7 @@ export async function validateHwpxArchive(fileBuffer: ArrayBuffer): Promise<stri
 export async function inspectHwpx(
   fileBuffer: ArrayBuffer,
 ): Promise<{ textNodes: TextNodeRecord[]; styleCatalog: StyleCatalog; integrityIssues: string[] }> {
+  await validateZipSize(fileBuffer);
   const zip = await JSZip.loadAsync(fileBuffer);
   const textNodes: TextNodeRecord[] = [];
   const styleCatalog: StyleCatalog = {};
@@ -667,6 +687,7 @@ export async function applyPlaceholders(
   fileBuffer: ArrayBuffer,
   placeholders: Record<string, string>,
 ): Promise<Blob> {
+  await validateZipSize(fileBuffer);
   const normalized: Record<string, string> = {};
   for (const [key, value] of Object.entries(placeholders)) {
     normalized[key.trim().toUpperCase()] = String(value);

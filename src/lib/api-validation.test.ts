@@ -101,7 +101,17 @@ describe("checkRateLimit", () => {
     expect(res).not.toBeNull();
     expect(res!.status).toBe(429);
     const json = await res!.json();
-    expect(json.code).toBe("RATE_LIMITED");
+    expect(json.error).toBe("RATE_LIMITED");
+  });
+
+  it("endpoint-scoped buckets: fill and extract count independently", () => {
+    const ip = `test-ip-${Date.now()}-3`;
+    // Each endpoint has its own 1 req/min bucket
+    expect(checkRateLimit(ip, 1, "/api/public/fill")).toBeNull();    // fill: 1st req OK
+    expect(checkRateLimit(ip, 1, "/api/public/extract")).toBeNull(); // extract: 1st req OK (different bucket)
+    // Both buckets are now full
+    expect(checkRateLimit(ip, 1, "/api/public/fill")).not.toBeNull();    // fill: 2nd req blocked
+    expect(checkRateLimit(ip, 1, "/api/public/extract")).not.toBeNull(); // extract: 2nd req blocked
   });
 });
 

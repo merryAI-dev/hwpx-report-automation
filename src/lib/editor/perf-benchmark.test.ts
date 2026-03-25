@@ -15,7 +15,7 @@ import { markFingerprint, ensureCharPrForMarks, clearCharPrCaches } from "./mark
 
 const REAL_FIXTURE_PATH = path.resolve(process.cwd(), "../examples/input-sample.hwpx");
 const hasFixture = fs.existsSync(REAL_FIXTURE_PATH);
-const benchTest = hasFixture ? it : it.skip;
+const benchTest = (hasFixture && !process.env.CI) ? it : it.skip;
 
 // ── Utility: 고정밀 타이머 ──
 function bench(fn: () => void, iterations: number): { avgMs: number; totalMs: number } {

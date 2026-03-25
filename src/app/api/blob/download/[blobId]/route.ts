@@ -15,13 +15,9 @@ export const GET = withApiAuth(async (
   const expires = url.searchParams.get("expires") || "";
   const signature = url.searchParams.get("sig") || "";
 
-  if (!session.activeTenant) {
-    return NextResponse.json({ error: "Active tenant is required." }, { status: 403 });
-  }
-
   const verification = verifyBlobDownloadSignature({
     blobId,
-    tenantId: session.activeTenant.tenantId,
+    tenantId: session.activeTenant!.tenantId,
     expires,
     signature,
   });
@@ -39,7 +35,7 @@ export const GET = withApiAuth(async (
 
   try {
     const { metadata, buffer } = await readBlobObject(blobId, {
-      tenantId: session.activeTenant.tenantId,
+      tenantId: session.activeTenant!.tenantId,
     });
     const requestedName = url.searchParams.get("name") || metadata.fileName;
     return new NextResponse(new Uint8Array(buffer), {

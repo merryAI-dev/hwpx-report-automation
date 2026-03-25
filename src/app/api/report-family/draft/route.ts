@@ -205,7 +205,8 @@ async function buildDraftWithAi(params: {
   draft: ReportFamilyDraft;
   usage: UsageTotals;
 }> {
-  const apiKey = params.openaiClient ? "provided" : (process.env.OPENAI_API_KEY || "");
+  const providedClient = params.openaiClient?.apiKey !== "missing" ? params.openaiClient : undefined;
+  const apiKey = providedClient ? "provided" : (process.env.OPENAI_API_KEY || "");
   if (!apiKey) {
     return {
       draft: buildReportFamilyDraft(params.plan, {
@@ -219,7 +220,7 @@ async function buildDraftWithAi(params: {
     };
   }
 
-  const client = params.openaiClient ?? new OpenAI({
+  const client = providedClient ?? new OpenAI({
     apiKey,
     baseURL: process.env.OPENAI_BASE_URL || "https://api.openai.com/v1",
   });

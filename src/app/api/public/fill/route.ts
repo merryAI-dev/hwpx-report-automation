@@ -1,14 +1,10 @@
 import { NextRequest, NextResponse } from "next/server";
-import { applyPlaceholders } from "@/lib/hwpx";
-import { checkRateLimit, getClientIp } from "@/lib/api-validation";
+import { applyPlaceholders, ZipExpansionError } from "@/lib/hwpx";
+import { checkRateLimit, getClientIp, publicApiError as err } from "@/lib/api-validation";
 
 export const runtime = "nodejs";
 
 const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10 MB
-
-function err(code: string, message: string, status: number) {
-  return NextResponse.json({ error: code, message }, { status });
-}
 
 /**
  * POST /api/public/fill
@@ -28,7 +24,7 @@ function err(code: string, message: string, status: number) {
  */
 export async function POST(request: NextRequest) {
   // ── Rate limiting ──
-  const rateLimited = checkRateLimit(getClientIp(request), 2);
+  const rateLimited = checkRateLimit(getClientIp(request), 2, "/api/public/fill");
   if (rateLimited) return rateLimited;
 
   // ── Parse multipart ──
@@ -78,11 +74,11 @@ export async function POST(request: NextRequest) {
   let outputBlob: Blob;
   try {
     const buffer = await file.arrayBuffer();
-    if (buffer.byteLength > MAX_FILE_SIZE) {
-      return err("FILE_TOO_LARGE", "파일 크기는 10MB 이하여야 합니다.", 413);
-    }
     outputBlob = await applyPlaceholders(buffer, placeholders);
-  } catch {
+  } catch (e) {
+    if (e instanceof ZipExpansionError) {
+      return err("PAYLOAD_TOO_LARGE", "압축 해제된 파일 크기가 50MB를 초과합니다.", 413);
+    }
     return err("INVALID_HWPX", "유효하지 않은 HWPX 파일입니다.", 400);
   }
 

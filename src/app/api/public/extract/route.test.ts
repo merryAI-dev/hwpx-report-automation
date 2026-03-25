@@ -2,14 +2,19 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { NextRequest } from "next/server";
 
-vi.mock("@/lib/api-validation", () => ({
-  checkRateLimit: vi.fn(() => null),
-  getClientIp: vi.fn(() => "127.0.0.1"),
-}));
+vi.mock("@/lib/api-validation", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/api-validation")>();
+  return {
+    ...actual,
+    checkRateLimit: vi.fn(() => null),
+    getClientIp: vi.fn(() => "127.0.0.1"),
+  };
+});
 
-vi.mock("@/lib/hwpx", () => ({
-  inspectHwpx: vi.fn(),
-}));
+vi.mock("@/lib/hwpx", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/hwpx")>();
+  return { ...actual, inspectHwpx: vi.fn() };
+});
 
 import { POST } from "./route";
 import { checkRateLimit } from "@/lib/api-validation";

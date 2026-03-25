@@ -12,7 +12,7 @@ import type {
 
 export function buildWorkspaceActorFromSession(session: AuthenticatedSession): WorkspaceActor {
   if (!session.activeTenant) {
-    throw new Error("Active tenant is required.");
+    throw new Error("워크스페이스 설정이 필요합니다.");
   }
 
   return {

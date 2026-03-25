@@ -29,6 +29,20 @@ function errorResponse(
   return NextResponse.json({ error: message, code }, { status });
 }
 
+// ── Public API error helper ──
+
+/**
+ * Convenience helper for public API route handlers.
+ * Returns `{ error: code, message }` at the given HTTP status.
+ */
+export function publicApiError(
+  code: string,
+  message: string,
+  status: number,
+): NextResponse {
+  return NextResponse.json({ error: code, message }, { status });
+}
+
 // ── Body size validation ──
 
 /**
@@ -140,18 +154,23 @@ function ensureCleanupTimer() {
 }
 
 /**
- * Check rate limit for a given IP address.
+ * Check rate limit for a given IP address, optionally scoped to an endpoint.
+ *
+ * Pass `endpoint` (e.g. `"/api/public/fill"`) to give each endpoint its own
+ * independent per-IP bucket. Without it, all callers share one bucket per IP.
  *
  * @returns `null` if within limits, or a `NextResponse` with status 429.
  */
 export function checkRateLimit(
   ip: string,
   maxPerMinute: number = DEFAULT_MAX_PER_MINUTE,
+  endpoint = "",
 ): NextResponse | null {
   ensureCleanupTimer();
 
   const now = Date.now();
-  const entry = rateLimitStore.get(ip) || { timestamps: [] };
+  const key = endpoint ? `${ip}:${endpoint}` : ip;
+  const entry = rateLimitStore.get(key) || { timestamps: [] };
 
   // Remove expired timestamps
   entry.timestamps = entry.timestamps.filter(
@@ -161,11 +180,11 @@ export function checkRateLimit(
   if (entry.timestamps.length >= maxPerMinute) {
     const retryAfterMs = RATE_LIMIT_WINDOW_MS - (now - entry.timestamps[0]);
     const retryAfterSec = Math.ceil(retryAfterMs / 1000);
-    log.warn("Rate limit exceeded", { ip, count: entry.timestamps.length, maxPerMinute });
+    log.warn("Rate limit exceeded", { ip, endpoint, count: entry.timestamps.length, maxPerMinute });
     return NextResponse.json(
       {
-        error: `요청이 너무 많습니다. ${retryAfterSec}초 후에 다시 시도해주세요.`,
-        code: "RATE_LIMITED",
+        error: "RATE_LIMITED",
+        message: `요청이 너무 많습니다. ${retryAfterSec}초 후에 다시 시도해주세요.`,
       },
       {
         status: 429,
@@ -175,7 +194,7 @@ export function checkRateLimit(
   }
 
   entry.timestamps.push(now);
-  rateLimitStore.set(ip, entry);
+  rateLimitStore.set(key, entry);
   return null;
 }
 

@@ -1,0 +1,35 @@
+# HWPX Studio — CI에서 HWPX 템플릿 자동 채우기 예시
+# 복사해서 사용하세요. YOUR_DOMAIN을 실제 도메인으로 교체하세요.
+#
+# [![Powered by HWPX Studio](https://img.shields.io/badge/Powered%20by-HWPX%20Studio-blue)](https://github.com/merryAI-dev/hwpx-report-automation?utm_source=badge&utm_medium=readme&utm_campaign=powered-by)
+
+name: Monthly Report Generator
+on:
+  schedule:
+    - cron: '0 9 1 * *'    # 매월 1일 오전 9시
+  workflow_dispatch:         # 수동 실행 가능
+
+jobs:
+  generate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Get current month
+        id: date
+        run: echo "month=$(date +%Y-%m)" >> $GITHUB_OUTPUT
+
+      - name: Fill HWPX Template
+        run: |
+          curl -X POST https://YOUR_DOMAIN/api/public/fill \
+            -F "file=@templates/report.hwpx" \
+            -F 'data={"MONTH":"${{ steps.date.outputs.month }}","AUTHOR":"자동생성"}' \
+            --output monthly-report-${{ steps.date.outputs.month }}.hwpx \
+            --fail
+
+      - name: Upload Report
+        uses: actions/upload-artifact@v4
+        with:
+          name: monthly-report-${{ steps.date.outputs.month }}
+          path: monthly-report-${{ steps.date.outputs.month }}.hwpx
+          retention-days: 90
