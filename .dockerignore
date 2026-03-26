@@ -1,5 +1,7 @@
 node_modules
+**/node_modules
 .next
+**/.next
 .git
 .env
 .env.local
@@ -7,3 +9,5 @@ node_modules
 *.db-journal
 coverage
 .DS_Store
+pyhwpx
+mac-app
