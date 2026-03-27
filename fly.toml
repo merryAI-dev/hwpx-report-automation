@@ -14,6 +14,8 @@ primary_region = "nrt"  # Tokyo — closest to Korea
   BLOB_STORAGE_FS_ROOT = "/data/blob-storage"
   PORT = "3000"
   HOSTNAME = "0.0.0.0"
+  AUTH_DISABLED = "true"
+  # DATABASE_URL은 fly secrets로 관리: fly secrets set DATABASE_URL="postgresql://..."
 
 [[services]]
   internal_port = 3000

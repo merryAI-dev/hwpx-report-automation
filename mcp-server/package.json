@@ -1,0 +1,31 @@
+{
+  "name": "hwpx-mcp",
+  "version": "0.1.0",
+  "description": "MCP server for HWPX report automation — use with Claude Desktop or Cursor",
+  "main": "dist/index.js",
+  "bin": {
+    "hwpx-mcp": "dist/index.js"
+  },
+  "scripts": {
+    "build": "tsc",
+    "start": "node dist/index.js",
+    "dev": "ts-node src/index.ts"
+  },
+  "keywords": ["mcp", "hwpx", "hwp", "korean", "document", "automation"],
+  "license": "MIT",
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "dist/",
+    "README.md"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.0.0",
+    "ts-node": "^10.9.0",
+    "@types/node": "^20.0.0"
+  }
+}

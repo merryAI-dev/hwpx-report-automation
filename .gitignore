@@ -49,6 +49,10 @@ dev.db-journal
 .mcp.json
 .gitnexus
 
+# mcp-server build artifacts
+mcp-server/node_modules
+mcp-server/dist
+
 # Internal documents
 *.pdf
 .gstack/

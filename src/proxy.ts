@@ -23,6 +23,12 @@ const CORS_HEADERS = {
 export async function proxy(request: NextRequest) {
   const { pathname, search } = request.nextUrl;
 
+  // Single-user mode: AUTH_DISABLED=true — all requests pass through
+  // To enable auth, set AUTH_DISABLED=false and configure session secrets
+  if (process.env.AUTH_DISABLED === "true") {
+    return NextResponse.next();
+  }
+
   // /api/public/* — no auth required, CORS enabled for browser clients
   if (pathname.startsWith("/api/public/")) {
     if (request.method === "OPTIONS") {
