@@ -65,7 +65,7 @@ export async function GET(request: Request) {
     ]);
 
     return NextResponse.json({
-      entries: entries.map((e) => ({
+      entries: entries.map((e: typeof entries[number]) => ({
         id: e.id,
         userEmail: e.userEmail,
         action: e.action,
